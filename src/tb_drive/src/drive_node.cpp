@@ -75,7 +75,9 @@ DriveNode::DriveNode() : Node("drive_node")
             cmd_ = m;
             cmd_time_ = now(); });
 
-    for (const auto &topic : get_parameter("drive.psd.topics").as_string_array())
+    // as_string_array()는 임시 Parameter 안을 참조로 돌려주므로 먼저 복사해야 함 (안 하면 dangling)
+    const std::vector<std::string> psd_topics = get_parameter("drive.psd.topics").as_string_array();
+    for (const auto &topic : psd_topics)
     {
         psd_subs_.push_back(create_subscription<sensor_msgs::msg::Range>(
             topic, rclcpp::SensorDataQoS(), [this, topic](const sensor_msgs::msg::Range::ConstSharedPtr m)
