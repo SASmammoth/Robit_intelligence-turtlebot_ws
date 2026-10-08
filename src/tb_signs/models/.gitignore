@@ -1,0 +1,2 @@
+# 엔진은 기기(TensorRT 버전) 종속 → Nano에서 직접 빌드
+*.engine

@@ -1,0 +1,11 @@
+path: /home/SASmammoth/datasets/turtlebot_signs/dataset
+train: images/train
+val: images/val
+names:
+  0: barrier_closed
+  1: barrier_open
+  2: brick
+  3: construction
+  4: left
+  5: parking
+  6: right

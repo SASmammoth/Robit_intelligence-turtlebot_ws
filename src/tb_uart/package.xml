@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>tb_uart</name>
+  <version>0.1.0</version>
+  <description>RT-SU (STM32-Ubuntu) UART packet receiver for Turtle-Bot</description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

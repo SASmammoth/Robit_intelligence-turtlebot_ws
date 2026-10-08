@@ -1,0 +1,8 @@
+sign_detect_node:
+  ros__parameters:
+    # 비워두면 share/tb_signs/models/ 기본 경로 사용
+    # engine_path: /home/nano1/turtlebot_ws/src/tb_signs/models/sign.engine
+    # names_path:  /home/nano1/turtlebot_ws/src/tb_signs/models/data.yaml
+    conf: 0.5          # 검출 임계값
+    nms: 0.5           # NMS IoU (end-to-end 출력이면 사용 안 함)
+    publish_debug: true

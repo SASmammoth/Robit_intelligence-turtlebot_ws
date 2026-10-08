@@ -1,0 +1,56 @@
+cmake_minimum_required(VERSION 3.16)
+project(tb_signs LANGUAGES CXX)
+
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -O2)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(tb_interfaces REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs dnn)
+find_package(yaml-cpp REQUIRED)
+
+# ---- CUDA (Jetson은 /usr/local/cuda)
+if(EXISTS /usr/local/cuda)
+  set(CUDAToolkit_ROOT /usr/local/cuda)
+endif()
+find_package(CUDAToolkit REQUIRED)
+
+# ---- TensorRT (JetPack 기본 경로)
+find_path(TENSORRT_INCLUDE_DIR NvInfer.h
+  PATHS /usr/include/aarch64-linux-gnu /usr/include /usr/local/tensorrt/include)
+find_library(NVINFER_LIB nvinfer
+  PATHS /usr/lib/aarch64-linux-gnu /usr/local/tensorrt/lib)
+if(NOT TENSORRT_INCLUDE_DIR OR NOT NVINFER_LIB)
+  message(FATAL_ERROR "TensorRT를 찾지 못함 (libnvinfer-dev 설치 확인)")
+endif()
+message(STATUS "TensorRT: ${TENSORRT_INCLUDE_DIR} / ${NVINFER_LIB}")
+
+add_executable(sign_detect_node
+  src/sign_detect_node.cpp
+  src/trt_detector.cpp)
+
+target_include_directories(sign_detect_node PRIVATE
+  include
+  ${TENSORRT_INCLUDE_DIR})
+
+target_link_libraries(sign_detect_node
+  ${OpenCV_LIBS}
+  yaml-cpp
+  ${NVINFER_LIB}
+  CUDA::cudart)
+
+ament_target_dependencies(sign_detect_node
+  rclcpp sensor_msgs tb_interfaces cv_bridge ament_index_cpp)
+
+install(TARGETS sign_detect_node DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY config launch models DESTINATION share/${PROJECT_NAME})
+
+ament_package()
