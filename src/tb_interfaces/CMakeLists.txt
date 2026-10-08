@@ -10,6 +10,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/LaneMask.msg"
   "msg/Detection.msg"
   "msg/DetectionArray.msg"
+  "msg/DriveCmd.msg"
   DEPENDENCIES std_msgs sensor_msgs
 )
 

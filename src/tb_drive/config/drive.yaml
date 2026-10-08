@@ -1,0 +1,35 @@
+drive_node:
+  ros__parameters:
+    drive:
+      # ── 안전
+      enable: false          # 켜기 전까지 항상 0 발행. GUI나 ros2 param set으로 켬
+      require_cmd: false     # 대회: true (tb_brain 없으면 정지). 차선만 테스트: false
+      latency_comp: false    # /odom 생기면 true
+      control_hz: 30
+
+      # ── 속도 (★ 직접 정해야 함)
+      v_max_mm_s: 150        # 처음엔 100~150에서 시작
+      v_min_mm_s: 40         # 모터가 실제로 굴러가는 최저 속도
+      w_max_deg_s: 90        # 바퀴 최고 속도에서 계산 (README 참고)
+      accel_mm_s2: 300
+      decel_mm_s2: 600
+      w_accel_deg_s2: 360
+
+      # ── 경로 추종
+      ld_min_mm: 150         # ★ /lane/path 첫 점 거리(사각지대) 근처
+      ld_max_mm: 350         # ★ 카메라가 보는 가장 먼 거리보다 짧게
+      ld_time_ms: 1000       # lookahead = 속도 × 이 시간
+      curv_slow_mm: 100      # 커브 감속 세기 (0이면 감속 없음)
+      stop_dist_mm: 40       # 경로 끝까지 이만큼 남으면 정지
+
+      # ── 타임아웃
+      path_timeout_ms: 400   # 이보다 오래된 /lane/path는 버림
+      hold_ms: 600           # 경로가 비면 마지막 경로를 추측항법으로 이만큼 더 따라감
+      cmd_timeout_ms: 500    # /drive/cmd 유효 시간
+      weak_src_pct: 60       # path_source가 memory/color_rule이면 속도를 이 %로
+
+      # ── PSD 비상정지 (★ STM32 브리지가 Range 토픽을 내면 켜기)
+      psd:
+        enable: false
+        stop_mm: 150
+        topics: ["/psd/front"]
