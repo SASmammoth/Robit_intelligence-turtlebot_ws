@@ -1,5 +1,4 @@
 # ===== colcon 빌드 산출물 =====
-# (저장소를 워크스페이스 루트에 두는 경우 대비. src/ 안에 둔다면 없어도 무방)
 build/
 install/
 log/
@@ -14,7 +13,8 @@ CMakeCache.txt
 CMakeFiles/
 cmake-build-*/
 compile_commands.json
-.cache/            # clangd 인덱스
+# clangd 인덱스
+.cache/
 
 # ===== Qt =====
 ui_*.h
@@ -39,69 +39,11 @@ venv/
 *.local.sh
 
 # ===== 에디터 / IDE =====
+# .vscode는 공유용 설정만 추적
 .vscode/*
 !.vscode/tasks.json
 !.vscode/c_cpp_properties.json
 !.vscode/extensions.json
-.idea/
-*.swp
-*~
-.DS_Store
-
-# ===== ROS 데이터 =====
-*.db3
-*.mcap
-rosbag*/
-rosbag2_*/
-
-# ===== YOLO / 데이터셋 (Nextcloud로 관리) =====
-datasets/
-runs/
-*.pt
-*.onnx
-*.engine
-*.trt# ===== colcon 빌드 산출물 =====
-# (저장소를 워크스페이스 루트에 두는 경우 대비. src/ 안에 둔다면 없어도 무방)
-build/
-install/
-log/
-build_*/
-install_*/
-
-# ===== C++ / CMake =====
-*.o
-*.so
-*.a
-CMakeCache.txt
-CMakeFiles/
-cmake-build-*/
-compile_commands.json
-.cache/            # clangd 인덱스
-
-# ===== Qt =====
-ui_*.h
-moc_*.cpp
-qrc_*.cpp
-*.qm
-*.pro.user
-CMakeLists.txt.user
-
-# ===== Python =====
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-.venv/
-venv/
-
-# ===== 환경 (기기별) =====
-.pixi/
-.env
-.env.local
-*.local.sh
-
-# ===== 에디터 / IDE =====
-.vscode/
 .idea/
 *.swp
 *~

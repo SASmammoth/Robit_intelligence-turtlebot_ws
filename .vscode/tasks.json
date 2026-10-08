@@ -1,0 +1,34 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "colcon build",
+            "type": "shell",
+            "command": "[ -f /opt/ros/jazzy/setup.bash ] && source /opt/ros/jazzy/setup.bash; colcon build --symlink-install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && jq -s 'add' build/*/compile_commands.json > build/compile_commands.json",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": { "executable": "/bin/bash", "args": ["-c"] }
+            },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "colcon build (this package)",
+            "type": "shell",
+            "command": "[ -f /opt/ros/jazzy/setup.bash ] && source /opt/ros/jazzy/setup.bash; colcon build --symlink-install --packages-select ${input:pkg} --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && jq -s 'add' build/*/compile_commands.json > build/compile_commands.json",
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": { "executable": "/bin/bash", "args": ["-c"] }
+            },
+            "problemMatcher": ["$gcc"]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "pkg",
+            "type": "promptString",
+            "description": "package name",
+            "default": "tb_camera"
+        }
+    ]
+}
