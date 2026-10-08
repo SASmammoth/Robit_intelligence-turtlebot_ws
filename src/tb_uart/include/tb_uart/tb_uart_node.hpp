@@ -53,7 +53,7 @@ private:
   std::mutex mtx_;
   int idL_{0}, idR_{1};
   int psdF_{0}, psdL_{1}, psdR_{2};
-  int dirL_{1}, dirR_{1};   // velocity 송신 방향 (1 또는 -1)
+  int dirL_{1}, dirR_{-1};   // velocity 송신 방향 (1 또는 -1)
 
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;

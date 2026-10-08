@@ -177,16 +177,16 @@ void TbUartNode::on_command(const std_msgs::msg::String::SharedPtr msg)
     return;
   }
 
-  // ---------- start 외 명령은 작동 중에만 수행 ----------
-  if (!running_state_) {
-    // 로그는 출력하되 rt_u2s_uart로는 송신하지 않음
-    publish_error("STM32 is not running. Command ignored: '" + s + "' (send 'start' first)");
-    return;
-  }
-
   // ---------- quit ----------
   if (n == 1 && t[0] == "quit") {
     cmd_quit();
+    return;
+  }
+
+  // ---------- start, quit 외 명령은 작동 중에만 수행 ----------
+  if (!running_state_) {
+    // 로그는 출력하되 rt_u2s_uart로는 송신하지 않음
+    publish_error("STM32 is not running. Command ignored: '" + s + "' (send 'start' first)");
     return;
   }
 
