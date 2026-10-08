@@ -40,6 +40,16 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.psd.stop_mm", 150, 0, 1000);
     declare_parameter("drive.psd.topics", std::vector<std::string>{"/psd/front"}); // 시작할 때만 읽음
 
+    // ====== 모터 출력 (tb_uart_node: TB_Uart_RX "velocity L R", 다이나믹셀 원시값)
+    // 하드웨어 값이라 GUI 대신 yaml에서 정함
+    declare_bool("drive.uart.enable", true);
+    declare_parameter("drive.uart.wheel_radius_m", 0.0475);
+    declare_parameter("drive.uart.wheel_sep_m", 0.1933);
+    declare_parameter("drive.uart.rpm_per_unit", 0.229); // MX-64 Protocol 2.0 Goal Velocity 단위
+    declare_int("drive.uart.max_raw", 1000, 0, 2000);    // 넘으면 L/R 비율 유지한 채 축소
+    declare_bool("drive.uart.invert_left", false);
+    declare_bool("drive.uart.invert_right", false);
+
     reload_params();
     post_cb_handle_ = add_post_set_parameters_callback(
         [this](const std::vector<rclcpp::Parameter> &) { reload_params(); });
@@ -76,6 +86,7 @@ DriveNode::DriveNode() : Node("drive_node")
     cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     state_pub_ = create_publisher<std_msgs::msg::String>("/drive/state", 10);
     target_pub_ = create_publisher<geometry_msgs::msg::PointStamped>("/drive/target", 10);
+    uart_pub_ = create_publisher<std_msgs::msg::String>("TB_Uart_RX", 10);
 
     make_timer();
     RCLCPP_INFO(get_logger(), "drive_node started (enable=%d, require_cmd=%d)", enable_, require_cmd_);
@@ -107,6 +118,8 @@ void DriveNode::reload_params()
     {
         lim_.reset();
         follower_.reset(); // 꺼져 있던 동안의 경로·이동 기록은 버림
+        if (!enable)
+            uart_send_zero_ = true; // 꺼질 때 모터에 0 한 번 보내고 그 뒤로는 조용히 (WASD와 안 섞이게)
         RCLCPP_INFO(get_logger(), "drive %s", enable ? "ENABLED" : "disabled");
     }
     enable_ = enable;
@@ -133,6 +146,14 @@ void DriveNode::reload_params()
 
     psd_enable_ = get_parameter("drive.psd.enable").as_bool();
     psd_stop_ = mm("drive.psd.stop_mm");
+
+    uart_enable_ = get_parameter("drive.uart.enable").as_bool();
+    wheel_r_ = std::max(1e-3, get_parameter("drive.uart.wheel_radius_m").as_double());
+    wheel_sep_ = get_parameter("drive.uart.wheel_sep_m").as_double();
+    rpm_per_unit_ = std::max(1e-6, get_parameter("drive.uart.rpm_per_unit").as_double());
+    uart_max_raw_ = get_parameter("drive.uart.max_raw").as_int();
+    invert_l_ = get_parameter("drive.uart.invert_left").as_bool();
+    invert_r_ = get_parameter("drive.uart.invert_right").as_bool();
 
     const int hz = get_parameter("drive.control_hz").as_int();
     if (hz != control_hz_)
@@ -216,6 +237,13 @@ void DriveNode::on_timer()
 
     publish_cmd(lim_.v, lim_.w);
     follower_.record(t, lim_.v, lim_.w);
+    if (enable_)
+        publish_uart(lim_.v, lim_.w, t, false);
+    else if (uart_send_zero_)
+    {
+        publish_uart(0.0, 0.0, t, true);
+        uart_send_zero_ = false;
+    }
     if (o.tg.ok)
         publish_target(o.tg, now_t);
 
@@ -246,6 +274,37 @@ void DriveNode::publish_cmd(double v, double w)
     tw.linear.x = v;
     tw.angular.z = w;
     cmd_pub_->publish(tw);
+}
+
+// (v, w) → 바퀴 선속도 → rpm → 다이나믹셀 원시값 → "velocity L R"
+// GUI WASD와 같은 규칙: 전진이면 L, R 둘 다 양수 (오른쪽 모터 반전은 tb_uart/STM32 쪽에서 처리)
+void DriveNode::publish_uart(double v, double w, double t, bool force)
+{
+    if (!uart_enable_)
+        return;
+
+    const double to_raw = 60.0 / (2.0 * M_PI * wheel_r_) / rpm_per_unit_; // [m/s] → 원시값
+    double l = (v - w * wheel_sep_ / 2.0) * to_raw;
+    double r = (v + w * wheel_sep_ / 2.0) * to_raw;
+    const double peak = std::max(std::abs(l), std::abs(r));
+    if (uart_max_raw_ > 0 && peak > uart_max_raw_)
+    {
+        l *= uart_max_raw_ / peak; // 곡률 유지
+        r *= uart_max_raw_ / peak;
+    }
+    const long L = std::lround(l) * (invert_l_ ? -1 : 1);
+    const long R = std::lround(r) * (invert_r_ ? -1 : 1);
+
+    // 값이 바뀌었을 때 + 같아도 0.2초마다 (UART 부하 줄이기)
+    if (!force && L == uart_l_ && R == uart_r_ && t - uart_t_ < 0.2)
+        return;
+    uart_l_ = L;
+    uart_r_ = R;
+    uart_t_ = t;
+
+    std_msgs::msg::String m;
+    m.data = "velocity " + std::to_string(L) + " " + std::to_string(R);
+    uart_pub_->publish(m);
 }
 
 void DriveNode::publish_target(const tb_drive::Target &tg, const rclcpp::Time &t)

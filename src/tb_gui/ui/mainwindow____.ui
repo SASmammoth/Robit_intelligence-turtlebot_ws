@@ -754,7 +754,7 @@
           <item>
            <layout class="QGridLayout" name="gridLayout_17" columnstretch="5,3">
             <item row="0" column="0">
-             <widget class="QLabel" name="textLabelSkel2">
+             <widget class="QLabel" name="Skel">
               <property name="text">
                <string>SealLen</string>
               </property>
@@ -764,7 +764,7 @@
              </widget>
             </item>
             <item row="0" column="1">
-             <widget class="QSpinBox" name="spinSkelSealLen">
+             <widget class="QSpinBox" name="textLabelSkel2">
               <property name="minimum">
                <number>1</number>
               </property>
@@ -772,7 +772,7 @@
                <number>31</number>
               </property>
               <property name="singleStep">
-               <number>1</number>
+               <number>2</number>
               </property>
              </widget>
             </item>
@@ -789,7 +789,7 @@
                <number>15</number>
               </property>
               <property name="singleStep">
-               <number>1</number>
+               <number>2</number>
               </property>
              </widget>
             </item>
@@ -858,13 +858,6 @@
              </widget>
             </item>
            </layout>
-          </item>
-          <item>
-           <widget class="QCheckBox" name="checkParking">
-            <property name="text">
-             <string>Parking</string>
-            </property>
-           </widget>
           </item>
          </layout>
         </item>

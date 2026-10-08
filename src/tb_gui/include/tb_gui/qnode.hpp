@@ -30,11 +30,12 @@ public:
   QNode();
   ~QNode();
 
-  // ====== 파라미터 (이름으로 /lineDetect_node, /path_node 중 보낼 곳을 고름)
+  // ====== 파라미터 (이름으로 /lineDetect_node, /path_node, /drive_node 중 보낼 곳을 고름)
   void setParams(const QMap<QString, int> &params);
-  bool requestParams();                 // 두 노드 모두 요청했으면 true
-  void saveParams(const QString &path); // 두 노드의 현재 값 → YAML
-  void loadParams(const QString &path); // YAML → 두 노드에 설정
+  bool setBoolParam(const QString &name, bool on); // drive.enable 등 (/drive_node). 연결 안 됐으면 false
+  bool requestParams();                 // 세 노드 모두 요청했으면 true
+  void saveParams(const QString &path); // 연결된 노드의 현재 값 → YAML (drive.enable 제외)
+  void loadParams(const QString &path); // YAML → 각 노드에 설정 (drive.enable 제외)
 
   // ====== 미션
   void publishTurn(int turn); // 0 직진, 1 좌, 2 우
@@ -52,8 +53,10 @@ protected:
 
 private:
   static bool isPathParam(const QString &name);
+  static bool isDriveParam(const QString &name);
   static std::vector<std::string> lineParamNames();
   static std::vector<std::string> pathParamNames();
+  static std::vector<std::string> driveParamNames(bool with_enable); // 정수 + bool
 
   std::shared_ptr<rclcpp::Node> node;
 
@@ -76,9 +79,12 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr uart_pub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr uart_sub_;
 
+  // 주행 상태 (/drive/state)
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr drive_state_sub_;
+
   // 파라미터
-  rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_;
-  bool line_requested_ = false, path_requested_ = false;
+  rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_, drive_client_;
+  bool line_requested_ = false, path_requested_ = false, drive_requested_ = false;
   std::shared_ptr<rclcpp::ParameterEventHandler> param_event_handler_;
   rclcpp::ParameterEventCallbackHandle::SharedPtr param_event_cb_handle_;
 
@@ -109,7 +115,11 @@ Q_SIGNALS:
 
   // 파라미터
   void paramLoaded(const QString &name, int value);
+  void boolParamLoaded(const QString &name, bool value);
   void paramFileStatus(const QString &text);
+
+  // 주행 (tb_drive)
+  void driveStateReceived(const QString &text);
 
   // UART (TB_Uart_TX 수신 문자열)
   void uartReceived(const QString &text);

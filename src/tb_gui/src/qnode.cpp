@@ -9,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 #include <QDateTime>
+#include <QStringList>
 
 // 압축 이미지 → QImage (실패 시 null)
 static QImage toQImage(const sensor_msgs::msg::CompressedImage &msg)
@@ -28,6 +29,13 @@ static int64_t now_ns()
 
 static const char *LINE_NODE = "/lineDetect_node";
 static const char *PATH_NODE = "/path_node";
+static const char *DRIVE_NODE = "/drive_node";
+
+// 파일 저장/불러오기에서 빼는 파라미터 (불러오자마자 로봇이 움직이면 안 됨)
+static bool isUnsavedParam(const std::string &name)
+{
+  return name == "drive.enable";
+}
 
 QNode::QNode()
 {
@@ -95,6 +103,11 @@ QNode::QNode()
   turn_pub_ = node->create_publisher<std_msgs::msg::UInt8>("/mission/turn", 10);
   parking_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/parking", 10);
 
+  // ====== 주행 상태 (tb_drive, 10Hz 문자열)
+  drive_state_sub_ = node->create_subscription<std_msgs::msg::String>(
+      "/drive/state", 10, [this](const std_msgs::msg::String::ConstSharedPtr m)
+      { Q_EMIT driveStateReceived(QString::fromStdString(m->data)); });
+
   // ====== UART (tb_uart_node)
   uart_pub_ = node->create_publisher<std_msgs::msg::String>("TB_Uart_RX", 10);
   uart_sub_ = node->create_subscription<std_msgs::msg::String>(
@@ -104,18 +117,24 @@ QNode::QNode()
   // ====== 파라미터 클라이언트 (노드별)
   line_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, LINE_NODE);
   path_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, PATH_NODE);
+  drive_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, DRIVE_NODE);
 
-  // 두 노드의 파라미터 변경을 실시간으로 받음
+  // 세 노드의 파라미터 변경을 실시간으로 받음
   param_event_handler_ = std::make_shared<rclcpp::ParameterEventHandler>(node);
   param_event_cb_handle_ = param_event_handler_->add_parameter_event_callback(
       [this](const rcl_interfaces::msg::ParameterEvent &event)
       {
-        if (event.node != LINE_NODE && event.node != PATH_NODE)
+        if (event.node != LINE_NODE && event.node != PATH_NODE && event.node != DRIVE_NODE)
           return;
         for (const auto *list : {&event.new_parameters, &event.changed_parameters})
           for (const auto &p : *list)
+          {
+            const QString name = QString::fromStdString(p.name);
             if (p.value.type == rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER)
-              Q_EMIT paramLoaded(QString::fromStdString(p.name), static_cast<int>(p.value.integer_value));
+              Q_EMIT paramLoaded(name, static_cast<int>(p.value.integer_value));
+            else if (p.value.type == rcl_interfaces::msg::ParameterType::PARAMETER_BOOL)
+              Q_EMIT boolParamLoaded(name, p.value.bool_value);
+          }
       });
 
   judge_timer_ = node->create_wall_timer(std::chrono::milliseconds(100), [this]
@@ -143,6 +162,11 @@ bool QNode::isPathParam(const QString &n)
   return n.startsWith("skel.") || n.startsWith("path.");
 }
 
+bool QNode::isDriveParam(const QString &n)
+{
+  return n.startsWith("drive.");
+}
+
 std::vector<std::string> QNode::lineParamNames()
 {
   std::vector<std::string> names;
@@ -162,16 +186,50 @@ std::vector<std::string> QNode::pathParamNames()
           "path.brick_depth_mm", "path.brick_margin_mm", "path.det_max_age_ms", "path.mem_travel_mm"};
 }
 
+std::vector<std::string> QNode::driveParamNames(bool with_enable)
+{
+  std::vector<std::string> names = {
+      "drive.require_cmd", "drive.latency_comp", "drive.psd.enable", // bool
+      "drive.control_hz",
+      "drive.v_max_mm_s", "drive.v_min_mm_s", "drive.w_max_deg_s",
+      "drive.accel_mm_s2", "drive.decel_mm_s2", "drive.w_accel_deg_s2",
+      "drive.ld_min_mm", "drive.ld_max_mm", "drive.ld_time_ms", "drive.curv_slow_mm", "drive.stop_dist_mm",
+      "drive.path_timeout_ms", "drive.hold_ms", "drive.cmd_timeout_ms", "drive.weak_src_pct",
+      "drive.psd.stop_mm"};
+  if (with_enable)
+    names.insert(names.begin(), "drive.enable");
+  return names;
+}
+
 void QNode::setParams(const QMap<QString, int> &params)
 {
-  std::vector<rclcpp::Parameter> line, path;
+  std::vector<rclcpp::Parameter> line, path, drive;
   for (auto it = params.begin(); it != params.end(); ++it)
-    (isPathParam(it.key()) ? path : line).emplace_back(it.key().toStdString(), it.value());
+  {
+    auto &dst = isDriveParam(it.key()) ? drive : isPathParam(it.key()) ? path
+                                                                       : line;
+    dst.emplace_back(it.key().toStdString(), it.value());
+  }
 
   if (!line.empty() && line_client_->service_is_ready())
     line_client_->set_parameters(line);
   if (!path.empty() && path_client_->service_is_ready())
     path_client_->set_parameters(path);
+  if (!drive.empty() && drive_client_->service_is_ready())
+    drive_client_->set_parameters(drive);
+}
+
+bool QNode::setBoolParam(const QString &name, bool on)
+{
+  if (!isDriveParam(name))
+    return false;
+  if (!drive_client_->service_is_ready())
+  {
+    RCLCPP_WARN(node->get_logger(), "%s 설정 실패: /drive_node 연결 안 됨", name.toStdString().c_str());
+    return false;
+  }
+  drive_client_->set_parameters({rclcpp::Parameter(name.toStdString(), on)});
+  return true;
 }
 
 bool QNode::requestParams()
@@ -182,8 +240,13 @@ bool QNode::requestParams()
                            {
       try {
         for (const auto &p : f.get())
+        {
+          const QString name = QString::fromStdString(p.get_name());
           if (p.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER)
-            Q_EMIT paramLoaded(QString::fromStdString(p.get_name()), static_cast<int>(p.as_int()));
+            Q_EMIT paramLoaded(name, static_cast<int>(p.as_int()));
+          else if (p.get_type() == rclcpp::ParameterType::PARAMETER_BOOL)
+            Q_EMIT boolParamLoaded(name, p.as_bool());
+        }
       } catch (const std::exception &e) {
         RCLCPP_WARN(node->get_logger(), "파라미터 읽기 실패: %s", e.what());
       } });
@@ -199,34 +262,57 @@ bool QNode::requestParams()
     request(path_client_, pathParamNames());
     path_requested_ = true;
   }
-  return line_requested_ && path_requested_;
+  if (!drive_requested_ && drive_client_->service_is_ready())
+  {
+    request(drive_client_, driveParamNames(true));
+    drive_requested_ = true;
+  }
+  return line_requested_ && path_requested_ && drive_requested_;
 }
 
 // 형식 (ROS 파라미터 파일과 같아서 launch에서도 그대로 읽을 수 있음)
 // /lineDetect_node:
 //   ros__parameters:
 //     white.h_min: 75
+//     drive.require_cmd: true
+// 연결된 노드만 저장한다 (예: tb_drive를 안 띄웠으면 line/path만)
 void QNode::saveParams(const QString &path)
 {
-  if (!line_client_->service_is_ready() || !path_client_->service_is_ready())
+  struct Target
   {
-    Q_EMIT paramFileStatus("저장 실패: 노드 연결 안 됨");
+    const char *name;
+    rclcpp::AsyncParametersClient::SharedPtr client;
+    std::vector<std::string> names;
+  };
+  std::vector<Target> targets;
+  for (const auto &t : {Target{LINE_NODE, line_client_, lineParamNames()},
+                        Target{PATH_NODE, path_client_, pathParamNames()},
+                        Target{DRIVE_NODE, drive_client_, driveParamNames(false)}})
+    if (t.client->service_is_ready())
+      targets.push_back(t);
+
+  if (targets.empty())
+  {
+    Q_EMIT paramFileStatus("저장 실패: 연결된 노드 없음");
     return;
   }
 
-  // 두 노드에서 값을 받아 모은 뒤 한 번에 파일로 씀
+  // 각 노드에서 값을 받아 모은 뒤 한 번에 파일로 씀 (콜백은 ROS 스레드에서 차례로 실행)
   struct Pending
   {
     std::string file;
-    std::vector<rclcpp::Parameter> line, path;
-    int done = 0;
+    std::vector<std::pair<std::string, std::vector<rclcpp::Parameter>>> nodes;
+    size_t left = 0;
   };
   auto st = std::make_shared<Pending>();
   st->file = path.toStdString();
+  st->left = targets.size();
+  for (const auto &t : targets)
+    st->nodes.push_back({t.name, {}});
 
   auto finish = [this, st]()
   {
-    if (++st->done < 2)
+    if (--st->left > 0)
       return;
     std::ofstream f(st->file);
     if (!f)
@@ -234,44 +320,41 @@ void QNode::saveParams(const QString &path)
       Q_EMIT paramFileStatus("저장 실패: 파일을 열 수 없음");
       return;
     }
-    auto write = [&f](const char *node_name, const std::vector<rclcpp::Parameter> &ps)
+    size_t count = 0;
+    QStringList saved;
+    for (const auto &[node_name, ps] : st->nodes)
     {
       f << node_name << ":\n  ros__parameters:\n";
       for (const auto &p : ps)
+      {
+        if (isUnsavedParam(p.get_name()))
+          continue;
         if (p.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER)
           f << "    " << p.get_name() << ": " << p.as_int() << "\n";
-    };
-    write(LINE_NODE, st->line);
-    write(PATH_NODE, st->path);
-    Q_EMIT paramFileStatus(QString("저장됨: %1 (%2개)")
-                               .arg(QString::fromStdString(st->file))
-                               .arg(st->line.size() + st->path.size()));
+        else if (p.get_type() == rclcpp::ParameterType::PARAMETER_BOOL)
+          f << "    " << p.get_name() << ": " << (p.as_bool() ? "true" : "false") << "\n";
+        else
+          continue;
+        ++count;
+      }
+      saved << QString::fromStdString(node_name).mid(1);
+    }
+    Q_EMIT paramFileStatus(QString("저장됨: %1개 (%2)").arg(count).arg(saved.join(", ")));
   };
 
-  line_client_->get_parameters(lineParamNames(),
-                               [st, finish](std::shared_future<std::vector<rclcpp::Parameter>> f)
-                               {
-                                 try
-                                 {
-                                   st->line = f.get();
-                                 }
-                                 catch (...)
-                                 {
-                                 }
-                                 finish();
-                               });
-  path_client_->get_parameters(pathParamNames(),
-                               [st, finish](std::shared_future<std::vector<rclcpp::Parameter>> f)
-                               {
-                                 try
-                                 {
-                                   st->path = f.get();
-                                 }
-                                 catch (...)
-                                 {
-                                 }
-                                 finish();
-                               });
+  for (size_t i = 0; i < targets.size(); ++i)
+    targets[i].client->get_parameters(targets[i].names,
+                                      [st, finish, i](std::shared_future<std::vector<rclcpp::Parameter>> f)
+                                      {
+                                        try
+                                        {
+                                          st->nodes[i].second = f.get();
+                                        }
+                                        catch (...)
+                                        {
+                                        }
+                                        finish();
+                                      });
 }
 
 void QNode::loadParams(const QString &path)
@@ -283,8 +366,8 @@ void QNode::loadParams(const QString &path)
     return;
   }
 
-  // "/노드:" 줄로 대상 노드를 정하고, "이름: 정수" 줄을 모음
-  std::vector<rclcpp::Parameter> line, pth;
+  // "/노드:" 줄로 대상 노드를 정하고, "이름: 값" 줄을 모음 (값은 정수 또는 true/false)
+  std::vector<rclcpp::Parameter> line, pth, drv;
   std::vector<rclcpp::Parameter> *cur = nullptr;
   std::string s;
   while (std::getline(f, s))
@@ -295,16 +378,30 @@ void QNode::loadParams(const QString &path)
     const std::string t = s.substr(b);
     if (b == 0)
     {
-      cur = (t.rfind(LINE_NODE, 0) == 0) ? &line : (t.rfind(PATH_NODE, 0) == 0) ? &pth
-                                                                                : nullptr;
+      cur = (t.rfind(LINE_NODE, 0) == 0)    ? &line
+            : (t.rfind(PATH_NODE, 0) == 0)  ? &pth
+            : (t.rfind(DRIVE_NODE, 0) == 0) ? &drv
+                                            : nullptr;
       continue;
     }
     const auto colon = t.find(':');
     if (!cur || colon == std::string::npos || t.rfind("ros__parameters", 0) == 0)
       continue;
+
+    const std::string name = t.substr(0, colon);
+    if (isUnsavedParam(name))
+      continue;
+    std::string val = t.substr(colon + 1);
+    val.erase(0, val.find_first_not_of(" \t"));
+    val.erase(val.find_last_not_of(" \t\r") + 1);
+    if (val == "true" || val == "false")
+    {
+      cur->emplace_back(name, val == "true");
+      continue;
+    }
     try
     {
-      cur->emplace_back(t.substr(0, colon), static_cast<int64_t>(std::stoll(t.substr(colon + 1))));
+      cur->emplace_back(name, static_cast<int64_t>(std::stoll(val)));
     }
     catch (...)
     {
@@ -312,16 +409,17 @@ void QNode::loadParams(const QString &path)
   }
 
   int sent = 0;
-  if (!line.empty() && line_client_->service_is_ready())
+  auto send = [&sent](rclcpp::AsyncParametersClient::SharedPtr c, const std::vector<rclcpp::Parameter> &ps)
   {
-    line_client_->set_parameters(line);
-    sent += static_cast<int>(line.size());
-  }
-  if (!pth.empty() && path_client_->service_is_ready())
-  {
-    path_client_->set_parameters(pth);
-    sent += static_cast<int>(pth.size());
-  }
+    if (!ps.empty() && c->service_is_ready())
+    {
+      c->set_parameters(ps);
+      sent += static_cast<int>(ps.size());
+    }
+  };
+  send(line_client_, line);
+  send(path_client_, pth);
+  send(drive_client_, drv);
   Q_EMIT paramFileStatus(QString("불러옴: %1 (%2개 적용)").arg(path).arg(sent));
 }
 

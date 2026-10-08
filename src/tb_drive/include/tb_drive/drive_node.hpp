@@ -32,6 +32,7 @@ private:
     bool psd_blocked(const rclcpp::Time &t) const;
     void publish_cmd(double v, double w);
     void publish_target(const tb_drive::Target &tg, const rclcpp::Time &t);
+    void publish_uart(double v, double w, double t, bool force);
 
     // ====== 입력
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
@@ -43,6 +44,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr target_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr uart_pub_; // TB_Uart_RX
 
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr post_cb_handle_;
@@ -66,4 +68,13 @@ private:
     double cmd_timeout_ = 0.5;
     double weak_scale_ = 0.6;
     double psd_stop_ = 0.15;
+
+    // 모터 출력 (UART)
+    bool uart_enable_ = true;
+    bool invert_l_ = false, invert_r_ = false;
+    double wheel_r_ = 0.0475, wheel_sep_ = 0.1933, rpm_per_unit_ = 0.229;
+    int uart_max_raw_ = 1000;
+    long uart_l_ = 0, uart_r_ = 0;
+    double uart_t_ = -1.0;
+    bool uart_send_zero_ = false;
 };

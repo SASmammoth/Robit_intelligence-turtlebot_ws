@@ -33,3 +33,14 @@ drive_node:
         enable: false
         stop_mm: 150
         topics: ["/psd/front"]
+
+      # ── 모터 출력: TB_Uart_RX "velocity L R" (다이나믹셀 원시값)
+      #    1 m/s ≈ 878, 0.15 m/s ≈ 132
+      uart:
+        enable: true
+        wheel_radius_m: 0.0475
+        wheel_sep_m: 0.1933
+        rpm_per_unit: 0.229     # MX-64 Protocol 2.0. Protocol 1.0이면 0.114
+        max_raw: 275            # MX-64 12V 무부하 약 63rpm. 넘으면 L/R 비율 유지하며 축소
+        invert_left: false      # GUI WASD와 같은 규칙(전진 = 둘 다 양수)이면 false
+        invert_right: false
