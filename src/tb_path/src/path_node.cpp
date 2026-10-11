@@ -90,6 +90,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_attach_mm", 300, 600);       // 선에 붙은 벽돌은 붙은 쪽을 이 거리 안의 선까지 막음
     declare_int("path.con_extend_mm", 400, 1000);      // 벽돌에 가려 끊긴 선을 이만큼 이음 (0이면 끔)
     declare_int("path.con_edge_mm", 60, 300);
+    declare_int("path.con_dead_end_mm", 250, 1000);    // 끝이 벽에 막힌 가지가 이보다 짧으면 삭제 (0이면 끔)
     declare_int("path.con_hold_mm", 80, 500);          // 기억한 벽돌 뒷면을 로봇 뒤 끝이 지나고 이만큼 더 가야 그쪽으로 붙음
     declare_int("path.con_clear_mm", 30, 200);         // 기억한 벽돌과 로봇 옆면 사이 여유          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
     declare_int("path.con_exit_mm", 600, 3000);
@@ -150,6 +151,7 @@ void PathNode::reload_params()
     con_attach_mm_ = get_parameter("path.con_attach_mm").as_int();
     con_extend_mm_ = get_parameter("path.con_extend_mm").as_int();
     con_hold_mm_ = get_parameter("path.con_hold_mm").as_int();
+    con_dead_end_mm_ = get_parameter("path.con_dead_end_mm").as_int();
     con_clear_mm_ = get_parameter("path.con_clear_mm").as_int();
     con_brick_w_mm_ = get_parameter("path.con_brick_w_mm").as_int();
     con_exit_mm_ = get_parameter("path.con_exit_mm").as_int();
@@ -314,7 +316,10 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     const bool has_pred = tracker_.predict_seed(pose_, geo_, predicted);
     if (has_pred)
         seed_hint = predicted;
-    const lane_skel::Result skel = lane_skel::build(wall, valid, skel_p_, &seed_hint,
+    lane_skel::Params sp = skel_p_;
+    if (con && con_dead_end_mm_ > 0) // 공사 구간: 벽돌과 선 사이 구석으로 뻗은 막다른 가지 삭제
+        sp.dead_end_len = int(std::lround(con_dead_end_mm_ / 1000.0 / geo_.m_per_px_y));
+    const lane_skel::Result skel = lane_skel::build(wall, valid, sp, &seed_hint,
                                                     has_pred ? &predicted : nullptr);
     last_seed_ = skel.ok ? skel.seed : cv::Point(-1, -1);
 

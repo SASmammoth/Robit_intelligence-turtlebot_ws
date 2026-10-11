@@ -56,7 +56,7 @@ private:
     // 공사 구간: 화면에서 사라진 뒤에도 로봇 옆을 지나는 벽돌을 기억 (월드 좌표, 오도메트리)
     std::vector<obstacles::Quad> con_mem_;
     std::vector<obstacles::Quad> con_near_; // 이번 프레임에 경로를 떼어 놓은 벽돌 (로봇 좌표, 디버그)
-    int con_hold_mm_ = 80, con_clear_mm_ = 30;
+    int con_hold_mm_ = 80, con_clear_mm_ = 30, con_dead_end_mm_ = 250;
     int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
     int con_sign_frames_ = 3;

@@ -12,6 +12,7 @@ struct Params {
     int prune_len      = 20;   // 이보다 짧은 잔가지는 삭제 (BEV px)
     int max_lane_thick = 20;   // 이보다 두꺼운 덩어리의 끝은 연장하지 않음 (BEV px)
     int scale          = 2;    // 내부 처리 축소 배율 (2 → 320x320을 160x160에서 처리)
+    int dead_end_len   = 0;    // 끝이 벽에 막힌(화면 끝·사각지대로 안 열린) 가지가 이보다 짧으면 삭제 (BEV px, 0이면 끔)
 };
 
 struct Result {

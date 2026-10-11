@@ -152,6 +152,29 @@ void prune_spurs(cv::Mat &s, int max_len)
     }
 }
 
+// 끝이 화면 끝이나 사각지대로 열리지 않고 벽에 막힌 가지(막다른 길) 중 max_len보다 짧은 것 삭제.
+// 벽돌과 선 사이 구석 같은 곳으로 뻗은 가지가 "직진에 가까운 가지"로 뽑히는 것을 막음.
+// 진짜 갈 길은 화면 끝까지 이어지므로 남음
+void prune_dead_ends(cv::Mat &s, const cv::Mat &vd, const cv::Rect &img, int max_len, int open_r)
+{
+    const cv::Mat A = crossing_map(s);
+    for (const auto &e : find_ends(s, A)) {
+        if (!s.at<uchar>(e)) continue;
+        bool open = e.x - img.x <= open_r || e.y - img.y <= open_r ||
+                    img.br().x - 1 - e.x <= open_r || img.br().y - 1 - e.y <= open_r;
+        for (int dy = -open_r; dy <= open_r && !open; ++dy)
+            for (int dx = -open_r; dx <= open_r && !open; ++dx) {
+                const cv::Point q(e.x + dx, e.y + dy);
+                if (q.x >= 0 && q.y >= 0 && q.x < vd.cols && q.y < vd.rows && !vd.at<uchar>(q))
+                    open = true;
+            }
+        if (open) continue;
+        const Walk w = walk_from(s, A, e, max_len);
+        if (w.hit_junction && w.len < max_len)
+            for (const auto &p : w.pts) s.at<uchar>(p) = 0;
+    }
+}
+
 // ───────── 벽(차선) 끝 연장 ─────────
 
 // tip에서 dir 방향으로 선을 그림.
@@ -353,6 +376,8 @@ Result build(const cv::Mat &lane, const cv::Mat &valid, const Params &p, const c
     cv::Mat skel = region.clone();
     thin_zhang_suen(skel);
     prune_spurs(skel, std::max(2, p.prune_len / K));
+    if (p.dead_end_len > 0)
+        prune_dead_ends(skel, vd, img, std::max(2, p.dead_end_len / K), 2);
 
     // 6) 여백 제거 → 로봇에 가장 가까운 줄기만
     //    사각지대 안의 중심선은 남겨둠: 영역 자체가 차선 거리로 추정한 것이라 믿을 만하고,
