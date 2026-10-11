@@ -34,6 +34,7 @@ def generate_launch_description():
     yolo = Node(package='tb_signs', executable='sign_detect_node', name='signs_node', output='screen',
                 parameters=[{'engine_path': engine}],
                 condition=IfCondition(signs))
+    uart = Node(package="tb_uart", executable="tb_uart_node", name="tb_uart_node", output='screen')
 
     return LaunchDescription([
         DeclareLaunchArgument('signs', default_value='true'),
@@ -44,4 +45,5 @@ def generate_launch_description():
         line,
         path,
         yolo,
+        uart,
     ])

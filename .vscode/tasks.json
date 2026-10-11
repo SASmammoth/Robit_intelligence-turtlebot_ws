@@ -1,33 +1,50 @@
 {
     "version": "2.0.0",
+    "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+            "executable": "/bin/bash",
+            "args": [
+                "-ic"
+            ]
+        },
+        "env": {
+            "ROS2_SETUP": "if [ -f /opt/ros/jazzy/setup.bash ]; then source /opt/ros/jazzy/setup.bash; else eval \"$(mamba shell hook --shell bash)\" && mamba activate ros2_env; fi",
+            "MERGE_CC": "jq -s 'add' build/*/compile_commands.json > build/compile_commands.json"
+        }
+    },
     "tasks": [
         {
             "label": "colcon build",
             "type": "shell",
-            "command": "[ -f /opt/ros/jazzy/setup.bash ] && source /opt/ros/jazzy/setup.bash; colcon build --symlink-install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && jq -s 'add' build/*/compile_commands.json > build/compile_commands.json",
-            "options": {
-                "cwd": "${workspaceFolder}",
-                "shell": { "executable": "/bin/bash", "args": ["-c"] }
+            "command": "eval \"$ROS2_SETUP\" && colcon build --symlink-install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && eval \"$MERGE_CC\"",
+            "group": {
+                "kind": "build",
+                "isDefault": true
             },
-            "group": { "kind": "build", "isDefault": true },
-            "problemMatcher": ["$gcc"]
+            "problemMatcher": [
+                "$gcc"
+            ]
         },
         {
             "label": "colcon build (this package)",
             "type": "shell",
-            "command": "[ -f /opt/ros/jazzy/setup.bash ] && source /opt/ros/jazzy/setup.bash; colcon build --symlink-install --packages-select ${input:pkg} --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && jq -s 'add' build/*/compile_commands.json > build/compile_commands.json",
-            "options": {
-                "cwd": "${workspaceFolder}",
-                "shell": { "executable": "/bin/bash", "args": ["-c"] }
-            },
-            "problemMatcher": ["$gcc"]
+            "command": "eval \"$ROS2_SETUP\" && colcon build --symlink-install --packages-select ${input:pkg} --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && eval \"$MERGE_CC\"",
+            "problemMatcher": [
+                "$gcc"
+            ]
         }
     ],
     "inputs": [
         {
             "id": "pkg",
-            "type": "promptString",
+            "type": "pickString",
             "description": "package name",
+            "options": [
+                "tb_camera",
+                "tb_cv",
+                "tb_gui"
+            ],
             "default": "tb_camera"
         }
     ]
