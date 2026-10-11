@@ -205,6 +205,7 @@ void Follower::reset()
     hist_.clear();
     cur_.clear();
     good_.clear();
+    sharp_t_ = -1e9;
     cur_stamp_ = good_stamp_ = -1.0;
 }
 
@@ -258,7 +259,25 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
     o.has_corner = find_corner(pts, 0.6, o.corner, o.corner_turn, p.corner_min_x); // 8cm 안에서 35° 넘게 꺾이면 코너
 
 
-    const double ld = std::clamp(p.ld_time * std::abs(v_now), p.ld_min, p.ld_max);
+    double ld = std::clamp(p.ld_time * std::abs(v_now), p.ld_min, p.ld_max);
+    if (p.ld_sharp > 0.0 && p.ld_sharp < ld)
+    {
+        // 앞쪽 경로가 로봇 방향에서 가장 많이 틀어진 각도 (6cm 현으로 재서 흔들림에 둔감하게)
+        double dev = 0.0, run = 0.0;
+        for (size_t i = 0; i + 3 < pts.size() && run < p.sharp_look; ++i)
+        {
+            if (pts[i].x <= 0.0)
+                continue;
+            dev = std::max(dev, std::abs(std::atan2(pts[i + 3].y - pts[i].y, pts[i + 3].x - pts[i].x)));
+            run += std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+        }
+        double r = std::clamp(dev / p.sharp_turn, 0.0, 1.0);
+        if (r >= 1.0)
+            sharp_t_ = t;            // 급한 곳: 이 시각부터 sharp_hold 동안 짧게 유지
+        else if (t - sharp_t_ < p.sharp_hold)
+            r = 1.0;
+        ld -= (ld - p.ld_sharp) * r;
+    }
     o.tg = find_target(pts, ld);
     if (!o.tg.ok)
     {

@@ -2,7 +2,7 @@ drive_node:
   ros__parameters:
     drive:
 
-      pivot_enter_deg: 70      # 코너(8cm 안에서 35° 넘게 꺾이는 곳)가 이보다 크게 꺾일 때만 피봇. 보통 커브는 코너로 안 잡힘
+      pivot_enter_deg: 100     # 코너가 이보다 크게 꺾일 때만 피봇. 가변 lookahead와 같이 쓰면 100° 아래는 피봇 없이가 더 안정적 (test/turn_sim)
       pivot_keep_deg: 20       # 이만큼은 전진하며 돌고 초과분만 제자리 회전. 줄이면 정확, 늘리면 피봇이 짧음
       pivot_confirm: 3         # 코너가 이만큼 연속(제어 주기)으로 보여야 피봇. 흔들림으로 생기는 가짜 코너 거르기
       pivot_exit_deg: 15
@@ -28,6 +28,9 @@ drive_node:
       ld_min_mm: 170         # ★ 실차 확인. 사각지대 채움(path.fill_blind)을 켠 상태 기준
       ld_max_mm: 350         # ★ 카메라가 보는 가장 먼 거리보다 짧게
       ld_time_ms: 1000       # lookahead = 속도 × 이 시간
+      ld_sharp_mm: 120       # ★ 급한 곳(교차로, 벽돌)에서 줄일 lookahead. 0이면 끔
+      sharp_turn_deg: 60     # 앞 35cm 경로가 로봇 방향에서 이만큼 틀어지면 ld_sharp를 다 씀 (그 사이는 비례)
+      sharp_hold_ms: 1000    # 급한 곳을 본 뒤 이 시간 동안은 짧게 유지 (코너를 빠져나올 때까지)
       curv_slow_mm: 100      # 커브 감속 세기 (0이면 감속 없음)
       stop_dist_mm: 40       # 경로 끝까지 이만큼 남으면 정지
 

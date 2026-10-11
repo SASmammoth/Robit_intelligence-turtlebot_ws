@@ -28,6 +28,9 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.ld_min_mm", 150, 30, 1000);
     declare_int("drive.ld_max_mm", 350, 30, 1500);
     declare_int("drive.ld_time_ms", 1000, 0, 5000);
+    declare_int("drive.ld_sharp_mm", 120, 0, 1000);       // 급한 곳에서 줄일 lookahead (0이면 끔)
+    declare_int("drive.sharp_turn_deg", 60, 1, 180);      // 앞 경로가 이만큼 틀어지면 ld_sharp를 다 씀
+    declare_int("drive.sharp_hold_ms", 1000, 0, 5000);    // 급한 곳을 본 뒤 이 시간 동안 짧게 유지
     declare_int("drive.curv_slow_mm", 100, 0, 1000);
     declare_int("drive.stop_dist_mm", 40, 0, 300);
 
@@ -36,7 +39,7 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.cmd_timeout_ms", 500, 50, 3000);
     declare_int("drive.weak_src_pct", 60, 0, 100);
 
-    declare_int("drive.pivot_enter_deg", 70, 0, 180);   // 코너가 이보다 크게 꺾이면 피봇
+    declare_int("drive.pivot_enter_deg", 100, 0, 180);   // 코너가 이보다 크게 꺾이면 피봇
     declare_int("drive.pivot_keep_deg", 20, 0, 180);    // 이 각도까지는 pure pursuit에 맡기고 초과분만 피봇
     declare_int("drive.pivot_confirm", 3, 1, 30);       // 코너가 이만큼 연속으로 보여야 피봇 (제어 주기 수)
     declare_int("drive.pivot_exit_deg", 15, 0, 90);
@@ -147,6 +150,9 @@ void DriveNode::reload_params()
     p.ld_min = mm("drive.ld_min_mm");
     p.ld_max = std::max(p.ld_min, mm("drive.ld_max_mm"));
     p.ld_time = mm("drive.ld_time_ms"); // ms → s 도 /1000
+    p.ld_sharp = mm("drive.ld_sharp_mm");
+    p.sharp_turn = deg("drive.sharp_turn_deg");
+    p.sharp_hold = mm("drive.sharp_hold_ms");
     p.curv_slow = mm("drive.curv_slow_mm");
     p.stop_dist = mm("drive.stop_dist_mm");
     p.corner_min_x = mm("drive.corner_min_x_mm");

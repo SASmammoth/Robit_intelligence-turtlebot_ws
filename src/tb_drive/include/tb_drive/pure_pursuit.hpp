@@ -26,6 +26,11 @@ struct Params
     double curv_slow = 0.1; // v = limit / (1 + curv_slow·|곡률|) [m]
     double stop_dist = 0.04; // 경로 끝까지 이만큼 남으면 정지 [m]
     double corner_min_x = 0.20; // 이보다 가까운 경로에서는 코너를 찾지 않음 [m] (= BEV 아랫줄 거리)
+    // 급한 곳에서 lookahead 줄이기: 앞 sharp_look 안에서 경로가 로봇 방향과 sharp_turn만큼 틀어지면 ld_sharp까지
+    double ld_sharp = 0.0;      // 0이면 끔 [m]
+    double sharp_turn = 1.05;   // 이만큼 틀어지면 ld_sharp를 다 씀 (그 사이는 비례) [rad]
+    double sharp_look = 0.35;   // 앞 이 길이 안의 경로를 봄 [m]
+    double sharp_hold = 1.0;    // 급한 곳을 본 뒤 이 시간 동안은 ld_sharp 유지 (피봇·코너 빠져나올 때까지) [s]
 };
 
 struct Target
@@ -110,6 +115,7 @@ private:
     MotionHistory hist_;
     std::vector<Pt> cur_, good_;
     double cur_stamp_ = -1.0, good_stamp_ = -1.0;
+    mutable double sharp_t_ = -1e9; // 마지막으로 급한 곳을 본 시각 (ld_sharp 유지용)
 };
 
 // 날카로운 꺾임(교차로, 벽돌 회피)에서만 쓰는 제자리 회전.
@@ -118,7 +124,7 @@ private:
 //  - 안전장치: 코너를 못 찾았는데 목표점이 fallback보다 옆이면, keep 안으로 들어올 때까지만 돎
 struct PivotParams
 {
-    double enter = 1.22;    // 코너가 이보다 크게 꺾이면 피봇 [rad]
+    double enter = 1.75;    // 코너가 이보다 크게 꺾이면 피봇 [rad]
     double keep = 0.35;     // 이 각도까지는 pure pursuit에 맡김 (피봇은 초과분만) [rad]
     double exit = 0.26;     // 피봇 중 목표점이 이 안으로 들어오면 종료 [rad]
     double w = 1.57;        // 피봇 각속도 [rad/s]
