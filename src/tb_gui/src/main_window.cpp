@@ -6,6 +6,12 @@
 #include "../include/tb_gui/main_window.hpp"
 
 #include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QGroupBox>
+#include <QScrollArea>
+#include <QSettings>
+#include <QVBoxLayout>
 #include <QApplication>
 #include <algorithm>
 #include <cstdlib>
@@ -218,11 +224,44 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
   showMission();
 
   // ====== 파라미터 저장 / 불러오기
-  ui->labelParamFile->setText("params: " + paramFile());
+  //  Save / Load      : 현재 파일에 바로 저장 / 현재 파일에서 불러오기
+  //  Save as / Open   : 파일 선택 창으로 위치·이름을 정한 뒤 저장 / 불러오기 (현재 파일이 바뀜)
+  //  마지막으로 쓴 파일은 QSettings에 기억 (~/.config/robit/tb_gui.conf)
+  {
+    QSettings s("robit", "tb_gui");
+    param_file_ = s.value("param_file", QDir::homePath() + "/tb_params.yaml").toString();
+  }
+  ui->btnSaveParams->setToolTip("현재 파일에 저장");
+  ui->btnLoadParams->setToolTip("현재 파일에서 불러오기");
+  auto *btn_save_as = new QPushButton("Save as...", this);
+  auto *btn_open = new QPushButton("Open...", this);
+  btn_save_as->setToolTip("저장할 위치와 이름을 골라서 저장");
+  btn_open->setToolTip("불러올 파일을 골라서 적용");
+  ui->horizontalLayoutParams->addWidget(btn_save_as);
+  ui->horizontalLayoutParams->addWidget(btn_open);
+  ui->labelParamFile->setWordWrap(true);
+  ui->labelParamFile->setText("params: " + param_file_);
+
   connect(ui->btnSaveParams, &QPushButton::clicked, this, [this]
-          { qnode->saveParams(paramFile()); });
+          { saveParamsTo(param_file_); });
   connect(ui->btnLoadParams, &QPushButton::clicked, this, [this]
-          { qnode->loadParams(paramFile()); });
+          { qnode->loadParams(param_file_); });
+  connect(btn_save_as, &QPushButton::clicked, this, [this]
+          {
+    const QString f = QFileDialog::getSaveFileName(this, "파라미터 저장", param_file_,
+                                                   "YAML (*.yaml *.yml);;All files (*)");
+    if (f.isEmpty())
+      return;
+    setParamFile(f.endsWith(".yaml") || f.endsWith(".yml") ? f : f + ".yaml");
+    saveParamsTo(param_file_); });
+  connect(btn_open, &QPushButton::clicked, this, [this]
+          {
+    const QString f = QFileDialog::getOpenFileName(this, "파라미터 불러오기", QFileInfo(param_file_).absolutePath(),
+                                                   "YAML (*.yaml *.yml);;All files (*)");
+    if (f.isEmpty())
+      return;
+    setParamFile(f);
+    qnode->loadParams(param_file_); });
   connect(qnode, &QNode::paramFileStatus, ui->labelParamFile, &QLabel::setText);
 
   // ======== 검출된 cv 객체 표시창 + reset버튼
@@ -306,6 +345,116 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
   // ====== 자동 주행 (Tab 3)
   setupDriveTab();
+
+  // ====== 거리·경로 파라미터 (Params 탭, 코드로 생성)
+  setupParamTab();
+}
+
+// ───────── 파라미터 스핀박스 공통 ─────────
+
+// (이름 라벨, 스핀박스) 한 쌍을 grid의 idx번째 칸에 넣고 노드와 연결
+void MainWindow::addParamSpin(QGridLayout *grid, QWidget *parent, int idx, int cols, const ParamSpinDef &d)
+{
+  const QString name = d.name;
+  auto *label = new QLabel(d.text, parent);
+  label->setToolTip(name);
+  auto *sp = new QSpinBox(parent);
+  sp->setRange(d.min, d.max);
+  sp->setSingleStep(d.step);
+  sp->setSuffix(d.suffix);
+  sp->setKeyboardTracking(false);
+  sp->setToolTip(name);
+  grid->addWidget(label, idx / cols, (idx % cols) * 2);
+  grid->addWidget(sp, idx / cols, (idx % cols) * 2 + 1);
+  global_widgets_[name] = {nullptr, nullptr, sp}; // paramLoaded → applyGlobalParam 로 동기화
+  connect(sp, qOverload<int>(&QSpinBox::valueChanged), this, [this, name](int v)
+          { queueParam(name, v); });
+}
+
+// ───────── Params 탭 (실측 거리, 경로 계산) ─────────
+// Tab 1에 이미 있는 값(HSV, BEV 사다리꼴, morph, bev.lane_w_px, skel.seal/prune/dash)은 넣지 않음
+// (한 파라미터에 위젯이 둘이면 동기화가 꼬임)
+
+void MainWindow::setupParamTab()
+{
+  struct Group
+  {
+    const char *title;
+    std::vector<ParamSpinDef> defs;
+  };
+  const std::vector<Group> groups = {
+      {"실측 거리 (lineDetect_node) ★ 자로 잰 값",
+       {
+           {"geo.lane_w_mm", "차선 안쪽 간격", " mm", 1, 1000, 1},
+           {"geo.bev_bottom_mm", "BEV 아랫줄 거리", " mm", 0, 2000, 1},
+           {"geo.bev_depth_mm", "BEV 세로 길이", " mm", 1, 3000, 1},
+       }},
+      {"스켈레톤 (path_node)",
+       {
+           {"skel.max_lane_thick", "차선 최대 두께", " px", 0, 200, 1},
+       }},
+      {"벽돌 (path_node)",
+       {
+           {"path.brick_margin_mm", "좌우 여유", " mm", 0, 300, 5},
+           {"path.brick_depth_mm", "앞뒤 길이", " mm", 0, 500, 5},
+           {"path.det_max_age_ms", "탐지 유효", " ms", 0, 2000, 50},
+       }},
+      {"경로 기억·판단 (path_node)",
+       {
+           {"path.mem_travel_mm", "기억 최대 이동", " mm", 0, 3000, 50},
+           {"path.max_dev_mm", "기억과 차이 허용", " mm", 0, 500, 5},
+           {"path.override_frames", "새 경로 믿기까지", " 프레임", 0, 100, 1},
+           {"path.min_len_mm", "최소 경로 길이", " mm", 0, 1000, 10},
+           {"path.branch_look_mm", "분기 미리보기", " mm", 0, 300, 5},
+           {"path.blind_max_mm", "사각지대 통과 최대", " mm", 0, 1000, 10},
+       }},
+  };
+  constexpr int COLS = 3;
+
+  auto *page = new QWidget;
+  auto *vbox = new QVBoxLayout(page);
+  for (const auto &g : groups)
+  {
+    auto *box = new QGroupBox(g.title, page);
+    auto *grid = new QGridLayout(box);
+    int i = 0;
+    for (const auto &d : g.defs)
+      addParamSpin(grid, box, i++, COLS, d);
+    grid->setColumnStretch(COLS * 2, 1);
+    vbox->addWidget(box);
+  }
+  auto *hint = new QLabel("이름에 마우스를 올리면 ROS 파라미터 이름이 보입니다. "
+                          "값은 바로 노드에 적용되고, 유지하려면 Save로 파일에 저장하세요.",
+                          page);
+  hint->setWordWrap(true);
+  hint->setStyleSheet("color: gray;");
+  vbox->addWidget(hint);
+  vbox->addStretch(1);
+
+  auto *scroll = new QScrollArea;
+  scroll->setWidgetResizable(true);
+  scroll->setWidget(page);
+  ui->tabWidget->addTab(scroll, "Params");
+}
+
+// ───────── 파라미터 파일 ─────────
+
+void MainWindow::setParamFile(const QString &path)
+{
+  param_file_ = path;
+  QSettings("robit", "tb_gui").setValue("param_file", path);
+  ui->labelParamFile->setText("params: " + path);
+}
+
+void MainWindow::saveParamsTo(const QString &path)
+{
+  // 폴더가 없으면 만들어 둠 (예: ~/ros2_ws/params/ 처음 저장할 때)
+  if (!QDir().mkpath(QFileInfo(path).absolutePath()))
+  {
+    ui->labelParamFile->setText("저장 실패: 폴더를 만들 수 없음 (" + path + ")");
+    return;
+  }
+  qnode->saveParams(path);
 }
 
 // ───────── 자동 주행 (tb_drive) ─────────
@@ -313,12 +462,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 void MainWindow::setupDriveTab()
 {
   // 파라미터 스핀박스: 이름, 표시 이름, 단위, 범위 (tb_drive의 declare_int 범위와 같게)
-  struct DriveSpinDef
-  {
-    const char *name, *text, *suffix;
-    int min, max, step;
-  };
-  static const DriveSpinDef defs[] = {
+  static const ParamSpinDef defs[] = {
       {"drive.v_max_mm_s", "최고 속도", " mm/s", 0, 1000, 10},
       {"drive.v_min_mm_s", "최저 속도", " mm/s", 0, 500, 5},
       {"drive.w_max_deg_s", "최대 회전", " °/s", 0, 720, 5},
@@ -336,28 +480,16 @@ void MainWindow::setupDriveTab()
       {"drive.weak_src_pct", "약한 경로 속도", " %", 0, 100, 5},
       {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},
       {"drive.control_hz", "제어 주기", " Hz", 5, 100, 5},
+      {"drive.pivot_enter_deg", "피봇 시작 각도", " °", 0, 180, 5},
+      {"drive.pivot_exit_deg", "피봇 종료 각도", " °", 0, 90, 1},
+      {"drive.pivot_w_deg_s", "피봇 회전 속도", " °/s", 0, 360, 5},
+      {"drive.pivot_fallback_deg", "피봇 안전장치 각도", " °", 0, 180, 5},
   };
   constexpr int COLS = 3; // (이름, 스핀박스) 묶음 3개씩 한 줄
 
   int i = 0;
   for (const auto &d : defs)
-  {
-    const QString name = d.name;
-    auto *label = new QLabel(d.text, ui->groupDriveParams);
-    label->setToolTip(name);
-    auto *sp = new QSpinBox(ui->groupDriveParams);
-    sp->setRange(d.min, d.max);
-    sp->setSingleStep(d.step);
-    sp->setSuffix(d.suffix);
-    sp->setKeyboardTracking(false);
-    sp->setToolTip(name);
-    ui->gridDriveParams->addWidget(label, i / COLS, (i % COLS) * 2);
-    ui->gridDriveParams->addWidget(sp, i / COLS, (i % COLS) * 2 + 1);
-    global_widgets_[name] = {nullptr, nullptr, sp}; // paramLoaded → applyGlobalParam 로 동기화
-    connect(sp, qOverload<int>(&QSpinBox::valueChanged), this, [this, name](int v)
-            { queueParam(name, v); });
-    ++i;
-  }
+    addParamSpin(ui->gridDriveParams, ui->groupDriveParams, i++, COLS, d);
   ui->gridDriveParams->setRowStretch((i + COLS - 1) / COLS, 1);
 
   // bool 파라미터 체크박스
@@ -661,11 +793,6 @@ void MainWindow::showMission()
   ui->labelMission->setText(QString("turn: %1 | parking: %2")
                                 .arg(names[std::clamp(turn_, 0, 2)])
                                 .arg(parking_ ? "ON" : "off"));
-}
-
-QString MainWindow::paramFile() const
-{
-  return QDir::homePath() + "/tb_params.yaml";
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

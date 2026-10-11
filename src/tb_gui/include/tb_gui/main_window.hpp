@@ -17,6 +17,8 @@
 #include <QCheckBox>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QGridLayout>
+#include <vector>
 #include <QIcon>
 #include <QSet>
 #include <QKeyEvent>
@@ -70,7 +72,19 @@ private:
   bool parking_ = false;
   QTimer status_timeout_; // 경로 출처가 1초 넘게 안 오면 회색
 
-  QString paramFile() const; // 저장 파일 경로
+  // 파라미터 파일 (Save/Load 대상, Save as/Open으로 바꿈)
+  QString param_file_;
+  void setParamFile(const QString &path); // 바꾸고 QSettings에 기억
+  void saveParamsTo(const QString &path); // 폴더가 없으면 만들고 저장
+
+  // 파라미터 스핀박스 (주행 탭, Params 탭 공통)
+  struct ParamSpinDef
+  {
+    const char *name, *text, *suffix;
+    int min, max, step;
+  };
+  void addParamSpin(QGridLayout *grid, QWidget *parent, int idx, int cols, const ParamSpinDef &d);
+  void setupParamTab();
 
   // 주행 (WASD)
   void updateDrive();                               // 눌린 키 → 좌우 속도 계산

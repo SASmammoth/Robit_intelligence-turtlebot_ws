@@ -182,8 +182,10 @@ std::vector<std::string> QNode::lineParamNames()
 
 std::vector<std::string> QNode::pathParamNames()
 {
-  return {"skel.seal_len", "skel.prune_len", "skel.dash_len",
-          "path.brick_depth_mm", "path.brick_margin_mm", "path.det_max_age_ms", "path.mem_travel_mm"};
+  return {"skel.seal_len", "skel.prune_len", "skel.dash_len", "skel.max_lane_thick",
+          "path.brick_depth_mm", "path.brick_margin_mm", "path.det_max_age_ms", "path.mem_travel_mm",
+          "path.max_dev_mm", "path.override_frames", "path.min_len_mm",
+          "path.branch_look_mm", "path.blind_max_mm"};
 }
 
 std::vector<std::string> QNode::driveParamNames(bool with_enable)
@@ -195,6 +197,7 @@ std::vector<std::string> QNode::driveParamNames(bool with_enable)
       "drive.accel_mm_s2", "drive.decel_mm_s2", "drive.w_accel_deg_s2",
       "drive.ld_min_mm", "drive.ld_max_mm", "drive.ld_time_ms", "drive.curv_slow_mm", "drive.stop_dist_mm",
       "drive.path_timeout_ms", "drive.hold_ms", "drive.cmd_timeout_ms", "drive.weak_src_pct",
+      "drive.pivot_enter_deg", "drive.pivot_exit_deg", "drive.pivot_w_deg_s", "drive.pivot_fallback_deg",
       "drive.psd.stop_mm"};
   if (with_enable)
     names.insert(names.begin(), "drive.enable");
@@ -317,7 +320,7 @@ void QNode::saveParams(const QString &path)
     std::ofstream f(st->file);
     if (!f)
     {
-      Q_EMIT paramFileStatus("저장 실패: 파일을 열 수 없음");
+      Q_EMIT paramFileStatus("저장 실패: 파일을 열 수 없음\n" + QString::fromStdString(st->file));
       return;
     }
     size_t count = 0;
@@ -339,7 +342,10 @@ void QNode::saveParams(const QString &path)
       }
       saved << QString::fromStdString(node_name).mid(1);
     }
-    Q_EMIT paramFileStatus(QString("저장됨: %1개 (%2)").arg(count).arg(saved.join(", ")));
+    Q_EMIT paramFileStatus(QString("저장됨: %1\n%2개 (%3)")
+                               .arg(QString::fromStdString(st->file))
+                               .arg(count)
+                               .arg(saved.join(", ")));
   };
 
   for (size_t i = 0; i < targets.size(); ++i)
@@ -362,7 +368,7 @@ void QNode::loadParams(const QString &path)
   std::ifstream f(path.toStdString());
   if (!f)
   {
-    Q_EMIT paramFileStatus("불러오기 실패: 파일 없음");
+    Q_EMIT paramFileStatus("불러오기 실패: 파일 없음\n" + path);
     return;
   }
 

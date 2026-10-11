@@ -2,12 +2,16 @@
 #   ros2 launch tb_line robot.launch.py                  # 전부
 #   ros2 launch tb_line robot.launch.py signs:=false     # YOLO 빼고
 #   ros2 launch tb_line robot.launch.py drive:=false     # 주행 노드 빼고 (차선·경로만 볼 때)
+#   ros2 launch tb_line robot.launch.py params:=~/tb_params.yaml   # GUI에서 저장한 값으로 시작
+#
+# 파라미터 적용 순서: 각 패키지 config/*.yaml → params:= 파일 (뒤에 오는 값이 덮어씀)
 #
 # tb_drive는 drive.enable=false로 뜨므로, 실행해도 GUI에서 켜기 전까지는 움직이지 않음
 import os
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler, TimerAction
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, OpaqueFunction,
+                            RegisterEventHandler, TimerAction)
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessStart
 from launch.substitutions import LaunchConfiguration
@@ -22,11 +26,20 @@ def share_or_empty(pkg, *rel):
         return ''
 
 
-def generate_launch_description():
-    default_engine = share_or_empty('tb_signs', 'models', 'sign.engine')
+def param_files(pkg_yaml, extra):
+    # 패키지 기본 yaml + (있으면) GUI에서 저장한 파일. 없는 파일은 건너뜀
+    return [f for f in (pkg_yaml, extra) if f and os.path.isfile(f)]
+
+
+def launch_setup(context):
     drive_yaml = share_or_empty("tb_drive", "config", "drive.yaml")
     line_yaml = share_or_empty("tb_line", "config", "line.yaml")
     path_yaml = share_or_empty("tb_path", "config", "path.yaml")
+
+    params = os.path.expanduser(LaunchConfiguration('params').perform(context))
+    if params and not os.path.isfile(params):
+        print(f"[robot.launch] params 파일 없음, 무시: {params}")
+        params = ''
 
     signs = LaunchConfiguration('signs')
     engine = LaunchConfiguration('engine')
@@ -40,14 +53,14 @@ def generate_launch_description():
         output='screen')
 
     line = Node(package='tb_line', executable='lineDetect_node', name='lineDetect_node', output='screen',
-                parameters=[line_yaml] if os.path.exists(line_yaml) else [])
+                parameters=param_files(line_yaml, params))
     path = Node(package='tb_path', executable='path_node', name='path_node', output='screen',
-                parameters=[path_yaml] if os.path.exists(path_yaml) else [])
+                parameters=param_files(path_yaml, params))
     yolo = Node(package='tb_signs', executable='sign_detect_node', name='signs_node', output='screen',
                 parameters=[{'engine_path': engine}],
                 condition=IfCondition(signs))
     driver = Node(package='tb_drive', executable='drive_node', name='drive_node', output='screen',
-                  parameters=[drive_yaml] if drive_yaml else [],
+                  parameters=param_files(drive_yaml, params),
                   condition=IfCondition(drive))
     uart = Node(
         package="tb_uart",
@@ -56,22 +69,31 @@ def generate_launch_description():
         output="screen",
     )
 
+    return [
+        camera,
+        RegisterEventHandler(
+            OnProcessStart(
+                target_action=camera,
+                on_start=[TimerAction(period=2.0, actions=[cam_setup])],
+            )
+        ),
+        line,
+        path,
+        yolo,
+        driver,
+        uart,
+    ]
+
+
+def generate_launch_description():
+    default_engine = share_or_empty('tb_signs', 'models', 'sign.engine')
     return LaunchDescription(
         [
             DeclareLaunchArgument("signs", default_value="true"),
             DeclareLaunchArgument("engine", default_value=default_engine),
             DeclareLaunchArgument("drive", default_value="true"),
-            camera,
-            RegisterEventHandler(
-                OnProcessStart(
-                    target_action=camera,
-                    on_start=[TimerAction(period=2.0, actions=[cam_setup])],
-                )
-            ),
-            line,
-            path,
-            yolo,
-            driver,
-            uart,
+            DeclareLaunchArgument("params", default_value="",
+                                  description="GUI에서 저장한 파라미터 yaml (비우면 패키지 기본값만)"),
+            OpaqueFunction(function=launch_setup),
         ]
     )
