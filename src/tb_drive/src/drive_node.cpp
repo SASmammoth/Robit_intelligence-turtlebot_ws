@@ -39,7 +39,8 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.pivot_enter_deg", 55, 0, 180);
     declare_int("drive.pivot_exit_deg", 15, 0, 90);
     declare_int("drive.pivot_w_deg_s", 60, 0, 360);
-    declare_int("drive.pivot_fallback_deg", 70, 0, 180); // 코너를 못 찾았는데 목표점이 이보다 옆이면 바로 피봇
+    declare_int("drive.pivot_fallback_deg", 75, 0, 180); // 코너를 못 찾았는데 목표점이 이보다 옆이면 바로 피봇
+    declare_int("drive.corner_min_x_mm", 200, 0, 1000);  // 이보다 가까운 경로에서는 코너를 찾지 않음 (BEV 아랫줄 거리)
 
     declare_bool("drive.psd.enable", false);
     declare_int("drive.psd.stop_mm", 150, 0, 1000);
@@ -146,6 +147,7 @@ void DriveNode::reload_params()
     p.ld_time = mm("drive.ld_time_ms"); // ms → s 도 /1000
     p.curv_slow = mm("drive.curv_slow_mm");
     p.stop_dist = mm("drive.stop_dist_mm");
+    p.corner_min_x = mm("drive.corner_min_x_mm");
 
     follower_.path_timeout = mm("drive.path_timeout_ms");
     follower_.hold_time = mm("drive.hold_ms");

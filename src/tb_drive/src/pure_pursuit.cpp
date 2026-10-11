@@ -86,7 +86,7 @@ Target find_target(const std::vector<Pt> &path, double ld)
     return t;
 }
 
-bool find_corner(const std::vector<Pt> &p, double min_turn, Pt &corner, double &turn)
+bool find_corner(const std::vector<Pt> &p, double min_turn, Pt &corner, double &turn, double min_x)
 {
     if (p.size() < 8)
         return false;
@@ -95,8 +95,8 @@ bool find_corner(const std::vector<Pt> &p, double min_turn, Pt &corner, double &
     const size_t win = 4; // 점 간격 2cm × 4 = 8cm 구간에서 방향 비교
     for (size_t i = 0; i + win + 1 < p.size(); ++i)
     {
-        if (p[i].x < -0.02)
-            continue; // 이미 지나간 부분
+        if (p[i].x < min_x)
+            continue; // 사각지대(채운 구간)와 이미 지나간 부분
         const double d = std::remainder(heading(i + win) - heading(i), 2 * M_PI);
         if (std::abs(d) > min_turn)
         {
@@ -104,7 +104,15 @@ bool find_corner(const std::vector<Pt> &p, double min_turn, Pt &corner, double &
             while (j + 2 < p.size() &&
                    std::abs(std::remainder(heading(j + 1) - heading(j), 2 * M_PI)) > 0.05)
                 ++j;
-            corner = p[i + win / 2];
+            // 창 안에서 가장 급하게 꺾이는 점을 코너로 (창 가운데로 하면 급한 모서리보다 몇 cm 일찍 잡힘)
+            size_t kb = i;
+            double best = -1.0;
+            for (size_t k = i; k < i + win; ++k)
+            {
+                const double dk = std::abs(std::remainder(heading(k + 1) - heading(k), 2 * M_PI));
+                if (dk > best) { best = dk; kb = k; }
+            }
+            corner = p[kb + 1];
             turn = std::remainder(heading(j) - heading(i), 2 * M_PI);
             return true;
         }
@@ -237,7 +245,7 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
         pts = shift_path(pts, dx, dy, dth);
     }
 
-    o.has_corner = find_corner(pts, 0.6, o.corner, o.corner_turn); // 8cm 안에서 35° 넘게 꺾이면 코너
+    o.has_corner = find_corner(pts, 0.6, o.corner, o.corner_turn, p.corner_min_x); // 8cm 안에서 35° 넘게 꺾이면 코너
 
 
     const double ld = std::clamp(p.ld_time * std::abs(v_now), p.ld_min, p.ld_max);

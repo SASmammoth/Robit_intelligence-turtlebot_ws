@@ -25,6 +25,7 @@ struct Params
     double ld_time = 1.0;   // lookahead = 속도 × ld_time [s]
     double curv_slow = 0.1; // v = limit / (1 + curv_slow·|곡률|) [m]
     double stop_dist = 0.04; // 경로 끝까지 이만큼 남으면 정지 [m]
+    double corner_min_x = 0.20; // 이보다 가까운 경로에서는 코너를 찾지 않음 [m] (= BEV 아랫줄 거리)
 };
 
 struct Target
@@ -43,7 +44,9 @@ struct Target
 Target find_target(const std::vector<Pt> &path, double ld);
 
 // 경로에서 처음 크게 꺾이는 점과 꺾인 각도 (왼쪽 +)
-bool find_corner(const std::vector<Pt> &path, double min_turn, Pt &corner, double &turn);
+// min_x보다 가까운 점(사각지대를 지나온 경로로 채운 구간)은 보지 않음.
+// 그 구간은 이미 돌고 있거나 다 돈 곳이라, 거기서 코너를 찾으면 커브 직후에 피봇을 또 함
+bool find_corner(const std::vector<Pt> &path, double min_turn, Pt &corner, double &turn, double min_x = 0.0);
 
 // 목표점 → (v, w). limit은 이번 주기 속도 상한 [m/s].
 // 경로 끝이 가까우면 decel로 멈출 수 있는 속도까지 낮추고, stop_dist 안이면 0.

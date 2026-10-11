@@ -197,7 +197,7 @@ std::vector<std::string> QNode::driveParamNames(bool with_enable)
       "drive.accel_mm_s2", "drive.decel_mm_s2", "drive.w_accel_deg_s2",
       "drive.ld_min_mm", "drive.ld_max_mm", "drive.ld_time_ms", "drive.curv_slow_mm", "drive.stop_dist_mm",
       "drive.path_timeout_ms", "drive.hold_ms", "drive.cmd_timeout_ms", "drive.weak_src_pct",
-      "drive.pivot_enter_deg", "drive.pivot_exit_deg", "drive.pivot_w_deg_s", "drive.pivot_fallback_deg",
+      "drive.pivot_enter_deg", "drive.pivot_exit_deg", "drive.pivot_w_deg_s", "drive.pivot_fallback_deg", "drive.corner_min_x_mm",
       "drive.psd.stop_mm"};
   if (with_enable)
     names.insert(names.begin(), "drive.enable");
