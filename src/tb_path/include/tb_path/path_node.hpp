@@ -53,8 +53,12 @@ private:
     int con_depth_mm_ = 200, con_margin_mm_ = 90, con_edge_mm_ = 60, con_exit_mm_ = 600, con_brick_w_mm_ = 200;
     int con_smooth_mm_ = 80, con_attach_mm_ = 300, con_extend_mm_ = 400;
     static void smooth_path(std::vector<cv::Point2d> &path, double half); // 모서리 둥글게 (공사 구간)
-    // 공사 구간: 화면에서 사라진 뒤에도 로봇 옆을 지나는 벽돌을 기억 (월드 좌표, 오도메트리)
-    std::vector<obstacles::Quad> con_mem_;
+    // 공사 구간: 화면 아랫줄을 막 벗어나는 벽돌을 쪽마다 하나 기억 (로봇 좌표, 이동 거리만큼 뒤로 옮김)
+    struct ConHold { bool on = false; obstacles::Quad q; double travel0 = 0.0; };
+    ConHold con_hold_[2];                  // [0] 오른쪽, [1] 왼쪽
+    double con_travel_ = 0.0;              // 공사 구간에서 지금까지 이동 거리
+    lane_path::Pose2D con_last_pose_;
+    bool con_have_pose_ = false;
     std::vector<obstacles::Quad> con_near_; // 이번 프레임에 경로를 떼어 놓은 벽돌 (로봇 좌표, 디버그)
     int con_hold_mm_ = 80, con_clear_mm_ = 30, con_dead_end_mm_ = 250;
     int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수

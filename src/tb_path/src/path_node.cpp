@@ -330,53 +330,58 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     if (con && con_smooth_mm_ > 0)
         smooth_path(out.path, con_smooth_mm_ / 1000.0);
 
-    // 공사 구간: 벽돌 기억 (박스 아랫변이 BEV 안에 온전히 있을 때만 = 바닥 위치가 맞을 때) → 옆을 지나는 동안 경로를 떼어 놓음
+    // 공사 구간: 화면 아랫줄을 막 벗어나려는 벽돌을 쪽(좌/우)마다 하나씩 기억 → 몸통이 옆을 지나는 동안 경로를 떼어 놓음
+    //   위치는 회전을 무시하고 "이동 거리만큼 뒤로" 옮김 (오도메트리 방향 오차가 쌓이지 않게, 수십 cm만 씀)
     if (!con)
     {
-        con_mem_.clear();
+        con_hold_[0].on = con_hold_[1].on = false;
         con_near_.clear();
+        con_have_pose_ = false;
     }
     else
     {
-        const double c = std::cos(pose_.th), sn = std::sin(pose_.th);
-        auto to_world = [&](const cv::Point2d &r) { return cv::Point2d(pose_.x + c * r.x - sn * r.y, pose_.y + sn * r.x + c * r.y); };
-        auto to_robot = [&](const cv::Point2d &w)
-        {
-            const double dx = w.x - pose_.x, dy = w.y - pose_.y;
-            return cv::Point2d(c * dx + sn * dy, -sn * dx + c * dy);
-        };
+        if (con_have_pose_)
+            con_travel_ += std::hypot(pose_.x - con_last_pose_.x, pose_.y - con_last_pose_.y);
+        con_last_pose_ = pose_;
+        con_have_pose_ = true;
+
         for (const auto &b : bricks)
         {
             std::vector<cv::Point2f> src{{float(b.x), float(b.y + b.h)}, {float(b.x + b.w), float(b.y + b.h)}}, dst;
             cv::perspectiveTransform(src, dst, H);
             if (dst[0].y < 0 || dst[1].y < 0 || dst[0].y >= label.rows - 2 || dst[1].y >= label.rows - 2)
-                continue; // 화면 위로 벗어났거나 박스 아랫변이 영상 아래에서 잘림
+                continue; // 화면 위로 벗어났거나 박스 아랫변이 영상 아래에서 잘림 (바닥 위치가 틀림)
             const cv::Point2d A = lane_path::bev_to_robot({dst[0].x, dst[0].y}, geo_);
             const cv::Point2d C = lane_path::bev_to_robot({dst[1].x, dst[1].y}, geo_);
+            const double x0 = std::min(A.x, C.x), yl = std::max(A.y, C.y), yr = std::min(A.y, C.y);
+            if (x0 > geo_.bottom_m + 0.08)
+                continue; // 아직 멀리 있음 (스켈레톤이 피함)
+            if (yl >= 0.0 && yr <= 0.0)
+                continue; // 로봇 정면에 걸침 → 어느 쪽인지 모름
             const cv::Point2d d(0.10, 0.0); // 벽돌 두께 8cm + 여유
-            con_mem_.push_back({to_world(A), to_world(C), to_world(C + d), to_world(A + d)});
+            ConHold &hd = con_hold_[yl < 0.0 ? 0 : 1]; // [0] 오른쪽, [1] 왼쪽
+            hd.on = true;
+            hd.q = {A, C, C + d, A + d};
+            hd.travel0 = con_travel_;
         }
-        // 로봇 뒤로 30cm 넘게 지난 것, 너무 많으면 오래된 것부터 지움
-        con_mem_.erase(std::remove_if(con_mem_.begin(), con_mem_.end(), [&](const obstacles::Quad &q)
-                                      {
-                                          double xm = -1e9;
-                                          for (const auto &w : q)
-                                              xm = std::max(xm, to_robot(w).x);
-                                          return xm < -0.30; }),
-                       con_mem_.end());
-        if (con_mem_.size() > 300)
-            con_mem_.erase(con_mem_.begin(), con_mem_.begin() + (con_mem_.size() - 300));
 
-        // 화면 아랫줄 근처까지 온 벽돌만 (멀리 보이는 벽돌은 스켈레톤이 이미 피함)
         std::vector<obstacles::Quad> near;
-        for (const auto &q : con_mem_)
+        for (auto &hd : con_hold_)
         {
-            obstacles::Quad r;
-            double x0 = 1e9;
-            for (int i = 0; i < 4; ++i)
-                r[i] = to_robot(q[i]), x0 = std::min(x0, r[i].x);
-            if (x0 < geo_.bottom_m + 0.10)
-                near.push_back(r);
+            if (!hd.on)
+                continue;
+            const double moved = con_travel_ - hd.travel0;
+            obstacles::Quad r = hd.q;
+            double x1 = -1e9;
+            for (auto &pt : r)
+                pt.x -= moved, x1 = std::max(x1, pt.x);
+            // 로봇 뒤 끝(14cm)이 벽돌 뒷면을 지나고 여유만큼 더 갔으면 끝
+            if (x1 + 0.14 + (con_clear_mm_ + con_hold_mm_) / 1000.0 < 0.0 || moved > 0.8)
+            {
+                hd.on = false;
+                continue;
+            }
+            near.push_back(r);
         }
         // 로봇: 바퀴 축 기준 앞 9cm, 뒤 14cm, 반폭 10.5cm
         obstacles::keep_clear(out.path, near, 0.09, 0.14, 0.105, con_clear_mm_ / 1000.0, con_hold_mm_ / 1000.0);
