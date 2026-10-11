@@ -87,7 +87,7 @@ private:
     // 모터 출력 (UART)
     bool uart_enable_ = true;
     bool invert_l_ = false, invert_r_ = false;
-    double wheel_r_ = 0.0475, wheel_sep_ = 0.1933, rpm_per_unit_ = 0.229;
+    double wheel_r_ = 0.0475, wheel_sep_ = 0.1933, pivot_sep_ = 0.1933, rpm_per_unit_ = 0.229;
     int uart_max_raw_ = 1000;
     long uart_l_ = 0, uart_r_ = 0;
     double uart_t_ = -1.0;

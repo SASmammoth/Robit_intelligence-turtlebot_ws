@@ -49,7 +49,8 @@ DriveNode::DriveNode() : Node("drive_node")
     // 하드웨어 값이라 GUI 대신 yaml에서 정함
     declare_bool("drive.uart.enable", true);
     declare_parameter("drive.uart.wheel_radius_m", 0.0475);
-    declare_parameter("drive.uart.wheel_sep_m", 0.1933);
+    declare_parameter("drive.uart.wheel_sep_m", 0.1933); // 전진하며 돌 때(두 바퀴 같은 방향) 실측 간격
+    declare_parameter("drive.uart.pivot_sep_m", 0.1933); // 제자리 회전 때 실측 간격 (바퀴가 미끄러져 더 작게 나옴)
     declare_parameter("drive.uart.rpm_per_unit", 0.229); // MX-64 Protocol 2.0 Goal Velocity 단위
     declare_int("drive.uart.max_raw", 1000, 0, 2000);    // 넘으면 L/R 비율 유지한 채 축소
     declare_bool("drive.uart.invert_left", false);
@@ -162,6 +163,7 @@ void DriveNode::reload_params()
     uart_enable_ = get_parameter("drive.uart.enable").as_bool();
     wheel_r_ = std::max(1e-3, get_parameter("drive.uart.wheel_radius_m").as_double());
     wheel_sep_ = get_parameter("drive.uart.wheel_sep_m").as_double();
+    pivot_sep_ = get_parameter("drive.uart.pivot_sep_m").as_double();
     rpm_per_unit_ = std::max(1e-6, get_parameter("drive.uart.rpm_per_unit").as_double());
     uart_max_raw_ = get_parameter("drive.uart.max_raw").as_int();
     invert_l_ = get_parameter("drive.uart.invert_left").as_bool();
@@ -363,8 +365,14 @@ void DriveNode::publish_uart(double v, double w, double t, bool force)
         return;
 
     const double to_raw = 60.0 / (2.0 * M_PI * wheel_r_) / rpm_per_unit_; // [m/s] → 원시값
-    double l = (v - w * wheel_sep_ / 2.0) * to_raw;
-    double r = (v + w * wheel_sep_ / 2.0) * to_raw;
+    // 바퀴 간격: 두 바퀴가 같은 방향으로 구르면(원호) wheel_sep, 안쪽 바퀴가 거꾸로 돌면
+    // 제자리 회전에 가까워질수록 바닥을 비비며 미끄러져 덜 돌므로 pivot_sep 쪽으로 섞음
+    double sep = wheel_sep_;
+    const double half_turn = std::abs(w) * wheel_sep_ / 2.0;
+    if (half_turn > std::abs(v))
+        sep = pivot_sep_ + (wheel_sep_ - pivot_sep_) * (std::abs(v) / half_turn); // 0 = 제자리, 1 = 안쪽 바퀴 정지
+    double l = (v - w * sep / 2.0) * to_raw;
+    double r = (v + w * sep / 2.0) * to_raw;
     const double peak = std::max(std::abs(l), std::abs(r));
     if (uart_max_raw_ > 0 && peak > uart_max_raw_)
     {

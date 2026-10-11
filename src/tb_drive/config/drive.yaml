@@ -46,7 +46,8 @@ drive_node:
         enable: true
         wheel_radius_m: 0.0475
         rpm_per_unit: 0.43     # 실측 보정: 직진 0.1m/s × 5s → 51cm (기존 0.229는 약 1.9배 빠름)
-        wheel_sep_m: 0.165     # 실측 보정: 제자리 회전 2바퀴 (실제 간격 0.1933)
+        wheel_sep_m: 0.193     # 실측 보정: 원호 (v 0.1, w 0.385, 4.1초 → 80°). 전진하며 돌 때 쓰임
+        pivot_sep_m: 0.165     # 실측 보정: 제자리 회전 2바퀴. 안쪽 바퀴가 거꾸로 돌 때 이쪽으로 섞임
         max_raw: 275            # MX-64 12V 무부하 약 63rpm. 넘으면 L/R 비율 유지하며 축소
         invert_left: false      # GUI WASD와 같은 규칙(전진 = 둘 다 양수)이면 false
         invert_right: false
