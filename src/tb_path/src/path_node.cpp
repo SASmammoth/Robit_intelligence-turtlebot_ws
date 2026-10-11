@@ -92,7 +92,8 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_edge_mm", 60, 300);
     declare_int("path.con_dead_end_mm", 250, 1000);    // 끝이 벽에 막힌 가지가 이보다 짧으면 삭제 (0이면 끔)
     declare_int("path.con_keep", 1, 2);                // 지난 벽돌 피하기: 0 끔, 1 그쪽으로 꺾지만 못하게(약), 2 벽돌에서 떼어 놓기(강)
-    declare_int("path.con_hold_mm", 40, 500);          // 기억한 벽돌 뒷면을 로봇 뒤 끝이 지나고 이만큼 더 가야 그쪽으로 붙음
+    declare_int("path.con_hold_mm", 40, 500);
+    declare_int("path.con_keep_rear_mm", 100, 300);    // 지난 벽돌: 바퀴 축이 뒷면을 지나고 이만큼 더 가야 그쪽으로 꺾음 (로봇 뒤 끝 14cm)          // 기억한 벽돌 뒷면을 로봇 뒤 끝이 지나고 이만큼 더 가야 그쪽으로 붙음
     declare_int("path.con_clear_mm", 30, 200);         // 기억한 벽돌과 로봇 옆면 사이 여유          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
     declare_int("path.con_exit_mm", 600, 3000);
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
@@ -153,6 +154,7 @@ void PathNode::reload_params()
     con_extend_mm_ = get_parameter("path.con_extend_mm").as_int();
     con_hold_mm_ = get_parameter("path.con_hold_mm").as_int();
     con_keep_ = get_parameter("path.con_keep").as_int();
+    con_keep_rear_mm_ = get_parameter("path.con_keep_rear_mm").as_int();
     con_dead_end_mm_ = get_parameter("path.con_dead_end_mm").as_int();
     con_clear_mm_ = get_parameter("path.con_clear_mm").as_int();
     con_brick_w_mm_ = get_parameter("path.con_brick_w_mm").as_int();
@@ -409,20 +411,24 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                 continue;
             const double moved = con_travel_ - hd.travel0;
             obstacles::Quad r = hd.q;
-            double x1 = -1e9;
+            double x0 = 1e9, x1 = -1e9;
             for (auto &pt : r)
-                pt.x -= moved, x1 = std::max(x1, pt.x);
+                pt.x -= moved, x0 = std::min(x0, pt.x), x1 = std::max(x1, pt.x);
             // 로봇 뒤 끝(14cm)이 벽돌 뒷면을 지나고 여유만큼 더 갔으면 끝
-            if (x1 + 0.14 + (con_clear_mm_ + con_hold_mm_) / 1000.0 < 0.0 || moved > 0.8)
+            if (x1 + (con_keep_rear_mm_ + con_clear_mm_ + con_hold_mm_) / 1000.0 < 0.0 || moved > 0.8)
             {
                 hd.on = false;
                 continue;
             }
+            // 아직 화면에 보이는 동안은 빨간 벽으로 피하므로 적용 안 함 (사각지대에 들어간 뒤에만)
+            // (녹화: 보이는 동안부터 걸어 출구 좌회전 앞 0.16~0.34m 경로가 1.2초 동안 정면으로 눌려 선을 넘음)
+            if (x0 > geo_.bottom_m)
+                continue;
             near.push_back(r);
         }
         // 로봇: 바퀴 축 기준 앞 9cm, 뒤 14cm, 반폭 10.5cm
         if (con_keep_ > 0)
-            obstacles::keep_clear(out.path, near, 0.09, 0.14, 0.105, con_clear_mm_ / 1000.0, con_hold_mm_ / 1000.0,
+            obstacles::keep_clear(out.path, near, 0.09, con_keep_rear_mm_ / 1000.0, 0.105, con_clear_mm_ / 1000.0, con_hold_mm_ / 1000.0,
                                   con_keep_ == 1);
         else
             near.clear();

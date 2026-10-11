@@ -60,7 +60,7 @@ private:
     lane_path::Pose2D con_last_pose_;
     bool con_have_pose_ = false;
     std::vector<obstacles::Quad> con_near_; // 이번 프레임에 경로를 떼어 놓은 벽돌 (로봇 좌표, 디버그)
-    int con_keep_ = 1;
+    int con_keep_ = 1, con_keep_rear_mm_ = 100;
     int con_hold_mm_ = 40, con_clear_mm_ = 30, con_dead_end_mm_ = 250;
     int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
