@@ -102,6 +102,11 @@ QNode::QNode()
 
   turn_pub_ = node->create_publisher<std_msgs::msg::UInt8>("/mission/turn", 10);
   parking_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/parking", 10);
+  construction_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/construction", 10);
+  construction_state_sub_ = node->create_subscription<std_msgs::msg::Bool>(
+      "/lane/construction", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+      { Q_EMIT constructionStateReceived(m->data); });
+  drive_cmd_pub_ = node->create_publisher<tb_interfaces::msg::DriveCmd>("/drive/cmd", 10);
 
   // ====== 주행 상태 (tb_drive, 10Hz 문자열)
   drive_state_sub_ = node->create_subscription<std_msgs::msg::String>(
@@ -436,6 +441,21 @@ void QNode::publishTurn(int turn)
   std_msgs::msg::UInt8 m;
   m.data = static_cast<uint8_t>(turn);
   turn_pub_->publish(m);
+}
+
+void QNode::publishConstruction(bool on)
+{
+  std_msgs::msg::Bool m;
+  m.data = on;
+  construction_pub_->publish(m);
+}
+
+void QNode::publishDriveStop()
+{
+  tb_interfaces::msg::DriveCmd m;
+  m.header.stamp = node->now();
+  m.mode = tb_interfaces::msg::DriveCmd::STOP;
+  drive_cmd_pub_->publish(m);
 }
 
 void QNode::publishParking(bool on)

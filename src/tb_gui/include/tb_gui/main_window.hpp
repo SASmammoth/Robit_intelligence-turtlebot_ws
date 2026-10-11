@@ -70,6 +70,25 @@ private:
   void showMission();
   int turn_ = 0;
   bool parking_ = false;
+  bool construction_ = false;     // GUI에서 켠 공사 구간 모드 (/mission/construction)
+  bool construction_state_ = false; // path_node가 실제로 공사 구간 모드인지 (/lane/construction)
+
+  // ====== View 탭: 카메라를 크게 + 키보드 조작 (setupViewTab 참고)
+  enum class DriveMode { Off, Wasd, Auto };
+  void setupViewTab();
+  bool viewTabActive() const;
+  void applyViewTabSize();             // View 탭이면 아래 탭 영역을 줄여 카메라를 크게
+  DriveMode driveMode() const;
+  void setDriveMode(DriveMode m);
+  void refreshViewStatus();            // 모드 배지·미션 표시 갱신
+  void setTurnMomentary(int key, bool press); // 자동 주행 중 A/D: 누르는 동안만 Left/Right
+  void setBarrier(bool on);            // 차단바 정지: /drive/cmd STOP을 10Hz로 계속 보냄
+  bool handleViewKey(QKeyEvent *ke, bool press);
+  QWidget *view_tab_ = nullptr;
+  QLabel *label_mode_ = nullptr, *label_keys_ = nullptr, *label_drive_brief_ = nullptr;
+  QCheckBox *check_construction_ = nullptr, *check_barrier_ = nullptr;
+  QList<int> turn_keys_;               // 누르고 있는 A/D (나중에 누른 것이 우선)
+  QTimer barrier_timer_;
   QTimer status_timeout_; // 경로 출처가 1초 넘게 안 오면 회색
 
   // 파라미터 파일 (Save/Load 대상, Save as/Open으로 바꿈)

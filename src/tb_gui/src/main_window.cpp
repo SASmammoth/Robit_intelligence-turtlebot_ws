@@ -12,6 +12,8 @@
 #include <QScrollArea>
 #include <QSettings>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QTabBar>
 #include <QApplication>
 #include <algorithm>
 #include <cstdlib>
@@ -348,6 +350,243 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
   // ====== 거리·경로 파라미터 (Params 탭, 코드로 생성)
   setupParamTab();
+
+  // ====== View 탭 (카메라 크게 + 키보드 조작)
+  setupViewTab();
+}
+
+// ───────── View 탭 ─────────
+// 이 탭을 고르면 아래 탭 영역이 탭 이름 줄만 남고 줄어들어, 위의 카메라 화면이 커짐.
+// 이 탭에 있는 동안만 아래 키가 동작 (다른 탭에서 숫자 입력할 때 방해되지 않게)
+//   Space : WASD ↔ 자동 주행 전환 (꺼져 있으면 WASD부터)      Esc : 모두 정지 (자동·WASD 끔)
+//   WASD 모드 : W/A/S/D 수동 주행
+//   자동 모드 : A/D 누르고 있는 동안 Left/Right, 떼면 Straight
+//   P : 주차   C : 공사 구간   B : 차단바 정지 (켜 둔 동안 /drive/cmd STOP)
+// 같은 조작은 상태 상자의 버튼·체크박스로도 할 수 있음
+void MainWindow::setupViewTab()
+{
+  view_tab_ = new QWidget;
+  auto *vl = new QVBoxLayout(view_tab_);
+  vl->setContentsMargins(6, 2, 6, 2);
+  auto *hint = new QLabel("View 탭: 키보드 조작 켜짐 (Space 모드 전환, Esc 정지 — 위 상태 상자 참고)", view_tab_);
+  hint->setStyleSheet("color: gray;");
+  vl->addWidget(hint);
+  ui->tabWidget->insertTab(0, view_tab_, "View");
+
+  // 상태 상자 맨 위에: 모드 배지, 모드 버튼, 미션 체크박스, 주행 요약, 키 안내
+  auto *box = ui->verticalLayoutStatus;
+  label_mode_ = new QLabel(ui->groupStatus);
+  label_mode_->setAlignment(Qt::AlignCenter);
+  box->insertWidget(0, label_mode_);
+
+  auto *row = new QHBoxLayout;
+  auto *btn_off = new QPushButton("정지 (Esc)", ui->groupStatus);
+  auto *btn_wasd = new QPushButton("WASD", ui->groupStatus);
+  auto *btn_auto = new QPushButton("자동", ui->groupStatus);
+  for (QPushButton *b : {btn_off, btn_wasd, btn_auto})
+  {
+    b->setFocusPolicy(Qt::NoFocus); // 버튼이 Space를 먹지 않게
+    row->addWidget(b);
+  }
+  box->insertLayout(1, row);
+  connect(btn_off, &QPushButton::clicked, this, [this] { setDriveMode(DriveMode::Off); });
+  connect(btn_wasd, &QPushButton::clicked, this, [this] { setDriveMode(DriveMode::Wasd); });
+  connect(btn_auto, &QPushButton::clicked, this, [this] { setDriveMode(DriveMode::Auto); });
+
+  label_drive_brief_ = new QLabel("drive: -", ui->groupStatus);
+  box->insertWidget(2, label_drive_brief_);
+
+  // 기존 주차 체크박스 옆에 공사 구간, 차단바
+  check_construction_ = new QCheckBox("공사 구간 (C)", ui->groupStatus);
+  check_barrier_ = new QCheckBox("차단바 정지 (B)", ui->groupStatus);
+  ui->checkParking->setText("Parking (P)");
+  const int park_idx = box->indexOf(ui->checkParking);
+  box->insertWidget(park_idx + 1, check_construction_);
+  box->insertWidget(park_idx + 2, check_barrier_);
+  for (QWidget *w : std::initializer_list<QWidget *>{check_construction_, check_barrier_, ui->checkParking,
+                                                     ui->radioTurnLeft, ui->radioTurnRight, ui->radioTurnStraight})
+    w->setFocusPolicy(Qt::NoFocus);
+
+  connect(check_construction_, &QCheckBox::toggled, this, [this](bool on)
+          {
+    construction_ = on;
+    qnode->publishConstruction(on);
+    showMission(); });
+  connect(qnode, &QNode::constructionStateReceived, this, [this](bool on)
+          {
+    construction_state_ = on;
+    showMission(); });
+  connect(check_barrier_, &QCheckBox::toggled, this, [this](bool on) { setBarrier(on); });
+  barrier_timer_.setInterval(100); // drive.cmd_timeout_ms(500)보다 충분히 짧게
+  connect(&barrier_timer_, &QTimer::timeout, this, [this] { qnode->publishDriveStop(); });
+
+  label_keys_ = new QLabel(ui->groupStatus);
+  label_keys_->setWordWrap(true);
+  label_keys_->setStyleSheet("color: gray; font-size: 11px;");
+  box->addWidget(label_keys_);
+
+  // 모드가 바뀌는 모든 경로(버튼, 키, 다른 탭의 체크박스)에서 표시 갱신
+  connect(ui->checkDriveEnable, &QCheckBox::toggled, this, [this](bool) { refreshViewStatus(); });
+  connect(ui->checkAutoEnable, &QCheckBox::toggled, this, [this](bool) { refreshViewStatus(); });
+  connect(qnode, &QNode::boolParamLoaded, this, [this](const QString &n, bool)
+          { if (n == "drive.enable") refreshViewStatus(); });
+  connect(qnode, &QNode::driveStateReceived, this, [this](const QString &t)
+          { label_drive_brief_->setText(t.isEmpty() ? "drive: -" : t); });
+
+  connect(ui->tabWidget, &QTabWidget::currentChanged, this, [this](int)
+          {
+    applyViewTabSize();
+    refreshViewStatus();
+    if (!viewTabActive() && !turn_keys_.isEmpty()) // 탭을 떠나면 누르고 있던 A/D는 놓은 것으로
+    {
+      turn_keys_.clear();
+      ui->radioTurnStraight->setChecked(true);
+    } });
+
+  ui->tabWidget->setCurrentWidget(view_tab_);
+  applyViewTabSize();
+  refreshViewStatus();
+  showMission();
+}
+
+bool MainWindow::viewTabActive() const
+{
+  return view_tab_ && ui->tabWidget->currentWidget() == view_tab_;
+}
+
+void MainWindow::applyViewTabSize()
+{
+  // QTabWidget은 가장 큰 페이지 크기를 차지하므로, View 탭일 때는 높이를 직접 줄임
+  if (viewTabActive())
+    ui->tabWidget->setMaximumHeight(ui->tabWidget->tabBar()->sizeHint().height() + 34);
+  else
+    ui->tabWidget->setMaximumHeight(QWIDGETSIZE_MAX);
+}
+
+MainWindow::DriveMode MainWindow::driveMode() const
+{
+  if (ui->checkAutoEnable->isChecked())
+    return DriveMode::Auto;
+  if (ui->checkDriveEnable->isChecked())
+    return DriveMode::Wasd;
+  return DriveMode::Off;
+}
+
+void MainWindow::setDriveMode(DriveMode m)
+{
+  // 기존 체크박스를 그대로 써서 Drive 탭과 항상 같은 상태 (서로 끄는 처리도 거기 있음)
+  if (m != DriveMode::Auto && !turn_keys_.isEmpty())
+  {
+    turn_keys_.clear();
+    ui->radioTurnStraight->setChecked(true);
+  }
+  switch (m)
+  {
+  case DriveMode::Off:
+    if (ui->checkAutoEnable->isChecked())
+      setAutoDrive(false);
+    ui->checkDriveEnable->setChecked(false); // stopDrive 호출됨
+    stopDrive(true);
+    break;
+  case DriveMode::Wasd:
+    if (ui->checkAutoEnable->isChecked())
+      setAutoDrive(false);
+    ui->checkDriveEnable->setChecked(true);
+    break;
+  case DriveMode::Auto:
+    ui->checkDriveEnable->setChecked(false);
+    setAutoDrive(true);
+    break;
+  }
+  refreshViewStatus();
+}
+
+void MainWindow::refreshViewStatus()
+{
+  if (!label_mode_)
+    return;
+  static const char *text[] = {"정지", "WASD 수동", "자동 주행"};
+  static const char *color[] = {"#555555", "#2980b9", "#2e9d4a"};
+  const int i = static_cast<int>(driveMode());
+  label_mode_->setText(QString("%1%2").arg(text[i], viewTabActive() ? "" : "   (키 조작은 View 탭에서)"));
+  label_mode_->setStyleSheet(QString("font-size: 18px; font-weight: bold; border-radius: 4px; color: white; "
+                                     "padding: 4px; background: %1;").arg(color[i]));
+  label_keys_->setText(driveMode() == DriveMode::Auto
+                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사  B 차단바   Esc 정지"
+                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사  B 차단바   Esc 정지");
+}
+
+void MainWindow::setTurnMomentary(int key, bool press)
+{
+  turn_keys_.removeAll(key);
+  if (press)
+    turn_keys_.append(key);
+  const int k = turn_keys_.isEmpty() ? 0 : turn_keys_.last();
+  QRadioButton *b = k == Qt::Key_A ? ui->radioTurnLeft : k == Qt::Key_D ? ui->radioTurnRight : ui->radioTurnStraight;
+  b->setChecked(true); // 라디오 버튼의 toggled에서 /mission/turn 발행
+}
+
+void MainWindow::setBarrier(bool on)
+{
+  if (on)
+  {
+    qnode->publishDriveStop();
+    barrier_timer_.start();
+  }
+  else
+    barrier_timer_.stop(); // 0.5초(drive.cmd_timeout_ms) 뒤 원래대로 FOLLOW
+  if (check_barrier_->isChecked() != on)
+  {
+    QSignalBlocker block(check_barrier_);
+    check_barrier_->setChecked(on);
+  }
+  showMission();
+}
+
+// View 탭에서의 키. 처리했으면 true (다른 위젯으로 안 넘김)
+bool MainWindow::handleViewKey(QKeyEvent *ke, bool press)
+{
+  const int k = ke->key();
+  const bool repeat = ke->isAutoRepeat();
+  const DriveMode m = driveMode();
+
+  switch (k)
+  {
+  case Qt::Key_Space:
+    if (press && !repeat)
+      setDriveMode(m == DriveMode::Wasd ? DriveMode::Auto : DriveMode::Wasd);
+    return true;
+  case Qt::Key_Escape:
+    if (press && !repeat)
+    {
+      setDriveMode(DriveMode::Off);
+      setBarrier(false);
+    }
+    return true;
+  case Qt::Key_P:
+    if (press && !repeat)
+      ui->checkParking->toggle();
+    return true;
+  case Qt::Key_C:
+    if (press && !repeat)
+      check_construction_->toggle();
+    return true;
+  case Qt::Key_B:
+    if (press && !repeat)
+      setBarrier(!check_barrier_->isChecked());
+    return true;
+  case Qt::Key_A:
+  case Qt::Key_D:
+    if (m == DriveMode::Auto)
+    {
+      if (!repeat)
+        setTurnMomentary(k, press);
+      return true;
+    }
+    return false; // WASD 모드면 아래 기존 처리로
+  default:
+    return false;
+  }
 }
 
 // ───────── 파라미터 스핀박스 공통 ─────────
@@ -610,6 +849,10 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 {
   const bool press = ev->type() == QEvent::KeyPress;
 
+  if ((press || ev->type() == QEvent::KeyRelease) && viewTabActive() &&
+      handleViewKey(static_cast<QKeyEvent *>(ev), press))
+    return true;
+
   // 자동 주행 중 Space → 자동 주행 끄기
   if (press && ui->checkAutoEnable->isChecked())
   {
@@ -798,14 +1041,20 @@ void MainWindow::showPathSource(const QString &src)
 void MainWindow::showMission()
 {
   static const char *names[] = {"straight", "left", "right"};
-  ui->labelMission->setText(QString("turn: %1 | parking: %2")
+  QString cons = construction_ ? "ON" : "off";
+  if (construction_state_ != construction_)
+    cons += construction_state_ ? " (자동 진입)" : " (path_node 꺼짐)";
+  ui->labelMission->setText(QString("turn: %1 | parking: %2 | 공사: %3%4")
                                 .arg(names[std::clamp(turn_, 0, 2)])
-                                .arg(parking_ ? "ON" : "off"));
+                                .arg(parking_ ? "ON" : "off")
+                                .arg(cons)
+                                .arg(check_barrier_ && check_barrier_->isChecked() ? " | 차단바 정지" : ""));
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
   stopDrive(); // 주행 중에 창을 닫으면 정지 명령 전송
+  barrier_timer_.stop();
   if (ui->checkAutoEnable->isChecked())
     qnode->setBoolParam("drive.enable", false); // 테스트 중 GUI를 닫으면 자동 주행도 끔
   QMainWindow::closeEvent(event);

@@ -15,6 +15,7 @@
 #include <std_msgs/msg/bool.hpp>
 #include <opencv2/opencv.hpp>
 #include "tb_interfaces/msg/detection_array.hpp"
+#include "tb_interfaces/msg/drive_cmd.hpp"
 #endif
 #include <QThread>
 #include <QImage>
@@ -40,6 +41,8 @@ public:
   // ====== 미션
   void publishTurn(int turn); // 0 직진, 1 좌, 2 우
   void publishParking(bool on);
+  void publishConstruction(bool on); // /mission/construction (공사 구간 모드 수동 켜기/끄기)
+  void publishDriveStop();           // /drive/cmd STOP 한 번 (차단바 흉내: 10Hz 이상으로 계속 불러야 유지됨)
 
   // ====== UART (tb_uart_node: TB_Uart_RX로 명령 문자열 전송)
   void sendUart(const QString &cmd);  // "start", "quit" 등
@@ -74,6 +77,9 @@ private:
   // 미션
   rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr turn_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr parking_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr construction_state_sub_; // path_node가 실제로 공사 구간 모드인지
+  rclcpp::Publisher<tb_interfaces::msg::DriveCmd>::SharedPtr drive_cmd_pub_;
 
   // UART
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr uart_pub_;
@@ -112,6 +118,7 @@ Q_SIGNALS:
   void detectionsReceived(const QString &text);
   void turnReceived(int turn);
   void parkingReceived(bool on);
+  void constructionStateReceived(bool on); // /lane/construction (path_node 상태: 표지판 자동 진입 포함)
 
   // 파라미터
   void paramLoaded(const QString &name, int value);
