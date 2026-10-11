@@ -191,8 +191,8 @@ std::vector<std::string> QNode::pathParamNames()
           "path.brick_depth_mm", "path.brick_margin_mm", "path.brick_gap_mm", "path.det_max_age_ms", "path.mem_travel_mm",
           "path.max_dev_mm", "path.override_frames", "path.min_len_mm",
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm",
-          "path.con_lane_w_mm", "path.con_brick_w_mm", "path.con_brick_d_mm", "path.con_pass_mm",
-          "path.con_trans_mm", "path.con_spacing_mm", "path.con_exit_mm", "path.con_sign_frames"};
+          "path.con_lane_w_mm", "path.con_brick_w_mm", "path.con_brick_d_mm", "path.con_trans_mm",
+          "path.con_lead_mm", "path.con_hold_mm", "path.con_count", "path.con_exit_mm", "path.con_sign_frames"};
 }
 
 std::vector<std::string> QNode::driveParamNames(bool with_enable)

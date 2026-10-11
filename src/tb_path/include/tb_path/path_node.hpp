@@ -43,7 +43,9 @@ private:
     int last_msg_lane_w_ = -1;          // tb_line이 보낸 차선 폭 (공사 구간에서 덮어쓰므로 따로 기억)
 
     // 공사 구간 (construction.hpp). /mission/construction 수동 또는 표지판으로 자동 진입
-    void update_construction(const tb_interfaces::msg::LaneMask &msg, const std::array<double, 9> &h);
+    void update_construction(const tb_interfaces::msg::LaneMask &msg);
+    // 벽돌 박스·선 점을 계획기에 넣고 끝 판단. lines: 차선 마스크(BEV), H: 원본 → BEV
+    void step_construction(const rclcpp::Time &stamp, const cv::Mat &lines, const cv::Mat &valid, const cv::Mat &H);
     void draw_construction(cv::Mat &view) const;
     construction::Planner con_;
     bool con_manual_ = false, con_auto_ = false, con_done_ = false;
@@ -51,7 +53,7 @@ private:
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
     builtin_interfaces::msg::Time con_last_det_stamp_;
     int con_lane_w_mm_ = 560, con_sign_frames_ = 3;
-    std::vector<cv::Point2d> last_out_path_; // 직전 출력 경로 (진입 때 차선 방향 추정)
+    int cam_w_ = 640, cam_h_ = 480;     // YOLO 박스 좌표의 영상 크기 (박스가 영상 끝에서 잘렸는지 판단)
     bool con_on() const { return (con_manual_ || con_auto_) && !con_done_; }
 
     // 미션 (판단 노드 또는 ros2 topic pub 으로 받음)

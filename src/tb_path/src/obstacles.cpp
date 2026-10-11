@@ -9,9 +9,12 @@ namespace obstacles {
 namespace {
 
 // 벽돌 하나(q)의 줄마다 양 끝에서 바깥으로 gap 이내에 선이 있으면 그 사이를 채움
+// 줄마다만 채우면 선이 비스듬할 때 일부 줄만 이어져 얇은 틈이 남으므로,
+// 한쪽에서 찾은 (벽돌 끝, 선) 점들을 모아 볼록 다각형으로 통째로 채움
 void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap)
 {
     const cv::Rect bb = cv::boundingRect(q);
+    std::vector<cv::Point> side_pts[2]; // [0] 오른쪽, [1] 왼쪽
     for (int y = bb.y; y < bb.y + bb.height; ++y)
     {
         const uchar *qr = q.ptr<uchar>(y);
@@ -30,15 +33,26 @@ void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap)
             if (lr[x])
             {
                 std::fill(wr + xr + 1, wr + x, uchar(255));
+                side_pts[0].push_back({xr, y});
+                side_pts[0].push_back({x, y});
                 break;
             }
         for (int x = xl - 1; x >= std::max(0, xl - gap); --x)
             if (lr[x])
             {
                 std::fill(wr + x + 1, wr + xl, uchar(255));
+                side_pts[1].push_back({xl, y});
+                side_pts[1].push_back({x, y});
                 break;
             }
     }
+    for (const auto &pts : side_pts)
+        if (pts.size() >= 4)
+        {
+            std::vector<cv::Point> hull;
+            cv::convexHull(pts, hull);
+            cv::fillConvexPoly(wall, hull, cv::Scalar(255));
+        }
 }
 
 } // namespace
