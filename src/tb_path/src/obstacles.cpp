@@ -2,6 +2,7 @@
 
 #include <opencv2/imgproc.hpp>
 #include <cmath>
+#include <algorithm>
 
 namespace obstacles {
 
@@ -16,10 +17,19 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
                                         {float(b.x + b.w), float(b.y + b.h)}};
         std::vector<cv::Point2f> dst;
         cv::perspectiveTransform(src, dst, H);
-        const cv::Point2f a = dst[0], c = dst[1];
+        cv::Point2f a = dst[0], c = dst[1];
 
-        // 둘 다 BEV 밖이면 무시 (너무 멀거나 옆)
-        if (!canvas.contains(cv::Point(a)) && !canvas.contains(cv::Point(c))) continue;
+        // 위쪽(멀리)으로 벗어난 건 맨 윗줄로 당겨서 그림. 옆으로 벗어난 것만 무시
+        const bool beyond_top = a.y < 0 && c.y < 0;
+        if (beyond_top)
+        {
+            if (std::max(a.x, c.x) < 0 || std::min(a.x, c.x) >= wall.cols)
+                continue; // 멀리 있으면서 옆으로도 벗어남 → 무시
+            a.y = 0;
+            c.y = 0;
+        }
+        else if (!canvas.contains(cv::Point(a)) && !canvas.contains(cv::Point(c)))
+            continue;
 
         // 아랫변 방향과, 로봇에서 멀어지는 방향(BEV 위쪽에 가까운 법선)
         cv::Point2f along = c - a;

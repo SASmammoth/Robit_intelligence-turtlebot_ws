@@ -42,6 +42,9 @@ struct Target
 // 첫 점이 이미 ld보다 멀면(사각지대) 첫 점을 목표로 한다.
 Target find_target(const std::vector<Pt> &path, double ld);
 
+// 경로에서 처음 크게 꺾이는 점과 꺾인 각도 (왼쪽 +)
+bool find_corner(const std::vector<Pt> &path, double min_turn, Pt &corner, double &turn);
+
 // 목표점 → (v, w). limit은 이번 주기 속도 상한 [m/s].
 // 경로 끝이 가까우면 decel로 멈출 수 있는 속도까지 낮추고, stop_dist 안이면 0.
 void command(const Target &t, const Params &p, double limit, double &v, double &w);
@@ -87,8 +90,11 @@ public:
     {
         double v = 0.0, w = 0.0; // 원하는 속도 (가감속 제한 전)
         Target tg;
-        bool held = false;       // 마지막 경로를 붙잡고 가는 중
-        const char *why = "";    // 정지 이유 (움직이면 "")
+        bool held = false;        // 마지막 경로를 붙잡고 가는 중
+        const char *why = "";     // 정지 이유 (움직이면 "")
+        bool has_corner = false;  // 경로에 큰 꺾임이 있음
+        Pt corner;                // 꺾이는 지점 (base_link)
+        double corner_turn = 0.0; // 꺾인 각도 [rad], 왼쪽 +
     };
 
     void reset();

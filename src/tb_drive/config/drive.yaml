@@ -2,9 +2,10 @@ drive_node:
   ros__parameters:
     drive:
 
-      pivot_enter_deg: 55    # 목표점이 이보다 옆이면 제자리 회전 시작
-      pivot_exit_deg: 15     # 이 안으로 들어오면 다시 전진
-      pivot_w_deg_s: 60
+      pivot_enter_deg: 70      # 이보다 크게 꺾이는 코너에서만 멈추고 피봇 (일반 커브는 그냥 주행)
+      pivot_exit_deg: 15
+      pivot_w_deg_s: 90
+      pivot_fallback_deg: 70   # 코너를 못 찾았는데 목표점이 이보다 옆이면 바로 피봇
 
       # ── 안전
       enable: false          # 켜기 전까지 항상 0 발행. GUI나 ros2 param set으로 켬

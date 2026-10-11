@@ -146,7 +146,7 @@ using Chooser = std::function<int(cv::Point cur, cv::Point2d dir_in,
                                   const std::vector<cv::Point> &ends)>;
 
 std::vector<cv::Point> trace(const cv::Mat &s, cv::Point start, int look, int max_len,
-                             const Chooser &choose)
+                             const Chooser &choose , Turn turn)
 {
     cv::Mat vis(s.size(), CV_8U, cv::Scalar(0));
     std::vector<cv::Point> path{start};
@@ -195,7 +195,13 @@ std::vector<cv::Point> trace(const cv::Mat &s, cv::Point start, int look, int ma
                 //  (시작점이 선 중간일 때의 뒤쪽 방향, 계단 모양 옆 픽셀에서 생기는 가짜 가지)
                 std::vector<int> fwd;
                 for (int r : rep)
-                    if (std::abs(turn_angle(din, cv::Point2d(pv[r].back() - cur))) < 2.36) fwd.push_back(r);
+                {
+                    const double a = turn_angle(din, cv::Point2d(pv[r].back() - cur));
+                    const bool turn_side = (turn == Turn::Left && a > 0) || (turn == Turn::Right && a < 0);
+                    const double lim = turn_side ? 2.9 : 2.36; // 명령 방향은 약 165°까지 허용
+                    if (std::abs(a) < lim)
+                        fwd.push_back(r);
+                }
                 if (fwd.empty()) fwd = rep;
 
                 int pick = fwd[0];
@@ -332,7 +338,7 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
 
         const cv::Point start(sk.seed.x / K, sk.seed.y / K);
         const int look = std::max(3, int(p.lookahead_m / (g.my() * K)));
-        auto px = trace(sk.skel, start, look, sk.skel.rows * sk.skel.cols, choose);
+        auto px = trace(sk.skel, start, look, sk.skel.rows * sk.skel.cols, choose, turn);
 
         // 사각지대 안을 오래 지나는 경로는 거기서 자름.
         // 사각지대에서는 차선이 안 보여서 영역이 벽 너머로 샐 수 있음 (막다른 길 끝 등).

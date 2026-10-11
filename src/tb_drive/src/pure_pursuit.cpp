@@ -27,8 +27,6 @@ Pt point_along(const std::vector<Pt> &path, size_t s, double arc)
 } // namespace
 
 
-
-
 Target find_target(const std::vector<Pt> &path, double ld)
 {
     Target t;
@@ -88,7 +86,31 @@ Target find_target(const std::vector<Pt> &path, double ld)
     return t;
 }
 
-
+bool find_corner(const std::vector<Pt> &p, double min_turn, Pt &corner, double &turn)
+{
+    if (p.size() < 8)
+        return false;
+    auto heading = [&](size_t i)
+    { return std::atan2(p[i + 1].y - p[i].y, p[i + 1].x - p[i].x); };
+    const size_t win = 4; // 점 간격 2cm × 4 = 8cm 구간에서 방향 비교
+    for (size_t i = 0; i + win + 1 < p.size(); ++i)
+    {
+        if (p[i].x < -0.02)
+            continue; // 이미 지나간 부분
+        const double d = std::remainder(heading(i + win) - heading(i), 2 * M_PI);
+        if (std::abs(d) > min_turn)
+        {
+            size_t j = i + win; // 꺾임이 끝날 때까지 따라가서 전체 회전각 계산
+            while (j + 2 < p.size() &&
+                   std::abs(std::remainder(heading(j + 1) - heading(j), 2 * M_PI)) > 0.05)
+                ++j;
+            corner = p[i + win / 2];
+            turn = std::remainder(heading(j) - heading(i), 2 * M_PI);
+            return true;
+        }
+    }
+    return false;
+}
 
 void command(const Target &t, const Params &p, double limit, double &v, double &w)
 {
@@ -214,6 +236,19 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
         hist_.delta(stamp, t, dx, dy, dth);
         pts = shift_path(pts, dx, dy, dth);
     }
+
+    o.has_corner = find_corner(pts, 0.6, o.corner, o.corner_turn); // 8cm 안에서 35° 넘게 꺾이면 코너
+
+    struct Out
+    {
+        double v = 0.0, w = 0.0;
+        Target tg;
+        bool held = false;
+        const char *why = "";
+        bool has_corner = false;  // 경로에 큰 꺾임이 있음
+        Pt corner;                // 꺾이는 지점 (base_link)
+        double corner_turn = 0.0; // 꺾인 각도 [rad], 왼쪽 +
+    };
 
     const double ld = std::clamp(p.ld_time * std::abs(v_now), p.ld_min, p.ld_max);
     o.tg = find_target(pts, ld);

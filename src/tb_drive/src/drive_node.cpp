@@ -234,24 +234,56 @@ void DriveNode::on_timer()
             vd = o.v;
             wd = o.w;
 
-            // 목표점이 옆으로 많이 틀어져 있으면 제자리 회전
-            const double ang = std::atan2(o.tg.p.y, o.tg.p.x); // 왼쪽 +
-            if (!pivoting_ && o.tg.ok && std::abs(ang) > pivot_enter_)
+
+            // 코너를 지난 주기 이동만큼 옮김 (사각지대로 들어가도 추적)
+            if (phase_ != Phase::Follow)
+                corner_ = tb_drive::shift_path({corner_}, lim_.v * dt, 0.0, lim_.w * dt)[0];
+
+            const double tg_ang = o.tg.ok ? std::atan2(o.tg.p.y, o.tg.p.x) : 0.0;
+            switch (phase_)
             {
-                pivoting_ = true;
-                pivot_dir_ = ang > 0 ? 1 : -1; // 회전 중에는 방향 고정
+            case Phase::Follow:
+                if (o.has_corner && std::abs(o.corner_turn) > pivot_enter_ && o.corner.x < 0.35)
+                {
+                    phase_ = Phase::Approach;
+                    corner_ = o.corner;
+                    corner_turn_ = o.corner_turn;
+                }
+                else if (o.tg.ok && std::abs(tg_ang) > pivot_fallback_) // 안전장치: 코너 못 찾았는데 목표가 옆
+                {
+                    phase_ = Phase::Pivot;
+                    corner_turn_ = tg_ang;
+                    pivot_done_ = 0.0;
+                }
+                break;
+
+            case Phase::Approach: // 느리게 코너까지 전진
+            {
+                vd = std::max(follower_.p.v_min, 0.5 * follower_.p.v_max);
+                const double d2 = std::max(0.0025, corner_.x * corner_.x + corner_.y * corner_.y);
+                wd = vd * 2.0 * corner_.y / d2;
+                if (corner_.x <= 0.01)
+                {
+                    phase_ = Phase::Pivot;
+                    pivot_done_ = 0.0;
+                }
+                break;
             }
-            if (pivoting_ && (!o.tg.ok || std::abs(ang) < pivot_exit_))
-                pivoting_ = false;
-            if (pivoting_)
-            {
+
+            case Phase::Pivot: // 제자리에서 corner_turn_ 만큼
                 vd = 0.0;
-                wd = pivot_dir_ * pivot_w_;
-                why = "pivot";
+                wd = std::copysign(pivot_w_, corner_turn_);
+                pivot_done_ += std::abs(lim_.w) * dt;
+                if ((pivot_done_ >= std::abs(corner_turn_) - 0.26 && std::abs(tg_ang) < pivot_exit_) ||
+                    pivot_done_ > std::abs(corner_turn_) + 0.5) // 과회전 방지
+                    phase_ = Phase::Follow;
+                break;
             }
+            if (phase_ != Phase::Follow)
+                why = phase_ == Phase::Approach ? "approach" : "pivot";
         }
         if (mode != DriveCmd::FOLLOW)
-            pivoting_ = false;
+            phase_ = Phase::Follow;
 
         // ====== 가감속 제한 → PSD (전진만 막고 즉시 정지)
         lim_.step(vd, wd, dt, follower_.p);
