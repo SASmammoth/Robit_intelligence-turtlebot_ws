@@ -1219,6 +1219,123 @@
           </item>
          </layout>
         </widget>
+        <widget class="QWidget" name="tab_3">
+         <attribute name="title">
+          <string>Drive</string>
+         </attribute>
+         <layout class="QGridLayout" name="gridLayoutTab3" columnstretch="2,5">
+          <item row="0" column="0">
+           <widget class="QGroupBox" name="groupAutoDrive">
+            <property name="title">
+             <string>자동 주행 (tb_drive)</string>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayoutAutoDrive">
+             <item>
+              <widget class="QLabel" name="labelDriveMode">
+               <property name="minimumSize">
+                <size>
+                 <width>0</width>
+                 <height>32</height>
+                </size>
+               </property>
+               <property name="styleSheet">
+                <string>font-size: 16px; font-weight: bold; border-radius: 4px; background: #555; color: white;</string>
+               </property>
+               <property name="text">
+                <string>drive: (no data)</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignmentFlag::AlignCenter</set>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="labelDriveVel">
+               <property name="text">
+                <string>v: -   w: -</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="labelDriveInfo">
+               <property name="styleSheet">
+                <string>color: gray;</string>
+               </property>
+               <property name="text">
+                <string>ld: -   end: -</string>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="checkAutoEnable">
+               <property name="text">
+                <string>자동 주행 활성화 (Space: 끄기)</string>
+               </property>
+               <property name="focusPolicy">
+                <enum>Qt::FocusPolicy::NoFocus</enum>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="btnAutoStop">
+               <property name="text">
+                <string>자동 주행 정지</string>
+               </property>
+               <property name="styleSheet">
+                <string>font-weight: bold; color: #c0392b;</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="checkRequireCmd">
+               <property name="text">
+                <string>tb_brain 명령 필요 (require_cmd)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="checkLatencyComp">
+               <property name="text">
+                <string>지연 보정 (latency_comp)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="checkPsdEnable">
+               <property name="text">
+                <string>PSD 비상정지 (psd.enable)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="verticalSpacerAutoDrive">
+               <property name="orientation">
+                <enum>Qt::Orientation::Vertical</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>20</width>
+                 <height>0</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+            </layout>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QGroupBox" name="groupDriveParams">
+            <property name="title">
+             <string>tb_drive 파라미터</string>
+            </property>
+            <layout class="QGridLayout" name="gridDriveParams"/>
+           </widget>
+          </item>
+         </layout>
+        </widget>
        </widget>
       </item>
      </layout>

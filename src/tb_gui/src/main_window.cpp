@@ -275,7 +275,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     if (!on)
       stopDrive();
     else
-      setFocus(); });
+    {
+      if (ui->checkAutoEnable->isChecked()) // 수동과 자동이 동시에 모터를 움직이지 않게
+        setAutoDrive(false);
+      setFocus();
+    } });
 
   // 한계치/회전 비율을 바꾸면 누르고 있는 키 기준으로 바로 다시 계산
   connect(ui->spinMaxSpeed, qOverload<int>(&QSpinBox::valueChanged), this, [this](int)
@@ -299,6 +303,165 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
       stopDrive(); });
 
   connect(qnode, &QNode::uartReceived, this, &MainWindow::showUart);
+
+  // ====== 자동 주행 (Tab 3)
+  setupDriveTab();
+}
+
+// ───────── 자동 주행 (tb_drive) ─────────
+
+void MainWindow::setupDriveTab()
+{
+  // 파라미터 스핀박스: 이름, 표시 이름, 단위, 범위 (tb_drive의 declare_int 범위와 같게)
+  struct DriveSpinDef
+  {
+    const char *name, *text, *suffix;
+    int min, max, step;
+  };
+  static const DriveSpinDef defs[] = {
+      {"drive.v_max_mm_s", "최고 속도", " mm/s", 0, 1000, 10},
+      {"drive.v_min_mm_s", "최저 속도", " mm/s", 0, 500, 5},
+      {"drive.w_max_deg_s", "최대 회전", " °/s", 0, 720, 5},
+      {"drive.accel_mm_s2", "가속", " mm/s²", 10, 5000, 50},
+      {"drive.decel_mm_s2", "감속", " mm/s²", 10, 5000, 50},
+      {"drive.w_accel_deg_s2", "회전 가속", " °/s²", 10, 5000, 30},
+      {"drive.ld_min_mm", "lookahead 최소", " mm", 30, 1000, 10},
+      {"drive.ld_max_mm", "lookahead 최대", " mm", 30, 1500, 10},
+      {"drive.ld_time_ms", "lookahead 시간", " ms", 0, 5000, 100},
+      {"drive.curv_slow_mm", "커브 감속", " mm", 0, 1000, 10},
+      {"drive.stop_dist_mm", "경로 끝 정지", " mm", 0, 300, 5},
+      {"drive.hold_ms", "경로 유지", " ms", 0, 3000, 50},
+      {"drive.path_timeout_ms", "경로 유효", " ms", 50, 3000, 50},
+      {"drive.cmd_timeout_ms", "명령 유효", " ms", 50, 3000, 50},
+      {"drive.weak_src_pct", "약한 경로 속도", " %", 0, 100, 5},
+      {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},
+      {"drive.control_hz", "제어 주기", " Hz", 5, 100, 5},
+  };
+  constexpr int COLS = 3; // (이름, 스핀박스) 묶음 3개씩 한 줄
+
+  int i = 0;
+  for (const auto &d : defs)
+  {
+    const QString name = d.name;
+    auto *label = new QLabel(d.text, ui->groupDriveParams);
+    label->setToolTip(name);
+    auto *sp = new QSpinBox(ui->groupDriveParams);
+    sp->setRange(d.min, d.max);
+    sp->setSingleStep(d.step);
+    sp->setSuffix(d.suffix);
+    sp->setKeyboardTracking(false);
+    sp->setToolTip(name);
+    ui->gridDriveParams->addWidget(label, i / COLS, (i % COLS) * 2);
+    ui->gridDriveParams->addWidget(sp, i / COLS, (i % COLS) * 2 + 1);
+    global_widgets_[name] = {nullptr, nullptr, sp}; // paramLoaded → applyGlobalParam 로 동기화
+    connect(sp, qOverload<int>(&QSpinBox::valueChanged), this, [this, name](int v)
+            { queueParam(name, v); });
+    ++i;
+  }
+  ui->gridDriveParams->setRowStretch((i + COLS - 1) / COLS, 1);
+
+  // bool 파라미터 체크박스
+  bool_widgets_ = {{"drive.require_cmd", ui->checkRequireCmd},
+                   {"drive.latency_comp", ui->checkLatencyComp},
+                   {"drive.psd.enable", ui->checkPsdEnable}};
+  for (auto it = bool_widgets_.begin(); it != bool_widgets_.end(); ++it)
+  {
+    const QString name = it.key();
+    QCheckBox *c = it.value();
+    connect(c, &QCheckBox::toggled, this, [this, name, c](bool on)
+            {
+      if (!qnode->setBoolParam(name, on))
+      {
+        QSignalBlocker block(c);
+        c->setChecked(!on);
+        ui->labelDriveInfo->setText("drive_node 연결 안 됨");
+      } });
+  }
+
+  // 활성화 체크박스 / 정지 버튼
+  connect(ui->checkAutoEnable, &QCheckBox::toggled, this, [this](bool on)
+          { setAutoDrive(on); });
+  connect(ui->btnAutoStop, &QPushButton::clicked, this, [this]
+          { setAutoDrive(false); });
+
+  // 노드 값 → 화면 (다른 곳에서 ros2 param set 해도 반영)
+  connect(qnode, &QNode::boolParamLoaded, this, [this](const QString &name, bool on)
+          {
+    QCheckBox *c = name == "drive.enable" ? ui->checkAutoEnable : bool_widgets_.value(name, nullptr);
+    if (!c)
+      return;
+    QSignalBlocker block(c);
+    c->setChecked(on);
+    if (name == "drive.enable" && on && ui->checkDriveEnable->isChecked())
+      ui->checkDriveEnable->setChecked(false); });
+
+  // 상태 표시
+  connect(qnode, &QNode::driveStateReceived, this, &MainWindow::showDriveState);
+  drive_state_timeout_.setSingleShot(true);
+  drive_state_timeout_.setInterval(1000);
+  connect(&drive_state_timeout_, &QTimer::timeout, this, [this]
+          { showDriveState(""); });
+  showDriveState("");
+}
+
+void MainWindow::setAutoDrive(bool on)
+{
+  if (on && ui->checkDriveEnable->isChecked())
+    ui->checkDriveEnable->setChecked(false); // WASD 끄기 (stopDrive 호출됨)
+
+  const bool ok = qnode->setBoolParam("drive.enable", on);
+  QSignalBlocker block(ui->checkAutoEnable);
+  // 켜기에 실패하면 체크 해제. 끄기는 실패해도 화면은 꺼짐으로 두고 경고만
+  ui->checkAutoEnable->setChecked(on && ok);
+  if (!ok)
+    ui->labelDriveInfo->setText(on ? "켜기 실패: drive_node 연결 안 됨"
+                                   : "끄기 실패: drive_node 연결 안 됨 (로봇 확인!)");
+}
+
+// "FOLLOW src=live v=0.142 w=0.31 ld=0.25 end=0.48 HOLD stop:path_end"
+void MainWindow::showDriveState(const QString &text)
+{
+  static const QMap<QString, QString> colors = {
+      {"FOLLOW", "#2e9d4a"}, {"STOP", "#e67e22"}, {"TWIST", "#2980b9"}, {"DISABLED", "#555555"}};
+
+  if (text.isEmpty())
+  {
+    ui->labelDriveMode->setText("drive: (no data)");
+    ui->labelDriveMode->setStyleSheet(
+        "font-size: 16px; font-weight: bold; border-radius: 4px; color: white; background: #555555;");
+    ui->labelDriveVel->setText("v: -   w: -");
+    return;
+  }
+  drive_state_timeout_.start();
+
+  const QStringList t = text.split(' ', Qt::SkipEmptyParts);
+  const QString mode = t.value(0);
+  QMap<QString, QString> kv;
+  QString stop;
+  bool hold = false;
+  for (int i = 1; i < t.size(); ++i)
+  {
+    if (t[i] == "HOLD")
+      hold = true;
+    else if (t[i].startsWith("stop:"))
+      stop = t[i].mid(5);
+    else if (const int eq = t[i].indexOf('='); eq > 0)
+      kv[t[i].left(eq)] = t[i].mid(eq + 1);
+  }
+
+  QString title = mode;
+  if (!stop.isEmpty())
+    title += "  (" + stop + ")";
+  else if (hold)
+    title += "  (HOLD)";
+  ui->labelDriveMode->setText(title);
+  ui->labelDriveMode->setStyleSheet(
+      QString("font-size: 16px; font-weight: bold; border-radius: 4px; color: white; background: %1;")
+          .arg(colors.value(mode, "#555555")));
+
+  ui->labelDriveVel->setText(QString("v: %1 m/s   w: %2 rad/s").arg(kv.value("v", "-"), kv.value("w", "-")));
+  ui->labelDriveInfo->setText(QString("src: %1   ld: %2 m   end: %3 m")
+                                  .arg(kv.value("src", "-"), kv.value("ld", "-"), kv.value("end", "-")));
 }
 
 // ───────── 주행 (WASD) ─────────
@@ -306,6 +469,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 {
   const bool press = ev->type() == QEvent::KeyPress;
+
+  // 자동 주행 중 Space → 자동 주행 끄기
+  if (press && ui->checkAutoEnable->isChecked())
+  {
+    auto *ke = static_cast<QKeyEvent *>(ev);
+    if (ke->key() == Qt::Key_Space && !ke->isAutoRepeat())
+    {
+      setAutoDrive(false);
+      return true;
+    }
+  }
+
   if ((press || ev->type() == QEvent::KeyRelease) && ui->checkDriveEnable->isChecked())
   {
     auto *ke = static_cast<QKeyEvent *>(ev);
@@ -496,6 +671,8 @@ QString MainWindow::paramFile() const
 void MainWindow::closeEvent(QCloseEvent *event)
 {
   stopDrive(); // 주행 중에 창을 닫으면 정지 명령 전송
+  if (ui->checkAutoEnable->isChecked())
+    qnode->setBoolParam("drive.enable", false); // 테스트 중 GUI를 닫으면 자동 주행도 끔
   QMainWindow::closeEvent(event);
 }
 

@@ -1091,6 +1091,130 @@
               </item>
              </layout>
             </item>
+            <item row="0" column="2" rowspan="2">
+             <widget class="QGroupBox" name="groupDrive">
+              <property name="title">
+               <string>주행 (WASD)</string>
+              </property>
+              <layout class="QVBoxLayout" name="verticalLayoutDrive">
+               <item>
+                <widget class="QCheckBox" name="checkDriveEnable">
+                 <property name="text">
+                  <string>WASD 주행 활성화 (Space: 정지)</string>
+                 </property>
+                 <property name="focusPolicy">
+                  <enum>Qt::FocusPolicy::NoFocus</enum>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <layout class="QGridLayout" name="gridLayoutDrive" columnstretch="5,3">
+                 <item row="0" column="0">
+                  <widget class="QLabel" name="textLabelMaxSpeed">
+                   <property name="text">
+                    <string>속도 한계치</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="0" column="1">
+                  <widget class="QSpinBox" name="spinMaxSpeed">
+                   <property name="minimum">
+                    <number>0</number>
+                   </property>
+                   <property name="maximum">
+                    <number>1000</number>
+                   </property>
+                   <property name="singleStep">
+                    <number>10</number>
+                   </property>
+                   <property name="value">
+                    <number>100</number>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="0">
+                  <widget class="QLabel" name="textLabelTurnRatio">
+                   <property name="text">
+                    <string>회전 비율 (%)</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item row="1" column="1">
+                  <widget class="QSpinBox" name="spinTurnRatio">
+                   <property name="minimum">
+                    <number>0</number>
+                   </property>
+                   <property name="maximum">
+                    <number>100</number>
+                   </property>
+                   <property name="singleStep">
+                    <number>5</number>
+                   </property>
+                   <property name="value">
+                    <number>50</number>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <layout class="QHBoxLayout" name="horizontalLayoutDriveBtn">
+                 <item>
+                  <widget class="QPushButton" name="btnUartStart">
+                   <property name="text">
+                    <string>Start</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="btnUartQuit">
+                   <property name="text">
+                    <string>Quit</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QPushButton" name="btnDriveStop">
+                   <property name="text">
+                    <string>정지</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </item>
+               <item>
+                <widget class="QLabel" name="labelDriveCmd">
+                 <property name="text">
+                  <string>cmd  L: 0   R: 0</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLabel" name="labelUartState">
+                 <property name="styleSheet">
+                  <string>color: gray; font-weight: bold;</string>
+                 </property>
+                 <property name="text">
+                  <string>STM32: -</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLabel" name="labelUartLog">
+                 <property name="styleSheet">
+                  <string>color: gray;</string>
+                 </property>
+                 <property name="text">
+                  <string>-</string>
+                 </property>
+                 <property name="wordWrap">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
            </layout>
           </item>
          </layout>

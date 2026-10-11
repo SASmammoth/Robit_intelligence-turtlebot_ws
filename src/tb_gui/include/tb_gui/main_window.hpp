@@ -80,6 +80,13 @@ private:
   QSet<int> drive_keys_;
   int drive_l_ = 0, drive_r_ = 0; // 마지막으로 보낸 값
 
+  // 자동 주행 (tb_drive, Tab 3)
+  void setupDriveTab();                       // 파라미터 스핀박스 생성 + 연결
+  void setAutoDrive(bool on);                 // drive.enable 전송 (실패하면 체크 해제)
+  void showDriveState(const QString &text);   // /drive/state 표시
+  QMap<QString, QCheckBox *> bool_widgets_;   // drive.require_cmd 등
+  QTimer drive_state_timeout_;                // 1초 넘게 안 오면 회색
+
   // 공통
   QMap<QString, int> pending_;
   QTimer send_timer_;
