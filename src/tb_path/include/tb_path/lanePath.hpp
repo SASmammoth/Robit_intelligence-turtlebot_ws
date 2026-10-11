@@ -59,6 +59,11 @@ public:
 
     void reset() { mem_.clear(); suspicious_ = 0; }
 
+    // 기억한 경로를 지금 자세로 옮겨서, BEV 아래쪽에 처음 들어오는 점 (스켈레톤 시드 힌트).
+    // 커브에서는 BEV 하단 중앙이 차선 바깥에 놓여서, 그 근처에서 시드를 찾으면
+    // 선 너머 영역을 도로로 잡음. 로봇이 실제로 따라오던 경로의 연장선에서 찾으면 안 넘어감
+    bool predict_seed(const Pose2D &pose, const Geo &g, cv::Point &bev_px) const;
+
 private:
     std::vector<cv::Point2d> mem_;  // 기억한 경로 (월드 좌표)
     Pose2D mem_pose_;               // 기억을 마지막으로 갱신한 자세

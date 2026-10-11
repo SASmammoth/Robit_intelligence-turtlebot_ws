@@ -405,6 +405,26 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
     return out;
 }
 
+bool Tracker::predict_seed(const Pose2D &pose, const Geo &g, cv::Point &bev_px) const
+{
+    if (mem_.size() < 2)
+        return false;
+    if (std::hypot(pose.x - mem_pose_.x, pose.y - mem_pose_.y) > p.mem_travel_m)
+        return false; // 기억이 너무 오래됨 (추측항법 오차가 큼)
+    const double first_row_x = g.bottom_m + 3 * g.my(); // BEV 맨 아랫줄 바로 위
+    for (const auto &w : mem_) {
+        const cv::Point2d r = to_robot(w, pose);
+        if (r.x < first_row_x)
+            continue; // 아직 사각지대
+        const cv::Point2d b = robot_to_bev(r, g);
+        if (b.x < 0 || b.x >= g.bev_size || b.y < g.bev_size * 0.7)
+            return false; // 옆으로 벗어났거나 너무 멀리서 처음 보임 → 하단 중앙 탐색에 맡김
+        bev_px = {cvRound(b.x), cvRound(b.y)};
+        return true;
+    }
+    return false;
+}
+
 void draw_path(cv::Mat &bev, const Output &o, const Geo &g)
 {
     if (o.path.size() < 2) return;

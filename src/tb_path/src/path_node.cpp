@@ -241,7 +241,14 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     }
 
     // ====== 스켈레톤 → 경로
-    const lane_skel::Result skel = lane_skel::build(wall, valid, skel_p_, &last_seed_);
+    // 시드 힌트: 기억 경로의 연장선(움직임 반영) > 직전 시드 > 하단 중앙
+    // 기억 경로로 예측한 점이 있으면 시드·시작점 모두 그 근처에서 고름
+    cv::Point seed_hint = last_seed_, predicted;
+    const bool has_pred = tracker_.predict_seed(pose_, geo_, predicted);
+    if (has_pred)
+        seed_hint = predicted;
+    const lane_skel::Result skel = lane_skel::build(wall, valid, skel_p_, &seed_hint,
+                                                    has_pred ? &predicted : nullptr);
     last_seed_ = skel.ok ? skel.seed : cv::Point(-1, -1);
 
     const auto turn = static_cast<lane_path::Turn>(std::min<uint8_t>(turn_, 2));

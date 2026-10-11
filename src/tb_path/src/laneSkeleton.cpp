@@ -250,6 +250,16 @@ cv::Point keep_nearest_component(cv::Mat &s, cv::Point anchor)
     return best;
 }
 
+// a→b 직선이 차선 픽셀을 지나는지 (선 두께의 일부만 스쳐도 2px 이상이면 넘은 것으로 봄)
+bool crosses_lane(const cv::Mat &lane, cv::Point a, cv::Point b)
+{
+    cv::LineIterator it(lane, a, b, 8);
+    int hits = 0;
+    for (int i = 0; i < it.count; ++i, ++it)
+        if (**it && ++hits >= 2) return true;
+    return false;
+}
+
 bool find_seed(const cv::Mat &cand, const cv::Rect &img, const cv::Point *hint, cv::Point &seed)
 {
     if (hint) {                                             // 직전 프레임 위치 주변
@@ -292,7 +302,8 @@ void remove_dashes(cv::Mat &mask, int max_len)
     }
 }
 
-Result build(const cv::Mat &lane, const cv::Mat &valid, const Params &p, const cv::Point *seed_hint)
+Result build(const cv::Mat &lane, const cv::Mat &valid, const Params &p, const cv::Point *seed_hint,
+             const cv::Point *anchor_hint)
 {
     Result r;
     const int K = std::max(1, p.scale);
@@ -349,8 +360,26 @@ Result build(const cv::Mat &lane, const cv::Mat &valid, const Params &p, const c
     cv::Mat out = skel(img).clone();
     // 기준은 항상 로봇 위치(화면 하단 중앙). 직전 시드를 기준으로 하면 프레임마다 옆으로 밀려남
     const cv::Point anchor(out.cols / 2, out.rows - 1);
-    const cv::Point nearest = keep_nearest_component(out, anchor);
+    const cv::Mat skel_all = out.clone();
+    cv::Point nearest = keep_nearest_component(out, anchor);
     if (nearest.x < 0) return r;
+
+    // 커브에서는 하단 중앙이 차선 밖에 놓여, 선 너머 중심선이 가장 가까워질 수 있음.
+    // 이동량으로 예측한 점(anchor_hint)과 고른 시작점 사이에 차선이 있으면 선 너머로 넘어간 것
+    // → 예측점에서 가장 가까운 중심선으로 다시 고름. 평소(사이에 선 없음)에는 기존과 같음
+    if (anchor_hint && anchor_hint->x >= 0) {
+        const cv::Mat lane_img = ln(img);
+        const cv::Point ah(std::clamp(anchor_hint->x / K, 0, out.cols - 1),
+                           std::clamp(anchor_hint->y / K, 0, out.rows - 1));
+        if (crosses_lane(lane_img, ah, nearest)) {
+            cv::Mat alt = skel_all.clone();
+            const cv::Point n2 = keep_nearest_component(alt, ah);
+            if (n2.x >= 0 && !crosses_lane(lane_img, ah, n2)) {
+                out = alt;
+                nearest = n2;
+            }
+        }
+    }
 
     // 7) 결과 정리 (끝점/분기점은 BEV 좌표로)
     cv::Mat pad;

@@ -31,8 +31,11 @@ void remove_dashes(cv::Mat &mask, int max_len);
 
 // lane: BEV 차선 마스크(흰색|노란색), valid: make_valid_mask 결과
 // seed_hint: 직전 프레임 Result::seed (없으면 nullptr → 화면 하단 중앙에서 찾음)
+// anchor_hint: 경로 시작점을 고를 기준 (BEV 좌표, 없으면 화면 하단 중앙 = 로봇 정면).
+//   커브에서는 하단 중앙이 차선 밖에 놓여 선 너머 중심선이 더 가까워지므로,
+//   기억 경로로 예측한 점을 주면 그 근처 중심선에서 시작함
 Result build(const cv::Mat &lane, const cv::Mat &valid, const Params &p,
-             const cv::Point *seed_hint = nullptr);
+             const cv::Point *seed_hint = nullptr, const cv::Point *anchor_hint = nullptr);
 
 // 디버그 그림: 사각지대 회색, 도로 영역 푸른 틴트, 중심선 민트, 분기점 주황, 끝점 빨강
 void draw_debug(cv::Mat &bev_bgr, const cv::Mat &valid, const Result &r, int scale);
