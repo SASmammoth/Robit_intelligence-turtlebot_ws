@@ -6,9 +6,48 @@
 
 namespace obstacles {
 
-int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
-               double depth_px, double margin_px)
+namespace {
+
+// 벽돌 하나(q)의 줄마다 양 끝에서 바깥으로 gap 이내에 선이 있으면 그 사이를 채움
+void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap)
 {
+    const cv::Rect bb = cv::boundingRect(q);
+    for (int y = bb.y; y < bb.y + bb.height; ++y)
+    {
+        const uchar *qr = q.ptr<uchar>(y);
+        const uchar *lr = lines.ptr<uchar>(y);
+        uchar *wr = wall.ptr<uchar>(y);
+        int xl = -1, xr = -1;
+        for (int x = bb.x; x < bb.x + bb.width; ++x)
+            if (qr[x])
+            {
+                if (xl < 0) xl = x;
+                xr = x;
+            }
+        if (xl < 0)
+            continue;
+        for (int x = xr + 1; x <= std::min(wall.cols - 1, xr + gap); ++x)
+            if (lr[x])
+            {
+                std::fill(wr + xr + 1, wr + x, uchar(255));
+                break;
+            }
+        for (int x = xl - 1; x >= std::max(0, xl - gap); --x)
+            if (lr[x])
+            {
+                std::fill(wr + x + 1, wr + xl, uchar(255));
+                break;
+            }
+    }
+}
+
+} // namespace
+
+int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
+               double depth_px, double margin_px, const cv::Mat *lines, double gap_px)
+{
+    const bool close = lines && !lines->empty() && gap_px >= 1.0;
+    cv::Mat q;
     int n = 0;
     const cv::Rect canvas(0, 0, wall.cols, wall.rows);
     for (const auto &b : boxes) {
@@ -44,6 +83,13 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
         const std::vector<cv::Point> quad = {
             cv::Point(a - m), cv::Point(c + m), cv::Point(c + m + d), cv::Point(a - m + d)};
         cv::fillConvexPoly(wall, quad, cv::Scalar(255));
+        if (close)
+        {
+            q.create(wall.size(), CV_8U);
+            q.setTo(0);
+            cv::fillConvexPoly(q, quad, cv::Scalar(255));
+            close_gaps(wall, q, *lines, int(std::lround(gap_px)));
+        }
         ++n;
     }
     return n;

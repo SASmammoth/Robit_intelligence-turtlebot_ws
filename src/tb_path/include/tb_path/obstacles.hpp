@@ -11,8 +11,12 @@ struct Box { int x, y, w, h; };
 
 // H: 원본 → BEV (CV_64F 3x3), wall: BEV 크기 CV_8U (여기에 255로 그림)
 // margin_px: 박스 좌우로 더 넓히는 폭 (탐지 박스 오차 + 로봇 폭 여유)
+// lines: 차선(흰·노랑) 마스크. 주면 벽돌 양 끝과 차선 사이 gap_px 이하 틈을 막음
+//   (YOLO 박스는 항상 수평이라 BEV 벽도 수평. 곡선에서 비스듬히 선에 붙은 실제 벽돌과
+//    선 사이에 삼각형 틈이 생겨 스켈레톤이 그리로 빠짐. 로봇(21cm)이 못 지나는 틈은 벽으로 봐도 됨)
 // 반환: 실제로 그린 개수 (BEV 밖이면 안 그림)
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
-               double depth_px, double margin_px);
+               double depth_px, double margin_px,
+               const cv::Mat *lines = nullptr, double gap_px = 0.0);
 
 } // namespace obstacles

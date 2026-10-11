@@ -636,6 +636,7 @@ void MainWindow::setupParamTab()
        {
            {"path.brick_margin_mm", "좌우 여유", " mm", 0, 300, 5},
            {"path.brick_depth_mm", "앞뒤 길이", " mm", 0, 500, 5},
+           {"path.brick_gap_mm", "선까지 틈 막기", " mm", 0, 300, 10},
            {"path.det_max_age_ms", "탐지 유효", " ms", 0, 2000, 50},
        }},
       {"경로 기억·판단 (path_node)",

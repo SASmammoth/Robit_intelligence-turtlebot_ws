@@ -9,6 +9,7 @@ path_node:
     path:
       brick_depth_mm: 100    # ★ 벽돌 앞뒤 길이
       brick_margin_mm: 50   # ★ 박스 좌우 여유
+      brick_gap_mm: 120     # 벽돌 끝과 차선 사이 이보다 좁은 틈은 벽으로 막음 (곡선에서 수평 박스가 남기는 틈). 0=끔
       det_max_age_ms: 300
       mem_travel_mm: 600    # 기억만으로 갈 수 있는 최대 거리
       max_dev_mm: 50        # 새 경로가 기억과 이만큼 넘게 다르면 의심

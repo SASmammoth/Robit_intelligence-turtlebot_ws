@@ -72,6 +72,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("skel.dash_len", 40, 160);
     declare_int("path.brick_depth_mm", 60, 500);
     declare_int("path.brick_margin_mm", 30, 300);
+    declare_int("path.brick_gap_mm", 120, 300);   // 벽돌 끝과 차선 사이 이보다 좁은 틈은 막음 (0이면 안 막음)
     declare_int("path.det_max_age_ms", 300, 2000);
     declare_int("path.mem_travel_mm", 600, 3000);
     declare_int("skel.max_lane_thick", 20, 200);
@@ -126,6 +127,7 @@ void PathNode::reload_params()
     dash_len_ = get_parameter("skel.dash_len").as_int();
     brick_depth_mm_ = get_parameter("path.brick_depth_mm").as_int();
     brick_margin_mm_ = get_parameter("path.brick_margin_mm").as_int();
+    brick_gap_mm_ = get_parameter("path.brick_gap_mm").as_int();
     det_max_age_ms_ = get_parameter("path.det_max_age_ms").as_int();
     tracker_.p.mem_travel_m = get_parameter("path.mem_travel_mm").as_int() / 1000.0;
 
@@ -279,9 +281,11 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     if (!bricks.empty() && !con_on())
     {
         const cv::Mat H(3, 3, CV_64F, h.data());
+        const cv::Mat lines = wall.clone(); // 벽돌 그리기 전 차선만
         obstacles::draw_boxes(wall, H, bricks,
                               brick_depth_mm_ / 1000.0 / geo_.m_per_px_y,
-                              brick_margin_mm_ / 1000.0 / geo_.m_per_px_x);
+                              brick_margin_mm_ / 1000.0 / geo_.m_per_px_x,
+                              &lines, brick_gap_mm_ / 1000.0 / geo_.m_per_px_x);
     }
 
     // ====== 스켈레톤 → 경로
