@@ -17,9 +17,13 @@ struct Box { int x, y, w, h; };
 // edge_px: 벽돌 한쪽 끝에 선이 없고 화면 끝에서 이 안이면 화면 끝까지 막음 (0이면 안 함)
 //   (공사 구간은 차폭 56cm > 화면 48cm라 벽돌이 붙은 선이 화면 밖에 있을 때가 많음.
 //    안 막으면 스켈레톤이 벽돌과 화면 끝 사이로 빠짐)
+// width_px: 벽돌 실제 가로. 벽돌이 한쪽 선에 닿았으면 반대쪽 끝을 "선에서 width + margin"까지로 줄임
+//   (박스는 옆면·곡선 때문에 실제보다 넓어 지나갈 쪽 길을 막음). 0이면 박스 그대로
+//   edge_px는 양쪽 다 선에 안 닿았을 때만 씀
 // 반환: 실제로 그린 개수 (BEV 밖이면 안 그림)
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
                double depth_px, double margin_px,
-               const cv::Mat *lines = nullptr, double gap_px = 0.0, double edge_px = 0.0);
+               const cv::Mat *lines = nullptr, double gap_px = 0.0, double edge_px = 0.0,
+               double width_px = 0.0);
 
 } // namespace obstacles

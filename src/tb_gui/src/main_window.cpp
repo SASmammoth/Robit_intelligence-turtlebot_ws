@@ -655,6 +655,7 @@ void MainWindow::setupParamTab()
            {"path.con_lane_w_mm", "차폭", " mm", 0, 1500, 10},
            {"path.con_brick_depth_mm", "벽돌 벽 앞뒤", " mm", 0, 500, 10},
            {"path.con_brick_margin_mm", "벽돌 벽 좌우 여유", " mm", 0, 300, 5},
+           {"path.con_brick_w_mm", "벽돌 실제 가로", " mm", 0, 600, 10},
            {"path.con_edge_mm", "화면 끝까지 막기", " mm", 0, 300, 10},
            {"path.con_exit_mm", "벽돌 없이 이만큼 가면 끝", " mm", 0, 3000, 50},
            {"path.con_sign_frames", "표지판 연속 프레임", "", 1, 30, 1},

@@ -40,7 +40,7 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.weak_src_pct", 60, 0, 100);
     declare_int("drive.con_v_mm_s", 100, 0, 1000);        // 공사 구간 최고 속도
     declare_int("drive.con_ld_min_mm", 120, 0, 1000);     // 공사 구간 최소 lookahead (작을수록 벽돌 사이를 바짝 따라감)
-    declare_int("drive.con_pivot_enter_deg", 60, 0, 180); // 공사 구간 피봇 시작 각도 (일반보다 작게 → 피봇을 많이 씀)
+    declare_int("drive.con_pivot_enter_deg", 90, 0, 180); // 공사 구간 피봇 시작 각도 (일반 100보다 조금 작게)
     declare_int("drive.con_pivot_keep_deg", 15, 0, 180);  // 공사 구간에서 pure pursuit에 맡기는 각도
 
     declare_int("drive.pivot_enter_deg", 100, 0, 180);   // 코너가 이보다 크게 꺾이면 피봇

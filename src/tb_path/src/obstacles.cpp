@@ -8,20 +8,21 @@ namespace obstacles {
 
 namespace {
 
-// 벽돌 하나(q)의 줄마다 양 끝에서 바깥으로 gap 이내에 선이 있으면 그 사이를 채움
-// 줄마다만 채우면 선이 비스듬할 때 일부 줄만 이어져 얇은 틈이 남으므로,
-// 한쪽에서 찾은 (벽돌 끝, 선) 점들을 모아 볼록 다각형으로 통째로 채움
-void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap, int edge)
+// 벽돌 하나(q: 아직 wall에 안 그린 사각형)를 wall에 그림
+//  - 줄마다 양 끝에서 바깥으로 gap 이내에 선이 있으면 그 사이를 채움.
+//    한쪽에서 찾은 (벽돌 끝, 선) 점들을 볼록 다각형으로 통째로 채워 얇은 틈이 안 남게
+//  - width > 0이고 한쪽만 선에 닿았으면: 벽돌은 그 선에 붙은 것. 박스는 옆면·곡선 때문에 실제보다 넓게
+//    잡히므로, 반대쪽 끝을 "닿은 선에서 width"까지로 줄임 (반대쪽은 지나갈 길)
+//  - edge > 0이고 양쪽 다 선에 안 닿았으면 (= 화면 밖 선에 붙은 벽돌): 화면 끝에 더 가까운 쪽 하나만
+//    화면 끝까지 막고, 그 아래 화면 끝도 막음 (화면 밖 선 대신)
+void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int edge, int width)
 {
-    struct Row { int y, xl, xr; };
+    struct Row { int y, xl, xr, cl, cr; }; // cl/cr: 왼쪽/오른쪽에 닿은 선 x (-1이면 없음)
     std::vector<Row> rows;
     const cv::Rect bb = cv::boundingRect(q);
-    std::vector<cv::Point> side_pts[2]; // [0] 오른쪽, [1] 왼쪽
     for (int y = bb.y; y < bb.y + bb.height; ++y)
     {
         const uchar *qr = q.ptr<uchar>(y);
-        const uchar *lr = lines.ptr<uchar>(y);
-        uchar *wr = wall.ptr<uchar>(y);
         int xl = -1, xr = -1;
         for (int x = bb.x; x < bb.x + bb.width; ++x)
             if (qr[x])
@@ -31,23 +32,63 @@ void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap, 
             }
         if (xl < 0)
             continue;
-        rows.push_back({y, xl, xr});
-        for (int x = xr + 1; x <= std::min(wall.cols - 1, xr + gap); ++x)
-            if (lr[x])
-            {
-                std::fill(wr + xr + 1, wr + x, uchar(255));
-                side_pts[0].push_back({xr, y});
-                side_pts[0].push_back({x, y});
-                break;
-            }
-        for (int x = xl - 1; x >= std::max(0, xl - gap); --x)
-            if (lr[x])
-            {
-                std::fill(wr + x + 1, wr + xl, uchar(255));
-                side_pts[1].push_back({xl, y});
-                side_pts[1].push_back({x, y});
-                break;
-            }
+        Row r{y, xl, xr, -1, -1};
+        if (gap > 0)
+        {
+            const uchar *lr = lines.ptr<uchar>(y);
+            // 박스 안쪽에 선이 겹쳐 있어도 닿은 것 (벽돌이 선을 가림)
+            for (int x = std::max(0, xl - gap); x <= std::min(wall.cols - 1, xr + gap); ++x)
+                if (lr[x])
+                {
+                    if (x <= (xl + xr) / 2 && x >= xl - gap)
+                        r.cl = x; // 왼쪽: 가장 안쪽(오른쪽) 선 픽셀
+                    else if (x > (xl + xr) / 2 && r.cr < 0)
+                        r.cr = x; // 오른쪽: 가장 안쪽(왼쪽) 선 픽셀
+                }
+        }
+        rows.push_back(r);
+    }
+    if (rows.empty())
+        return;
+
+    int nl = 0, nr = 0;
+    std::vector<int> cls, crs;
+    for (const auto &r : rows)
+    {
+        if (r.cl >= 0) ++nl, cls.push_back(r.cl);
+        if (r.cr >= 0) ++nr, crs.push_back(r.cr);
+    }
+    const bool att_r = nr > 0 && nl == 0, att_l = nl > 0 && nr == 0;
+    auto median = [](std::vector<int> v)
+    {
+        std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+        return v[v.size() / 2];
+    };
+    const int mcr = crs.empty() ? -1 : median(crs), mcl = cls.empty() ? -1 : median(cls);
+
+    std::vector<cv::Point> side_pts[2]; // [0] 오른쪽, [1] 왼쪽
+    for (auto &r : rows)
+    {
+        if (width > 0 && att_r)
+            r.xl = std::max(r.xl, (r.cr >= 0 ? r.cr : mcr) - width);
+        if (width > 0 && att_l)
+            r.xr = std::min(r.xr, (r.cl >= 0 ? r.cl : mcl) + width);
+        if (r.xl > r.xr)
+            continue;
+        uchar *wr = wall.ptr<uchar>(r.y);
+        std::fill(wr + r.xl, wr + r.xr + 1, uchar(255));
+        if (r.cr > r.xr)
+        {
+            std::fill(wr + r.xr + 1, wr + r.cr, uchar(255));
+            side_pts[0].push_back({r.xr, r.y});
+            side_pts[0].push_back({r.cr, r.y});
+        }
+        if (r.cl >= 0 && r.cl < r.xl)
+        {
+            std::fill(wr + r.cl + 1, wr + r.xl, uchar(255));
+            side_pts[1].push_back({r.xl, r.y});
+            side_pts[1].push_back({r.cl, r.y});
+        }
     }
     for (const auto &pts : side_pts)
         if (pts.size() >= 4)
@@ -57,14 +98,14 @@ void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap, 
             cv::fillConvexPoly(wall, hull, cv::Scalar(255));
         }
 
-    // 선이 안 닿은 쪽 끝이 화면 끝 가까이면 화면 끝까지
-    if (edge <= 0 || rows.empty())
+    if (edge <= 0 || nl > 0 || nr > 0)
         return;
     int xmin = wall.cols, xmax = -1;
     for (const auto &r : rows)
         xmin = std::min(xmin, r.xl), xmax = std::max(xmax, r.xr);
-    const bool right = side_pts[0].empty() && xmax >= wall.cols - 1 - edge;
-    const bool left = side_pts[1].empty() && xmin <= edge;
+    const int dl = xmin, dr = wall.cols - 1 - xmax; // 각 끝에서 화면 끝까지
+    const bool left = dl <= edge && dl <= dr;
+    const bool right = !left && dr <= edge;
     for (const auto &r : rows)
     {
         uchar *wr = wall.ptr<uchar>(r.y);
@@ -73,9 +114,7 @@ void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap, 
         if (left)
             std::fill(wr, wr + r.xl + 1, uchar(255));
     }
-    // 벽돌보다 로봇 쪽(아래)의 화면 끝도 막음 = 화면 밖 차선 대신 (벽돌 아래로 화면 밖으로 빠지는 가지 방지)
-    const int strip = 4;
-    const int y0 = rows.front().y;
+    const int strip = 4, y0 = rows.front().y;
     if (left)
         cv::rectangle(wall, cv::Rect(0, y0, strip, wall.rows - y0), cv::Scalar(255), cv::FILLED);
     if (right)
@@ -85,7 +124,8 @@ void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap, 
 } // namespace
 
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
-               double depth_px, double margin_px, const cv::Mat *lines, double gap_px, double edge_px)
+               double depth_px, double margin_px, const cv::Mat *lines, double gap_px, double edge_px,
+               double width_px)
 {
     const bool close = lines && !lines->empty() && (gap_px >= 1.0 || edge_px >= 1.0);
     cv::Mat q;
@@ -123,14 +163,16 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
         const cv::Point2f d = away * float(depth_px);
         const std::vector<cv::Point> quad = {
             cv::Point(a - m), cv::Point(c + m), cv::Point(c + m + d), cv::Point(a - m + d)};
-        cv::fillConvexPoly(wall, quad, cv::Scalar(255));
         if (close)
         {
             q.create(wall.size(), CV_8U);
             q.setTo(0);
             cv::fillConvexPoly(q, quad, cv::Scalar(255));
-            close_gaps(wall, q, *lines, int(std::lround(gap_px)), int(std::lround(edge_px)));
+            draw_brick(wall, q, *lines, int(std::lround(gap_px)), int(std::lround(edge_px)),
+                       width_px >= 1.0 ? int(std::lround(width_px + margin_px)) : 0);
         }
+        else
+            cv::fillConvexPoly(wall, quad, cv::Scalar(255));
         ++n;
     }
     return n;
