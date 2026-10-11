@@ -73,6 +73,12 @@ private:
     int suspicious_ = 0;
 };
 
+// 급하게 꺾이는 모서리(교차로 ㄱ자)를 반지름 radius의 원호로 바꿈 (로봇 좌표 경로, 가까운 점부터)
+//  min_turn: 이보다 크게 꺾이는 곳만 [rad]. chord: 꺾임을 재는 앞뒤 길이 [m] (완만한 곡선은 안 건드림)
+//  원호를 놓을 자리가 모자라면(경로 시작·끝 근처) 반지름을 그만큼 줄임
+//  반환: 둥글게 한 모서리 수
+int fillet_corners(std::vector<cv::Point2d> &path, double radius, double min_turn, double chord = 0.06);
+
 // BEV 디버그 영상에 경로 그리기 (Live 초록, Memory 보라, ColorRule 주황)
 void draw_path(cv::Mat &bev_bgr, const Output &o, const Geo &g);
 

@@ -649,6 +649,8 @@ void MainWindow::setupParamTab()
            {"path.blind_max_mm", "사각지대 통과 최대", " mm", 0, 1000, 10},
            {"path.fill_blind", "사각지대 채움 (0끔/1직진만/2항상)", "", 0, 2, 1},
            {"path.fill_join_mm", "채움 연결 허용", " mm", 0, 200, 5},
+           {"path.turn_radius_mm", "교차로 회전 반지름 (0=끔)", " mm", 0, 500, 10},
+           {"path.turn_min_deg", "둥글게 할 꺾임", " °", 0, 180, 5},
        }},
       {"공사 구간 (path_node) — 표지판 또는 View 탭 C키",
        {

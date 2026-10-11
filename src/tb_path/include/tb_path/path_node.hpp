@@ -65,6 +65,7 @@ private:
     int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
     int con_sign_frames_ = 3;
+    int turn_radius_mm_ = 150, turn_min_deg_ = 45; // 급한 모서리를 원호로 (lanePath fillet_corners)
     bool con_on() const { return (con_manual_ || con_auto_) && !con_done_; }
 
     // 미션 (판단 노드 또는 ros2 topic pub 으로 받음)

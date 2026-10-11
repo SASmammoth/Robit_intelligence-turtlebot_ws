@@ -466,6 +466,72 @@ bool Tracker::predict_seed(const Pose2D &pose, const Geo &g, cv::Point &bev_px) 
     return false;
 }
 
+int fillet_corners(std::vector<cv::Point2d> &path, double radius, double min_turn, double chord)
+{
+    if (radius <= 0.0 || path.size() < 5)
+        return 0;
+    const double step = 0.01;
+    Pts p = resample(path, step);
+    const int k = std::max(2, int(std::lround(chord / step)));
+    int count = 0;
+    std::vector<char> done(p.size(), 0);
+    for (int pass = 0; pass < 3; ++pass) {
+        const int n = int(p.size());
+        if (n < 4 * k + 1) break;
+        // 가장 크게 꺾이는 곳 (앞뒤 chord 방향 차이)
+        int best = -1;
+        double ba = 0.0;
+        for (int i = 2 * k; i + 2 * k < n; ++i) {
+            if (done[i]) continue;
+            const cv::Point2d u = p[i] - p[i - k], v = p[i + k] - p[i];
+            const double a = std::atan2(u.x * v.y - u.y * v.x, u.dot(v));
+            if (std::abs(a) > std::abs(ba)) { ba = a; best = i; }
+        }
+        if (best < 0 || std::abs(ba) < min_turn) break;
+        const int i = best;
+        // 모서리 밖 양쪽 직선 방향과 꼭짓점 (두 직선의 교점)
+        cv::Point2d u = p[i - k] - p[i - 2 * k], v = p[i + 2 * k] - p[i + k];
+        u *= 1.0 / std::max(1e-9, cv::norm(u));
+        v *= 1.0 / std::max(1e-9, cv::norm(v));
+        const double th = std::atan2(u.x * v.y - u.y * v.x, u.dot(v)); // 전체 꺾임 (+ 왼쪽)
+        const double den = u.x * v.y - u.y * v.x;
+        if (std::abs(th) < min_turn || std::abs(den) < 1e-6) break;
+        const cv::Point2d a0 = p[i - k], b0 = p[i + k], w = b0 - a0;
+        const double t1 = (w.x * v.y - w.y * v.x) / den;
+        const cv::Point2d C = a0 + u * t1;
+        // 접선 길이 T = R·tan(θ/2). 경로 시작·끝을 넘지 않게 줄임
+        double T = radius * std::tan(std::abs(th) / 2);
+        T = std::min({T, std::max(0.0, -(p.front() - C).dot(u)), std::max(0.0, (p.back() - C).dot(v))});
+        if (T < 0.02) { done[i] = 1; continue; }
+        const double R = T / std::tan(std::abs(th) / 2);
+        const cv::Point2d A = C - u * T, B = C + v * T;
+        int ia = -1, ib = n;
+        for (int j = 0; j < i; ++j)
+            if ((p[j] - C).dot(u) < -T) ia = j;
+        for (int j = n - 1; j > i; --j)
+            if ((p[j] - C).dot(v) > T) ib = j;
+        const double sg = th > 0 ? 1.0 : -1.0;
+        const cv::Point2d O = A + cv::Point2d(-u.y, u.x) * (sg * R);
+        const double f0 = std::atan2(A.y - O.y, A.x - O.x);
+        const int na = std::max(2, int(std::ceil(R * std::abs(th) / step)));
+        Pts q(p.begin(), p.begin() + (ia + 1));
+        std::vector<char> dq(done.begin(), done.begin() + (ia + 1));
+        for (int m = 0; m <= na; ++m) {
+            const double f = f0 + th * m / na;
+            q.emplace_back(O.x + R * std::cos(f), O.y + R * std::sin(f));
+            dq.push_back(1);
+        }
+        (void)B;
+        for (int j = ib; j < n; ++j) { q.push_back(p[j]); dq.push_back(done[j]); }
+        p.swap(q);
+        done.swap(dq);
+        ++count;
+    }
+    if (count > 0)
+        path = resample(p, 0.02);
+    return count;
+}
+
 void draw_path(cv::Mat &bev, const Output &o, const Geo &g)
 {
     if (o.path.size() < 2) return;

@@ -83,6 +83,8 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.blind_max_mm", 250, 1000);
     declare_int("path.fill_blind", 1, 2);          // 사각지대를 지나온 경로로 채움: 0 끔, 1 직진 명령일 때만, 2 항상
     declare_int("path.fill_join_mm", 40, 200);     // 기억과 실시간 경로가 이보다 떨어져 있으면 안 채움
+    declare_int("path.turn_radius_mm", 150, 500);  // 급한 모서리(교차로 ㄱ자)를 이 반지름 원호로 (0이면 끔). 피봇 대신
+    declare_int("path.turn_min_deg", 45, 180);     // 앞뒤 6cm 사이에서 이보다 크게 꺾이는 곳만 둥글게
     // 공사 구간 (실측: 차폭 56cm, 벽돌 20x8cm 선에 붙어 좌우 번갈아, 빈 공간 40cm)
     declare_int("path.con_brick_depth_mm", 200, 500);  // 공사 구간 벽돌 벽 앞뒤 길이 (일반: brick_depth_mm)
     declare_int("path.con_brick_margin_mm", 90, 300);  // 공사 구간 벽돌 벽 좌우 여유 (일반: brick_margin_mm)
@@ -109,6 +111,8 @@ PathNode::PathNode() : Node("path_node")
     tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
     tp.fill_blind = get_parameter("path.fill_blind").as_int();
     tp.fill_join_m = get_parameter("path.fill_join_mm").as_int() / 1000.0;
+    turn_radius_mm_ = get_parameter("path.turn_radius_mm").as_int();
+    turn_min_deg_ = get_parameter("path.turn_min_deg").as_int();
     post_cb_handle_ = add_post_set_parameters_callback(
         [this](const std::vector<rclcpp::Parameter> &) { reload_params(); });
 
@@ -147,6 +151,8 @@ void PathNode::reload_params()
     tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
     tp.fill_blind = get_parameter("path.fill_blind").as_int();
     tp.fill_join_m = get_parameter("path.fill_join_mm").as_int() / 1000.0;
+    turn_radius_mm_ = get_parameter("path.turn_radius_mm").as_int();
+    turn_min_deg_ = get_parameter("path.turn_min_deg").as_int();
     con_depth_mm_ = get_parameter("path.con_brick_depth_mm").as_int();
     con_margin_mm_ = get_parameter("path.con_brick_margin_mm").as_int();
     con_edge_mm_ = get_parameter("path.con_edge_mm").as_int();
@@ -333,6 +339,9 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     // 공사 구간: 스켈레톤 경로는 벽돌 앞에서 ㄱ자로 꺾이므로 모서리를 둥글게 (기억에는 원래 경로가 남음)
     if (con && con_smooth_mm_ > 0)
         smooth_path(out.path, con_smooth_mm_ / 1000.0);
+    // 일반 주행: 급한 모서리(교차로 ㄱ자)를 원호로 → 피봇 없이 전진하며 돎 (코너까지 거리를 재지 않아 지나치지 않음)
+    if (!con && turn_radius_mm_ > 0)
+        lane_path::fillet_corners(out.path, turn_radius_mm_ / 1000.0, turn_min_deg_ * M_PI / 180.0);
 
     // 공사 구간: 화면 아랫줄을 막 벗어나려는 벽돌을 쪽(좌/우)마다 하나씩 기억 → 몸통이 옆을 지나는 동안 경로를 떼어 놓음
     //   위치는 회전을 무시하고 "이동 거리만큼 뒤로" 옮김 (오도메트리 방향 오차가 쌓이지 않게, 수십 cm만 씀)
