@@ -88,6 +88,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_brick_margin_mm", 90, 300);  // 공사 구간 벽돌 벽 좌우 여유 (일반: brick_margin_mm)
     declare_int("path.con_brick_w_mm", 200, 600);      // 벽돌 실제 가로. 선에 닿은 벽돌은 선에서 이만큼(+여유)만 벽
     declare_int("path.con_attach_mm", 300, 600);       // 선에 붙은 벽돌은 붙은 쪽을 이 거리 안의 선까지 막음
+    declare_int("path.con_extend_mm", 400, 1000);      // 벽돌에 가려 끊긴 선을 이만큼 이음 (0이면 끔)
     declare_int("path.con_edge_mm", 60, 300);          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
     declare_int("path.con_exit_mm", 600, 3000);
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
@@ -145,6 +146,7 @@ void PathNode::reload_params()
     con_margin_mm_ = get_parameter("path.con_brick_margin_mm").as_int();
     con_edge_mm_ = get_parameter("path.con_edge_mm").as_int();
     con_attach_mm_ = get_parameter("path.con_attach_mm").as_int();
+    con_extend_mm_ = get_parameter("path.con_extend_mm").as_int();
     con_brick_w_mm_ = get_parameter("path.con_brick_w_mm").as_int();
     con_exit_mm_ = get_parameter("path.con_exit_mm").as_int();
     con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
@@ -274,15 +276,31 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
 
     const cv::Mat H(3, 3, CV_64F, h.data());
     const cv::Mat lines = wall.clone(); // 벽돌 그리기 전 차선만
+    cv::Mat con_ext;                    // 공사 구간: 벽돌에 가려 끊긴 선을 이은 부분 (디버그 표시용)
     if (!bricks.empty())
     {
         const double depth = (con ? con_depth_mm_ : brick_depth_mm_) / 1000.0;
         const double margin = (con ? con_margin_mm_ : brick_margin_mm_) / 1000.0;
-        obstacles::draw_boxes(wall, H, bricks, depth / geo_.m_per_px_y, margin / geo_.m_per_px_x,
+        cv::Mat brick_m = con ? cv::Mat::zeros(wall.size(), CV_8U) : wall;
+        obstacles::draw_boxes(brick_m, H, bricks, depth / geo_.m_per_px_y, margin / geo_.m_per_px_x,
                               &lines, brick_gap_mm_ / 1000.0 / geo_.m_per_px_x,
                               con ? con_edge_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
                               con ? con_brick_w_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
-                              con ? con_attach_mm_ / 1000.0 / geo_.m_per_px_x : 0.0);
+                              con ? con_attach_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
+                              !con); // 공사 구간: BEV보다 먼 벽돌은 붙은 쪽을 몰라 잘못 피하므로 안 그림
+        if (con)
+        {
+            // 벽돌에 가려 끊긴 선을 벽돌 너머로 이음 (벽돌과 선 사이로 경로가 새지 않게)
+            if (con_extend_mm_ > 0)
+            {
+                con_ext = cv::Mat::zeros(wall.size(), CV_8U);
+                obstacles::extend_occluded(lines, brick_m, con_ext, 0.08 / geo_.m_per_px_y,
+                                           con_extend_mm_ / 1000.0 / geo_.m_per_px_y,
+                                           std::max(3, int(std::lround(0.012 / geo_.m_per_px_x))));
+                wall |= con_ext;
+            }
+            wall |= brick_m;
+        }
     }
 
     // ====== 스켈레톤 → 경로
@@ -336,6 +354,8 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
         cv::Mat view(label.size(), CV_8UC3, cv::Scalar(70, 70, 70));
         lane_skel::draw_debug(view, valid, skel, skel_p_.scale);
         view.setTo(cv::Scalar(0, 0, 200), (wall != 0) & (white == 0) & (yellow_wall == 0)); // 벽돌: 빨강
+        if (!con_ext.empty())
+            view.setTo(cv::Scalar(170, 170, 170), con_ext); // 이은 선: 회색
         view.setTo(cv::Scalar(235, 235, 235), white);
         view.setTo(cv::Scalar(0, 210, 255), yellow);
         if (skel.ok)

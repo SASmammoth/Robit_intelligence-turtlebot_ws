@@ -657,6 +657,7 @@ void MainWindow::setupParamTab()
            {"path.con_brick_w_mm", "벽돌 실제 가로", " mm", 0, 600, 10},
            {"path.con_smooth_mm", "경로 모서리 둥글게", " mm", 0, 300, 10},
            {"path.con_attach_mm", "붙은 쪽 선까지 막기", " mm", 0, 600, 10},
+           {"path.con_extend_mm", "가려진 선 잇기", " mm", 0, 1000, 10},
            {"path.con_edge_mm", "화면 끝까지 막기", " mm", 0, 300, 10},
            {"path.con_exit_mm", "벽돌 없이 이만큼 가면 끝", " mm", 0, 3000, 50},
            {"path.con_sign_frames", "표지판 연속 프레임", "", 1, 30, 1},

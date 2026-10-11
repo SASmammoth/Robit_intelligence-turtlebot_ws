@@ -140,7 +140,7 @@ void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int ed
 
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
                double depth_px, double margin_px, const cv::Mat *lines, double gap_px, double edge_px,
-               double width_px, double attach_px)
+               double width_px, double attach_px, bool keep_far)
 {
     const bool close = lines && !lines->empty() && (gap_px >= 1.0 || edge_px >= 1.0);
     cv::Mat q;
@@ -158,6 +158,8 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
         const bool beyond_top = a.y < 0 && c.y < 0;
         if (beyond_top)
         {
+            if (!keep_far)
+                continue;
             if (std::max(a.x, c.x) < 0 || std::min(a.x, c.x) >= wall.cols)
                 continue; // 멀리 있으면서 옆으로도 벗어남 → 무시
             a.y = 0;
@@ -183,7 +185,8 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
             q.create(wall.size(), CV_8U);
             q.setTo(0);
             cv::fillConvexPoly(q, quad, cv::Scalar(255));
-            draw_brick(wall, q, *lines, int(std::lround(gap_px)), int(std::lround(edge_px)),
+            // 화면 위로 당겨 그린 먼 벽돌은 선이 안 보여 붙은 쪽을 모르므로 화면 끝 막기는 안 함
+            draw_brick(wall, q, *lines, int(std::lround(gap_px)), beyond_top ? 0 : int(std::lround(edge_px)),
                        width_px >= 1.0 ? int(std::lround(width_px + margin_px)) : 0, int(std::lround(attach_px)));
         }
         else
@@ -191,6 +194,65 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
         ++n;
     }
     return n;
+}
+
+int extend_occluded(const cv::Mat &lines, const cv::Mat &bricks, cv::Mat &out,
+                    double probe_px, double len_px, int thick)
+{
+    cv::Mat labels, stats, cents;
+    const int n = cv::connectedComponentsWithStats(lines, labels, stats, cents, 8, CV_32S);
+    int count = 0;
+    for (int k = 1; k < n; ++k)
+    {
+        if (stats.at<int>(k, cv::CC_STAT_AREA) < 30)
+            continue;
+        const int top = stats.at<int>(k, cv::CC_STAT_TOP);
+        if (top <= 2)
+            continue; // 화면 끝까지 이어진 선
+        // 위쪽 끝 근처 점들로 방향 (끝 40px), 끝점 (끝 4px 평균)
+        std::vector<cv::Point2f> seg;
+        cv::Point2f tip(0, 0);
+        int nt = 0;
+        const int y1 = std::min(lines.rows - 1, top + 40);
+        for (int y = top; y <= y1; ++y)
+        {
+            const int *lr = labels.ptr<int>(y);
+            for (int x = 0; x < lines.cols; ++x)
+                if (lr[x] == k)
+                {
+                    seg.emplace_back(float(x), float(y));
+                    if (y <= top + 4)
+                        tip += cv::Point2f(float(x), float(y)), ++nt;
+                }
+        }
+        if (seg.size() < 20 || nt == 0)
+            continue;
+        tip *= 1.0f / nt;
+        cv::Vec4f fl;
+        cv::fitLine(seg, fl, cv::DIST_L2, 0, 0.01, 0.01);
+        cv::Point2f d(fl[0], fl[1]);
+        if (d.y > 0)
+            d = -d; // 위쪽(먼 쪽)으로
+        if (-d.y < 0.3f)
+            continue; // 거의 가로선은 안 이음
+        // 끝에서 probe 안에 벽돌이 있어야 (= 벽돌이 선을 가림)
+        bool hit = false;
+        for (float t = 0; t <= probe_px && !hit; t += 1.0f)
+        {
+            const cv::Point2f p = tip + d * t;
+            for (int o = -thick; o <= thick && !hit; ++o)
+            {
+                const cv::Point q(cvRound(p.x + o), cvRound(p.y));
+                if (q.x >= 0 && q.y >= 0 && q.x < bricks.cols && q.y < bricks.rows && bricks.at<uchar>(q))
+                    hit = true;
+            }
+        }
+        if (!hit)
+            continue;
+        cv::line(out, tip, tip + d * float(len_px), cv::Scalar(255), thick, cv::LINE_8);
+        ++count;
+    }
+    return count;
 }
 
 } // namespace obstacles

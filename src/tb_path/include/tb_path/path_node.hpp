@@ -50,7 +50,7 @@ private:
     bool con_brick_seen_ = false;       // 공사 구간에서 벽돌을 한 번이라도 봤는지
     lane_path::Pose2D con_brick_pose_;  // 마지막으로 벽돌을 본 위치
     int con_depth_mm_ = 200, con_margin_mm_ = 90, con_edge_mm_ = 60, con_exit_mm_ = 600, con_brick_w_mm_ = 200;
-    int con_smooth_mm_ = 80, con_attach_mm_ = 300;
+    int con_smooth_mm_ = 80, con_attach_mm_ = 300, con_extend_mm_ = 400;
     static void smooth_path(std::vector<cv::Point2d> &path, double half); // 모서리 둥글게 (공사 구간)
     int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
