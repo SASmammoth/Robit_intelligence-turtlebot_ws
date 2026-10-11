@@ -355,15 +355,50 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                 continue; // 화면 위로 벗어났거나 박스 아랫변이 영상 아래에서 잘림 (바닥 위치가 틀림)
             const cv::Point2d A = lane_path::bev_to_robot({dst[0].x, dst[0].y}, geo_);
             const cv::Point2d C = lane_path::bev_to_robot({dst[1].x, dst[1].y}, geo_);
-            const double x0 = std::min(A.x, C.x), yl = std::max(A.y, C.y), yr = std::min(A.y, C.y);
+            const double x0 = std::min(A.x, C.x);
+            double yl = std::max(A.y, C.y), yr = std::min(A.y, C.y);
             if (x0 > geo_.bottom_m + 0.08)
                 continue; // 아직 멀리 있음 (스켈레톤이 피함)
             if (yl >= 0.0 && yr <= 0.0)
                 continue; // 로봇 정면에 걸침 → 어느 쪽인지 모름
-            const cv::Point2d d(0.10, 0.0); // 벽돌 두께 8cm + 여유
-            ConHold &hd = con_hold_[yl < 0.0 ? 0 : 1]; // [0] 오른쪽, [1] 왼쪽
+            const bool right = yl < 0.0;
+            // 박스는 옆면까지 잡혀 안쪽 끝이 실제보다 로봇 쪽으로 나옴 → 벽돌이 붙은 선이 보이면 "선 + 벽돌 가로"로 고침
+            // (벽돌 앞면 줄부터 화면 아래까지, 붙은 쪽으로 con_attach_mm 안의 선)
+            if (con_brick_w_mm_ > 0)
+            {
+                const int row0 = std::clamp(int(std::max(dst[0].y, dst[1].y)), 0, label.rows - 1);
+                const int cx = std::clamp(int((dst[0].x + dst[1].x) / 2), 0, label.cols - 1);
+                const int reach = int(std::lround(con_attach_mm_ / 1000.0 / geo_.m_per_px_x));
+                const int xe = right ? std::min(label.cols - 1, int(std::max(dst[0].x, dst[1].x)) + reach)
+                                     : std::max(0, int(std::min(dst[0].x, dst[1].x)) - reach);
+                std::vector<double> ly;
+                for (int y = row0; y < label.rows; y += 2)
+                {
+                    const uchar *lr = lines.ptr<uchar>(y);
+                    if (right)
+                    {
+                        for (int x = cx; x <= xe; ++x)
+                            if (lr[x]) { ly.push_back(lane_path::bev_to_robot({double(x), double(y)}, geo_).y); break; }
+                    }
+                    else
+                    {
+                        for (int x = cx; x >= xe; --x)
+                            if (lr[x]) { ly.push_back(lane_path::bev_to_robot({double(x), double(y)}, geo_).y); break; }
+                    }
+                }
+                if (ly.size() >= 3)
+                {
+                    std::nth_element(ly.begin(), ly.begin() + ly.size() / 2, ly.end());
+                    const double line_y = ly[ly.size() / 2], bw = con_brick_w_mm_ / 1000.0;
+                    if (right)
+                        yl = std::min(yl, line_y + bw);
+                    else
+                        yr = std::max(yr, line_y - bw);
+                }
+            }
+            ConHold &hd = con_hold_[right ? 0 : 1]; // [0] 오른쪽, [1] 왼쪽
             hd.on = true;
-            hd.q = {A, C, C + d, A + d};
+            hd.q = {cv::Point2d(x0, yl), cv::Point2d(x0, yr), cv::Point2d(x0 + 0.10, yr), cv::Point2d(x0 + 0.10, yl)}; // 두께 8cm + 여유
             hd.travel0 = con_travel_;
         }
 
