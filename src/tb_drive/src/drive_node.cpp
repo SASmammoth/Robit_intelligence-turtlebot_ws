@@ -38,7 +38,10 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.hold_ms", 600, 0, 3000);
     declare_int("drive.cmd_timeout_ms", 500, 50, 3000);
     declare_int("drive.weak_src_pct", 60, 0, 100);
-    declare_int("drive.con_v_mm_s", 100, 0, 1000);   // 공사 구간(path_source=construction) 최고 속도
+    declare_int("drive.con_v_mm_s", 100, 0, 1000);        // 공사 구간 최고 속도
+    declare_int("drive.con_ld_min_mm", 120, 0, 1000);     // 공사 구간 최소 lookahead (작을수록 벽돌 사이를 바짝 따라감)
+    declare_int("drive.con_pivot_enter_deg", 60, 0, 180); // 공사 구간 피봇 시작 각도 (일반보다 작게 → 피봇을 많이 씀)
+    declare_int("drive.con_pivot_keep_deg", 15, 0, 180);  // 공사 구간에서 pure pursuit에 맡기는 각도
 
     declare_int("drive.pivot_enter_deg", 100, 0, 180);   // 코너가 이보다 크게 꺾이면 피봇
     declare_int("drive.pivot_keep_deg", 20, 0, 180);    // 이 각도까지는 pure pursuit에 맡기고 초과분만 피봇
@@ -79,6 +82,14 @@ DriveNode::DriveNode() : Node("drive_node")
 
     src_sub_ = create_subscription<std_msgs::msg::String>(
         "/lane/path_source", 10, [this](const std_msgs::msg::String::ConstSharedPtr m) { path_src_ = m->data; });
+    con_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "/lane/construction", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+        {
+            if (m->data == construction_)
+                return;
+            construction_ = m->data;
+            apply_profile();
+            RCLCPP_INFO(get_logger(), "construction profile: %s", construction_ ? "ON" : "off"); });
 
     cmd_sub_ = create_subscription<DriveCmd>(
         "/drive/cmd", 10, [this](const DriveCmd::ConstSharedPtr m)
@@ -123,6 +134,13 @@ void DriveNode::declare_bool(const std::string &name, bool def)
     declare_parameter(name, def);
 }
 
+void DriveNode::apply_profile()
+{
+    follower_.p.ld_min = construction_ ? ld_min_con_ : ld_min_normal_;
+    follower_.p.ld_max = std::max(follower_.p.ld_max, follower_.p.ld_min);
+    pivot_.p = construction_ ? pv_con_ : pv_normal_;
+}
+
 void DriveNode::reload_params()
 {
     auto mm = [this](const char *n) { return get_parameter(n).as_int() / 1000.0; };
@@ -148,8 +166,9 @@ void DriveNode::reload_params()
     p.accel = mm("drive.accel_mm_s2");
     p.decel = mm("drive.decel_mm_s2");
     p.w_accel = deg("drive.w_accel_deg_s2");
-    p.ld_min = mm("drive.ld_min_mm");
-    p.ld_max = std::max(p.ld_min, mm("drive.ld_max_mm"));
+    ld_min_normal_ = mm("drive.ld_min_mm");
+    ld_min_con_ = mm("drive.con_ld_min_mm");
+    p.ld_max = std::max(ld_min_normal_, mm("drive.ld_max_mm"));
     p.ld_time = mm("drive.ld_time_ms"); // ms → s 도 /1000
     p.ld_sharp = mm("drive.ld_sharp_mm");
     p.sharp_turn = deg("drive.sharp_turn_deg");
@@ -164,13 +183,18 @@ void DriveNode::reload_params()
     weak_scale_ = get_parameter("drive.weak_src_pct").as_int() / 100.0;
     con_v_ = mm("drive.con_v_mm_s");
 
-    auto &pv = pivot_.p;
+    auto &pv = pv_normal_;
     pv.enter = deg("drive.pivot_enter_deg");
     pv.keep = std::min(deg("drive.pivot_keep_deg"), pv.enter);
     pv.confirm = get_parameter("drive.pivot_confirm").as_int();
     pv.exit = std::min(deg("drive.pivot_exit_deg"), pv.keep);
     pv.w = deg("drive.pivot_w_deg_s");
     pv.fallback = deg("drive.pivot_fallback_deg");
+    pv_con_ = pv; // 나머지는 같고 시작 각도·맡기는 각도만
+    pv_con_.enter = deg("drive.con_pivot_enter_deg");
+    pv_con_.keep = std::min(deg("drive.con_pivot_keep_deg"), pv_con_.enter);
+    pv_con_.exit = std::min(pv_con_.exit, pv_con_.keep);
+    apply_profile();
 
     psd_enable_ = get_parameter("drive.psd.enable").as_bool();
     psd_stop_ = mm("drive.psd.stop_mm");
@@ -249,8 +273,7 @@ void DriveNode::on_timer()
                 limit = std::min<double>(limit, cmd_->speed_limit);
             if (path_src_ == "memory" || path_src_ == "color_rule")
                 limit *= weak_scale_;
-            const bool construction = path_src_ == "construction";
-            if (construction && con_v_ > 0.0)
+            if (construction_ && con_v_ > 0.0)
                 limit = std::min(limit, con_v_);
 
             o = follower_.follow(t, lim_.v, limit);
@@ -259,8 +282,7 @@ void DriveNode::on_timer()
 
 
             // 날카로운 꺾임에서만 제자리 회전 (자세한 규칙은 Pivoter)
-            pivot_.step(o, lim_.v, lim_.w, dt, std::max(follower_.p.v_min, 0.5 * follower_.p.v_max), vd, wd, why,
-                        !construction); // 공사 구간은 경로를 미리 계획하므로 코너 피봇 없이 (안전장치만)
+            pivot_.step(o, lim_.v, lim_.w, dt, std::max(follower_.p.v_min, 0.5 * follower_.p.v_max), vd, wd, why);
         }
         if (mode != DriveCmd::FOLLOW)
             pivot_.reset();

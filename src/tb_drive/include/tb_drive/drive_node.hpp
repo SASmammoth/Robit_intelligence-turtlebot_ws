@@ -10,6 +10,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/range.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
 
 #include "tb_interfaces/msg/drive_cmd.hpp"
@@ -37,6 +38,7 @@ private:
     // ====== 입력
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr src_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
     rclcpp::Subscription<DriveCmd>::SharedPtr cmd_sub_;
     std::vector<rclcpp::Subscription<sensor_msgs::msg::Range>::SharedPtr> psd_subs_;
 
@@ -67,7 +69,12 @@ private:
     int control_hz_ = 0;
     double cmd_timeout_ = 0.5;
     double weak_scale_ = 0.6;
-    double con_v_ = 0.10; // 공사 구간 최고 속도 [m/s]
+    // 공사 구간 (/lane/construction): 경로는 일반과 같고 속도·lookahead·피봇만 바꿈
+    bool construction_ = false;
+    double con_v_ = 0.10;                   // 최고 속도 [m/s]
+    double ld_min_normal_ = 0.17, ld_min_con_ = 0.12;
+    tb_drive::PivotParams pv_normal_, pv_con_;
+    void apply_profile();                   // construction_에 맞는 값을 follower_·pivot_에 넣음
     double psd_stop_ = 0.15;
 
     tb_drive::Pivoter pivot_; // 날카로운 꺾임에서만 제자리 회전 (pure_pursuit.hpp)

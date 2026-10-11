@@ -16,7 +16,6 @@
 #include "tb_interfaces/msg/detection_array.hpp"
 #include "tb_path/laneSkeleton.hpp"
 #include "tb_path/lanePath.hpp"
-#include "tb_path/construction.hpp"
 
 class PathNode : public rclcpp::Node
 {
@@ -42,18 +41,18 @@ private:
     std::array<double, 9> last_h_{};   // BEV가 바뀌었는지 확인용
     int last_msg_lane_w_ = -1;          // tb_line이 보낸 차선 폭 (공사 구간에서 덮어쓰므로 따로 기억)
 
-    // 공사 구간 (construction.hpp). /mission/construction 수동 또는 표지판으로 자동 진입
-    void update_construction(const tb_interfaces::msg::LaneMask &msg);
-    // 벽돌 박스·선 점을 계획기에 넣고 끝 판단. lines: 차선 마스크(BEV), H: 원본 → BEV
-    void step_construction(const rclcpp::Time &stamp, const cv::Mat &lines, const cv::Mat &valid, const cv::Mat &H);
-    void draw_construction(cv::Mat &view) const;
-    construction::Planner con_;
-    bool con_manual_ = false, con_auto_ = false, con_done_ = false;
+    // 공사 구간: 따로 경로를 만들지 않고 일반 주행(스켈레톤) 그대로, 파라미터만 바꿈
+    //   - 차선 폭 56cm, 벽돌 벽을 크게(깊이·좌우 여유), 화면 끝에 붙은 벽돌은 화면 끝까지 막음
+    //   - tb_drive는 /lane/construction을 보고 속도·lookahead·피봇 파라미터를 바꿈
+    // /mission/construction 수동 또는 표지판으로 진입, 벽돌이 con_exit_mm 동안 안 보이면 끝
+    void update_construction(const tb_interfaces::msg::LaneMask &msg, bool brick_seen);
+    bool con_manual_ = false, con_auto_ = false, con_done_ = false, con_active_ = false;
+    bool con_brick_seen_ = false;       // 공사 구간에서 벽돌을 한 번이라도 봤는지
+    lane_path::Pose2D con_brick_pose_;  // 마지막으로 벽돌을 본 위치
+    int con_depth_mm_ = 150, con_margin_mm_ = 60, con_edge_mm_ = 60, con_exit_mm_ = 600;
     int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
-    builtin_interfaces::msg::Time con_last_det_stamp_;
     int con_lane_w_mm_ = 560, con_sign_frames_ = 3;
-    int cam_w_ = 640, cam_h_ = 480;     // YOLO 박스 좌표의 영상 크기 (박스가 영상 끝에서 잘렸는지 판단)
     bool con_on() const { return (con_manual_ || con_auto_) && !con_done_; }
 
     // 미션 (판단 노드 또는 ros2 topic pub 으로 받음)

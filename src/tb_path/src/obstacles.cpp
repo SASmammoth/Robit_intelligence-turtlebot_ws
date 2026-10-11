@@ -11,8 +11,10 @@ namespace {
 // 벽돌 하나(q)의 줄마다 양 끝에서 바깥으로 gap 이내에 선이 있으면 그 사이를 채움
 // 줄마다만 채우면 선이 비스듬할 때 일부 줄만 이어져 얇은 틈이 남으므로,
 // 한쪽에서 찾은 (벽돌 끝, 선) 점들을 모아 볼록 다각형으로 통째로 채움
-void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap)
+void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap, int edge)
 {
+    struct Row { int y, xl, xr; };
+    std::vector<Row> rows;
     const cv::Rect bb = cv::boundingRect(q);
     std::vector<cv::Point> side_pts[2]; // [0] 오른쪽, [1] 왼쪽
     for (int y = bb.y; y < bb.y + bb.height; ++y)
@@ -29,6 +31,7 @@ void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap)
             }
         if (xl < 0)
             continue;
+        rows.push_back({y, xl, xr});
         for (int x = xr + 1; x <= std::min(wall.cols - 1, xr + gap); ++x)
             if (lr[x])
             {
@@ -53,14 +56,38 @@ void close_gaps(cv::Mat &wall, const cv::Mat &q, const cv::Mat &lines, int gap)
             cv::convexHull(pts, hull);
             cv::fillConvexPoly(wall, hull, cv::Scalar(255));
         }
+
+    // 선이 안 닿은 쪽 끝이 화면 끝 가까이면 화면 끝까지
+    if (edge <= 0 || rows.empty())
+        return;
+    int xmin = wall.cols, xmax = -1;
+    for (const auto &r : rows)
+        xmin = std::min(xmin, r.xl), xmax = std::max(xmax, r.xr);
+    const bool right = side_pts[0].empty() && xmax >= wall.cols - 1 - edge;
+    const bool left = side_pts[1].empty() && xmin <= edge;
+    for (const auto &r : rows)
+    {
+        uchar *wr = wall.ptr<uchar>(r.y);
+        if (right)
+            std::fill(wr + r.xr, wr + wall.cols, uchar(255));
+        if (left)
+            std::fill(wr, wr + r.xl + 1, uchar(255));
+    }
+    // 벽돌보다 로봇 쪽(아래)의 화면 끝도 막음 = 화면 밖 차선 대신 (벽돌 아래로 화면 밖으로 빠지는 가지 방지)
+    const int strip = 4;
+    const int y0 = rows.front().y;
+    if (left)
+        cv::rectangle(wall, cv::Rect(0, y0, strip, wall.rows - y0), cv::Scalar(255), cv::FILLED);
+    if (right)
+        cv::rectangle(wall, cv::Rect(wall.cols - strip, y0, strip, wall.rows - y0), cv::Scalar(255), cv::FILLED);
 }
 
 } // namespace
 
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
-               double depth_px, double margin_px, const cv::Mat *lines, double gap_px)
+               double depth_px, double margin_px, const cv::Mat *lines, double gap_px, double edge_px)
 {
-    const bool close = lines && !lines->empty() && gap_px >= 1.0;
+    const bool close = lines && !lines->empty() && (gap_px >= 1.0 || edge_px >= 1.0);
     cv::Mat q;
     int n = 0;
     const cv::Rect canvas(0, 0, wall.cols, wall.rows);
@@ -102,7 +129,7 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
             q.create(wall.size(), CV_8U);
             q.setTo(0);
             cv::fillConvexPoly(q, quad, cv::Scalar(255));
-            close_gaps(wall, q, *lines, int(std::lround(gap_px)));
+            close_gaps(wall, q, *lines, int(std::lround(gap_px)), int(std::lround(edge_px)));
         }
         ++n;
     }
