@@ -67,6 +67,7 @@ private:
     int control_hz_ = 0;
     double cmd_timeout_ = 0.5;
     double weak_scale_ = 0.6;
+    double con_v_ = 0.10; // 공사 구간 최고 속도 [m/s]
     double psd_stop_ = 0.15;
 
     tb_drive::Pivoter pivot_; // 날카로운 꺾임에서만 제자리 회전 (pure_pursuit.hpp)

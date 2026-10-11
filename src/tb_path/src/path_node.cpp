@@ -51,10 +51,20 @@ PathNode::PathNode() : Node("path_node")
             last_cmd_ = *m;
             last_cmd_time_ = now(); });
 
+    con_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "/mission/construction", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+        {
+            if (m->data != con_manual_)
+                RCLCPP_INFO(get_logger(), "construction (manual): %d", m->data);
+            con_manual_ = m->data;
+            if (!m->data)
+                con_done_ = false; });
+
     // ====== 출력
     path_pub_ = create_publisher<nav_msgs::msg::Path>("/lane/path", 10);
     src_pub_ = create_publisher<std_msgs::msg::String>("/lane/path_source", 10);
     debug_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/skel/compressed", 10);
+    con_pub_ = create_publisher<std_msgs::msg::Bool>("/lane/construction", 10);
 
     // ====== 파라미터
     declare_int("skel.seal_len", 30, 100);
@@ -72,6 +82,15 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.blind_max_mm", 250, 1000);
     declare_int("path.fill_blind", 1, 2);          // 사각지대를 지나온 경로로 채움: 0 끔, 1 직진 명령일 때만, 2 항상
     declare_int("path.fill_join_mm", 40, 200);     // 기억과 실시간 경로가 이보다 떨어져 있으면 안 채움
+    // 공사 구간 (실측: 차폭 56cm, 벽돌 20x8cm 선에 붙어 좌우 번갈아, 빈 공간 40cm)
+    declare_int("path.con_lane_w_mm", 560, 1500);   // 공사 구간 안쪽 차폭
+    declare_int("path.con_brick_w_mm", 200, 600);   // 벽돌이 선에서 안쪽으로 나온 길이
+    declare_int("path.con_brick_d_mm", 80, 300);    // 벽돌 앞뒤 두께
+    declare_int("path.con_pass_mm", 100, 300);      // 벽돌 옆을 지날 때 차선 중심에서 반대쪽으로
+    declare_int("path.con_trans_mm", 400, 1000);    // 반대쪽 틈으로 넘어가는 길이
+    declare_int("path.con_spacing_mm", 480, 1500);  // 벽돌 중심 사이 기본 간격
+    declare_int("path.con_exit_mm", 500, 2000);     // 마지막 벽돌을 지나 이만큼 가면 공사 구간 끝
+    declare_int("path.con_sign_frames", 3, 30);     // 공사 표지판이 이만큼 연속으로 보이면 자동 진입
 
     reload_params();
     skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
@@ -120,6 +139,16 @@ void PathNode::reload_params()
     tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
     tp.fill_blind = get_parameter("path.fill_blind").as_int();
     tp.fill_join_m = get_parameter("path.fill_join_mm").as_int() / 1000.0;
+    auto &cp = con_.p;
+    con_lane_w_mm_ = get_parameter("path.con_lane_w_mm").as_int();
+    cp.lane_w = con_lane_w_mm_ / 1000.0;
+    cp.brick_w = get_parameter("path.con_brick_w_mm").as_int() / 1000.0;
+    cp.brick_d = get_parameter("path.con_brick_d_mm").as_int() / 1000.0;
+    cp.pass_off = get_parameter("path.con_pass_mm").as_int() / 1000.0;
+    cp.trans_len = get_parameter("path.con_trans_mm").as_int() / 1000.0;
+    cp.spacing = get_parameter("path.con_spacing_mm").as_int() / 1000.0;
+    cp.exit_after = get_parameter("path.con_exit_mm").as_int() / 1000.0;
+    con_sign_frames_ = std::max(1, int(get_parameter("path.con_sign_frames").as_int()));
 }
 
 // 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽
@@ -199,11 +228,12 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     // ====== BEV가 바뀌었으면 (tb_line 파라미터 변경) 기억 초기화
     std::array<double, 9> h;
     std::copy(msg->homography.begin(), msg->homography.end(), h.begin());
-    if (h != last_h_ || msg->lane_w_px != geo_.lane_w_px)
+    if (h != last_h_ || msg->lane_w_px != last_msg_lane_w_)
     {
         tracker_.reset();
         last_seed_ = {-1, -1};
         last_h_ = h;
+        last_msg_lane_w_ = msg->lane_w_px;
     }
 
     geo_.bev_size = label.cols;
@@ -212,6 +242,14 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     geo_.m_per_px_y = msg->m_per_px_y;
     geo_.bottom_m = msg->bottom_offset_m;
     skel_p_.lane_w = geo_.lane_w_px;
+
+    // ====== 공사 구간: 진입/이탈, 벽돌 관측, 차선 폭 덮어쓰기
+    update_construction(*msg, h);
+    if (con_on())
+    {
+        geo_.lane_w_px = std::max(8, int(std::lround(con_lane_w_mm_ / 1000.0 / geo_.m_per_px_x)));
+        skel_p_.lane_w = geo_.lane_w_px;
+    }
 
     // ====== 라벨 → 마스크
     const cv::Mat white = (label == LABEL_WHITE);
@@ -238,7 +276,7 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                 if (d.label == "brick")
                     bricks.push_back({d.x, d.y, d.w, d.h});
     }
-    if (!bricks.empty())
+    if (!bricks.empty() && !con_on())
     {
         const cv::Mat H(3, 3, CV_64F, h.data());
         obstacles::draw_boxes(wall, H, bricks,
@@ -258,7 +296,22 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     last_seed_ = skel.ok ? skel.seed : cv::Point(-1, -1);
 
     const auto turn = static_cast<lane_path::Turn>(std::min<uint8_t>(turn_, 2));
-    const lane_path::Output out = tracker_.update(skel, skel_p_.scale, white, yellow, valid, geo_, turn, pose_);
+    lane_path::Output out = tracker_.update(skel, skel_p_.scale, white, yellow, valid, geo_, turn, pose_);
+
+    // 공사 구간: 벽돌을 하나라도 봤으면 지도로 만든 지그재그 경로, 아직이면 스켈레톤으로 차선 기준만 맞춤
+    bool con_path = false;
+    if (con_.active())
+    {
+        std::vector<cv::Point2d> cp;
+        if (con_.path(pose_, cp))
+        {
+            out.path = cp;
+            con_path = true;
+        }
+        else if (out.src == lane_path::Source::Live)
+            con_.lane_hint(out.path, pose_);
+    }
+    last_out_path_ = out.path;
 
     nav_msgs::msg::Path path;
     path.header.stamp = msg->header.stamp;
@@ -275,13 +328,16 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     path_pub_->publish(path);
 
     std_msgs::msg::String src;
-    src.data = lane_path::source_name(out.src);
+    src.data = con_path ? "construction" : lane_path::source_name(out.src);
     src_pub_->publish(src);
     if (out.src != last_src_)
     {
         RCLCPP_INFO(get_logger(), "path source: %s", src.data.c_str());
         last_src_ = out.src;
     }
+    std_msgs::msg::Bool con_state;
+    con_state.data = con_on();
+    con_pub_->publish(con_state);
 
     // ====== 디버그: 라벨을 색으로 그리고 스켈레톤·경로·벽돌 표시
     if (debug_pub_->get_subscription_count() > 0)
@@ -298,12 +354,129 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             for (const auto &p : pts)
                 cv::circle(view, p * skel_p_.scale, 1, cv::Scalar(200, 255, 100), -1);
         }
-        lane_path::draw_path(view, out, geo_);
+        if (con_path)
+            draw_construction(view);
+        else
+            lane_path::draw_path(view, out, geo_);
         static const char *turn_txt[] = {"straight", "left", "right"};
-        cv::putText(view, std::string(turn_txt[static_cast<int>(turn)]) + (parking_ ? " +park" : ""),
+        cv::putText(view, std::string(turn_txt[static_cast<int>(turn)]) + (parking_ ? " +park" : "") +
+                              (con_on() ? " +con" : ""),
                     {6, label.rows - 8}, cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(255, 255, 255), 1);
         publish_debug(view, msg->header);
     }
+}
+
+// 공사 구간 진입/이탈과 벽돌 관측
+void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, const std::array<double, 9> &h)
+{
+    const rclcpp::Time stamp(msg.header.stamp);
+    const bool det_fresh = last_det_ &&
+        std::abs((stamp - rclcpp::Time(last_det_->header.stamp)).seconds()) * 1000.0 <= det_max_age_ms_;
+
+    // 표지판으로 자동 진입 (연속 con_sign_frames 프레임)
+    bool sign = false;
+    if (det_fresh)
+        for (const auto &d : last_det_->detections)
+            if (d.label == "construction")
+                sign = true;
+    con_sign_seen_ = sign ? con_sign_seen_ + 1 : 0;
+    if (sign)
+        con_sign_time_ = stamp;
+    if (con_done_ && !con_manual_ && (stamp - con_sign_time_).seconds() > 3.0)
+        con_done_ = false; // 끝난 뒤 표지판이 3초 넘게 안 보이면 다음 진입 허용
+    if (!con_auto_ && !con_done_ && con_sign_seen_ >= con_sign_frames_)
+    {
+        con_auto_ = true;
+        RCLCPP_INFO(get_logger(), "construction: 표지판으로 진입");
+    }
+
+    // 켜짐/꺼짐에 맞춰 계획기 시작·정리
+    if (con_on() && !con_.active())
+    {
+        // 차선 방향: 직전 경로의 앞쪽 현, 없으면 로봇 방향
+        double heading = pose_.th;
+        cv::Point2d point(pose_.x, pose_.y);
+        std::vector<cv::Point2d> seg;
+        for (const auto &q : last_out_path_)
+            if (q.x > 0.15 && q.x < 0.6)
+                seg.push_back(q);
+        if (seg.size() >= 5 && cv::norm(seg.back() - seg.front()) > 0.15)
+        {
+            const cv::Point2d d = seg.back() - seg.front(), m = (seg.front() + seg.back()) * 0.5;
+            const double c = std::cos(pose_.th), sn = std::sin(pose_.th);
+            heading = pose_.th + std::atan2(d.y, d.x);
+            point = {pose_.x + c * m.x - sn * m.y, pose_.y + sn * m.x + c * m.y};
+        }
+        con_.start(heading, point);
+        tracker_.reset(); // 차선 폭이 바뀌므로 기억 초기화
+        RCLCPP_INFO(get_logger(), "construction: 시작 (차선 방향 %.0f°)", heading * 180 / M_PI);
+    }
+    else if (!con_on() && con_.active())
+    {
+        con_.reset();
+        tracker_.reset();
+        RCLCPP_INFO(get_logger(), "construction: 끝");
+    }
+    if (!con_.active())
+        return;
+
+    // 벽돌 관측: 박스 아랫변 가운데 = 로봇 쪽 앞면이 바닥에 닿은 곳 (같은 탐지 메시지는 한 번만)
+    if (det_fresh && last_det_->header.stamp != con_last_det_stamp_)
+    {
+        con_last_det_stamp_ = last_det_->header.stamp;
+        std::array<double, 9> hh = h;
+        const cv::Mat H(3, 3, CV_64F, hh.data());
+        for (const auto &d : last_det_->detections)
+        {
+            if (d.label != "brick")
+                continue;
+            std::vector<cv::Point2f> src{{float(d.x + d.w / 2.0), float(d.y + d.h)}}, dst;
+            cv::perspectiveTransform(src, dst, H);
+            con_.observe(lane_path::bev_to_robot(cv::Point2d(dst[0].x, dst[0].y), geo_), pose_);
+        }
+    }
+
+    // 마지막 벽돌을 지나 con_exit만큼 가면 끝 (수동이면 다시 끌 때까지 일반 주행)
+    if (con_.finished(pose_))
+    {
+        con_auto_ = false;
+        con_done_ = true;
+        con_.reset();
+        tracker_.reset();
+        RCLCPP_INFO(get_logger(), "construction: 마지막 벽돌 통과, 일반 주행으로");
+    }
+}
+
+// 디버그: 벽돌 지도(청록)와 계획 경로(분홍)
+void PathNode::draw_construction(cv::Mat &view) const
+{
+    const double c = std::cos(pose_.th), sn = std::sin(pose_.th);
+    auto to_px = [&](const cv::Point2d &w)
+    {
+        const double dx = w.x - pose_.x, dy = w.y - pose_.y;
+        const cv::Point2d b = lane_path::robot_to_bev({c * dx + sn * dy, -sn * dx + c * dy}, geo_);
+        return cv::Point(cvRound(b.x), cvRound(b.y));
+    };
+    const double h = con_.heading(), bw = con_.p.brick_w / 2, bd = con_.p.brick_d / 2;
+    const cv::Point2d t(std::cos(h), std::sin(h)), n(-std::sin(h), std::cos(h));
+    for (const auto &b : con_.bricks())
+    {
+        const std::vector<cv::Point> poly = {to_px(b.c + t * bd + n * bw), to_px(b.c + t * bd - n * bw),
+                                             to_px(b.c - t * bd - n * bw), to_px(b.c - t * bd + n * bw)};
+        cv::fillConvexPoly(view, poly, cv::Scalar(200, 220, 0));
+    }
+    std::vector<cv::Point2d> path;
+    if (con_.path(pose_, path) && path.size() >= 2)
+    {
+        std::vector<cv::Point> px;
+        for (const auto &q : path)
+        {
+            const cv::Point2d b = lane_path::robot_to_bev(q, geo_);
+            px.emplace_back(cvRound(b.x), cvRound(b.y));
+        }
+        cv::polylines(view, px, false, cv::Scalar(180, 80, 255), 2, cv::LINE_AA);
+    }
+    cv::putText(view, "construction", {6, 18}, cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(180, 80, 255), 1, cv::LINE_AA);
 }
 
 void PathNode::publish_debug(const cv::Mat &img, const std_msgs::msg::Header &header)

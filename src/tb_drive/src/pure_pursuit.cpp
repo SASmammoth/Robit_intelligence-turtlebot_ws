@@ -298,7 +298,7 @@ void Pivoter::reset()
 }
 
 bool Pivoter::step(const Follower::Out &o, double v_now, double w_now, double dt,
-                   double v_approach, double &v, double &w, const char *&why)
+                   double v_approach, double &v, double &w, const char *&why, bool corner_ok)
 {
     // 코너를 지난 주기 이동만큼 옮김 (사각지대로 들어가도 추적)
     if (phase_ == Phase::Approach)
@@ -309,7 +309,7 @@ bool Pivoter::step(const Follower::Out &o, double v_now, double w_now, double dt
     if (phase_ == Phase::Follow)
     {
         // 코너가 같은 방향으로 연속해서 보이는지 셈
-        const bool sharp = o.has_corner && std::abs(o.corner_turn) > p.enter && o.corner.x < p.reach;
+        const bool sharp = corner_ok && o.has_corner && std::abs(o.corner_turn) > p.enter && o.corner.x < p.reach;
         const int sign = o.corner_turn > 0 ? 1 : -1;
         if (sharp && (seen_ == 0 || sign == seen_sign_))
         {

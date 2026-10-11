@@ -38,6 +38,7 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.hold_ms", 600, 0, 3000);
     declare_int("drive.cmd_timeout_ms", 500, 50, 3000);
     declare_int("drive.weak_src_pct", 60, 0, 100);
+    declare_int("drive.con_v_mm_s", 100, 0, 1000);   // 공사 구간(path_source=construction) 최고 속도
 
     declare_int("drive.pivot_enter_deg", 100, 0, 180);   // 코너가 이보다 크게 꺾이면 피봇
     declare_int("drive.pivot_keep_deg", 20, 0, 180);    // 이 각도까지는 pure pursuit에 맡기고 초과분만 피봇
@@ -161,6 +162,7 @@ void DriveNode::reload_params()
     follower_.hold_time = mm("drive.hold_ms");
     cmd_timeout_ = mm("drive.cmd_timeout_ms");
     weak_scale_ = get_parameter("drive.weak_src_pct").as_int() / 100.0;
+    con_v_ = mm("drive.con_v_mm_s");
 
     auto &pv = pivot_.p;
     pv.enter = deg("drive.pivot_enter_deg");
@@ -247,6 +249,9 @@ void DriveNode::on_timer()
                 limit = std::min<double>(limit, cmd_->speed_limit);
             if (path_src_ == "memory" || path_src_ == "color_rule")
                 limit *= weak_scale_;
+            const bool construction = path_src_ == "construction";
+            if (construction && con_v_ > 0.0)
+                limit = std::min(limit, con_v_);
 
             o = follower_.follow(t, lim_.v, limit);
             vd = o.v;
@@ -254,7 +259,8 @@ void DriveNode::on_timer()
 
 
             // 날카로운 꺾임에서만 제자리 회전 (자세한 규칙은 Pivoter)
-            pivot_.step(o, lim_.v, lim_.w, dt, std::max(follower_.p.v_min, 0.5 * follower_.p.v_max), vd, wd, why);
+            pivot_.step(o, lim_.v, lim_.w, dt, std::max(follower_.p.v_min, 0.5 * follower_.p.v_max), vd, wd, why,
+                        !construction); // 공사 구간은 경로를 미리 계획하므로 코너 피봇 없이 (안전장치만)
         }
         if (mode != DriveCmd::FOLLOW)
             pivot_.reset();

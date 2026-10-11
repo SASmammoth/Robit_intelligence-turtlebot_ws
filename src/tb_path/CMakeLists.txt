@@ -22,7 +22,8 @@ find_package(OpenCV REQUIRED)
 add_library(path_core STATIC
   src/laneSkeleton.cpp
   src/lanePath.cpp
-  src/obstacles.cpp)
+  src/obstacles.cpp
+  src/construction.cpp)
 target_include_directories(path_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   ${OpenCV_INCLUDE_DIRS})

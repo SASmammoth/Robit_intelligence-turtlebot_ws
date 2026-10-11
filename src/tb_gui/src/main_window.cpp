@@ -649,6 +649,17 @@ void MainWindow::setupParamTab()
            {"path.fill_blind", "사각지대 채움 (0끔/1직진만/2항상)", "", 0, 2, 1},
            {"path.fill_join_mm", "채움 연결 허용", " mm", 0, 200, 5},
        }},
+      {"공사 구간 (path_node) — 표지판 또는 View 탭 C키",
+       {
+           {"path.con_lane_w_mm", "차폭", " mm", 0, 1500, 10},
+           {"path.con_brick_w_mm", "벽돌 가로 (선에서 안쪽)", " mm", 0, 600, 5},
+           {"path.con_brick_d_mm", "벽돌 앞뒤 두께", " mm", 0, 300, 5},
+           {"path.con_pass_mm", "벽돌 옆 지날 위치", " mm", 0, 300, 5},
+           {"path.con_trans_mm", "넘어가는 길이", " mm", 0, 1000, 10},
+           {"path.con_spacing_mm", "벽돌 중심 간격", " mm", 0, 1500, 10},
+           {"path.con_exit_mm", "끝 판단 거리", " mm", 0, 2000, 50},
+           {"path.con_sign_frames", "표지판 연속 프레임", "", 1, 30, 1},
+       }},
   };
   constexpr int COLS = 3;
 
@@ -722,6 +733,7 @@ void MainWindow::setupDriveTab()
       {"drive.path_timeout_ms", "경로 유효", " ms", 50, 3000, 50},
       {"drive.cmd_timeout_ms", "명령 유효", " ms", 50, 3000, 50},
       {"drive.weak_src_pct", "약한 경로 속도", " %", 0, 100, 5},
+      {"drive.con_v_mm_s", "공사 구간 속도", " mm/s", 0, 1000, 10},
       {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},
       {"drive.control_hz", "제어 주기", " Hz", 5, 100, 5},
       {"drive.pivot_enter_deg", "피봇 시작 각도", " °", 0, 180, 5},
@@ -1029,7 +1041,8 @@ void MainWindow::loadTargetToSliders()
 void MainWindow::showPathSource(const QString &src)
 {
   static const QMap<QString, QString> colors = {
-      {"live", "#2e9d4a"}, {"memory", "#8e44ad"}, {"color_rule", "#e67e22"}, {"lost", "#c0392b"}};
+      {"live", "#2e9d4a"}, {"memory", "#8e44ad"}, {"color_rule", "#e67e22"}, {"lost", "#c0392b"},
+      {"construction", "#16a085"}};
   const QString bg = colors.value(src, "#555555");
   ui->labelPathSource->setText(src.isEmpty() ? "path: (no data)" : "path: " + src);
   ui->labelPathSource->setStyleSheet(

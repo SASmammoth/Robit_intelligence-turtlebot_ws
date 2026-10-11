@@ -16,6 +16,7 @@
 #include "tb_interfaces/msg/detection_array.hpp"
 #include "tb_path/laneSkeleton.hpp"
 #include "tb_path/lanePath.hpp"
+#include "tb_path/construction.hpp"
 
 class PathNode : public rclcpp::Node
 {
@@ -39,6 +40,19 @@ private:
     lane_path::Geo geo_;
     lane_path::Source last_src_ = lane_path::Source::Lost;
     std::array<double, 9> last_h_{};   // BEV가 바뀌었는지 확인용
+    int last_msg_lane_w_ = -1;          // tb_line이 보낸 차선 폭 (공사 구간에서 덮어쓰므로 따로 기억)
+
+    // 공사 구간 (construction.hpp). /mission/construction 수동 또는 표지판으로 자동 진입
+    void update_construction(const tb_interfaces::msg::LaneMask &msg, const std::array<double, 9> &h);
+    void draw_construction(cv::Mat &view) const;
+    construction::Planner con_;
+    bool con_manual_ = false, con_auto_ = false, con_done_ = false;
+    int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
+    rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
+    builtin_interfaces::msg::Time con_last_det_stamp_;
+    int con_lane_w_mm_ = 560, con_sign_frames_ = 3;
+    std::vector<cv::Point2d> last_out_path_; // 직전 출력 경로 (진입 때 차선 방향 추정)
+    bool con_on() const { return (con_manual_ || con_auto_) && !con_done_; }
 
     // 미션 (판단 노드 또는 ros2 topic pub 으로 받음)
     uint8_t turn_ = 0;                  // 0 직진, 1 좌, 2 우
@@ -63,6 +77,8 @@ private:
     rclcpp::Subscription<tb_interfaces::msg::DetectionArray>::SharedPtr det_sub_;
     rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr turn_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr parking_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr con_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
 

@@ -39,6 +39,7 @@ drive_node:
       hold_ms: 600           # 경로가 비면 마지막 경로를 추측항법으로 이만큼 더 따라감
       cmd_timeout_ms: 500    # /drive/cmd 유효 시간
       weak_src_pct: 60       # path_source가 memory/color_rule이면 속도를 이 %로
+      con_v_mm_s: 100        # 공사 구간(path_source=construction) 최고 속도. 시뮬레이션은 0.2m/s까지 여유 같음
 
       # ── PSD 비상정지 (★ STM32 브리지가 Range 토픽을 내면 켜기)
       psd:

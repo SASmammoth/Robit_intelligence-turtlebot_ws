@@ -142,8 +142,9 @@ public:
     void reset();
     // o: 이번 주기 Follower 결과, v_now·w_now: 지난 주기 실제 출력, dt: 주기
     // 피봇이 끼어들면 true를 돌려주고 v, w를 덮어씀 (why: "approach" / "pivot")
+    // corner_ok=false면 코너 피봇은 하지 않고 안전장치만 (공사 구간처럼 경로를 미리 계획한 곳)
     bool step(const Follower::Out &o, double v_now, double w_now, double dt,
-              double v_approach, double &v, double &w, const char *&why);
+              double v_approach, double &v, double &w, const char *&why, bool corner_ok = true);
     Phase phase() const { return phase_; }
 
 private:
