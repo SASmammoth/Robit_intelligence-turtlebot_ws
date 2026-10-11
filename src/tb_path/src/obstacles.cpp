@@ -255,4 +255,33 @@ int extend_occluded(const cv::Mat &lines, const cv::Mat &bricks, cv::Mat &out,
     return count;
 }
 
+void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
+                double front, double rear, double half, double clear, double hold)
+{
+    for (const auto &q : bricks)
+    {
+        double x0 = 1e9, x1 = -1e9, yl = -1e9, yr = 1e9;
+        for (const auto &p : q)
+        {
+            x0 = std::min(x0, p.x);
+            x1 = std::max(x1, p.x);
+            yl = std::max(yl, p.y);
+            yr = std::min(yr, p.y);
+        }
+        const bool right = yl < 0.0, left = yr > 0.0; // 벽돌이 로봇 오른쪽 / 왼쪽
+        if (!right && !left)
+            continue;
+        const double a = x0 - front - clear, b = x1 + rear + clear + hold;
+        for (auto &p : path)
+        {
+            if (p.x < a || p.x > b)
+                continue;
+            if (right)
+                p.y = std::max(p.y, yl + half + clear);
+            else
+                p.y = std::min(p.y, yr - half - clear);
+        }
+    }
+}
+
 } // namespace obstacles

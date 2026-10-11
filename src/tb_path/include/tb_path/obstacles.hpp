@@ -3,6 +3,7 @@
 // 박스 아랫변 = 물체가 바닥에 닿은 곳이라 BEV 변환이 맞는 유일한 부분.
 // 그 아랫변을 BEV로 옮기고, 로봇에서 멀어지는 방향으로 depth_px 만큼 채운 사각형을 벽으로 씀
 #include <opencv2/core.hpp>
+#include <array>
 #include <vector>
 
 namespace obstacles {
@@ -35,5 +36,14 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
 // 반환: 이은 선 수
 int extend_occluded(const cv::Mat &lines, const cv::Mat &bricks, cv::Mat &out,
                     double probe_px, double len_px, int thick);
+
+// 로봇 옆을 지나는 중인 벽돌(로봇 좌표 사각형)에서 경로를 떼어 놓음 (공사 구간)
+// 카메라는 로봇 앞 일정 거리부터 보므로 몸통이 벽돌 옆을 지나는 동안 벽돌이 화면에 없고,
+// 그 사이 경로가 벽돌 쪽으로 바뀌면 몸통 옆이 벽돌을 침.
+// 벽돌 앞면 - front ~ 뒷면 + rear + hold 구간의 경로 점은 벽돌 안쪽 끝에서 half + clear 이상 떨어지게 옆으로 밂.
+// 벽돌이 로봇 가운데(y=0)에 걸쳐 있으면 어느 쪽인지 모르므로 건드리지 않음
+using Quad = std::array<cv::Point2d, 4>;
+void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
+                double front, double rear, double half, double clear, double hold);
 
 } // namespace obstacles

@@ -89,7 +89,9 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_brick_w_mm", 200, 600);      // 벽돌 실제 가로. 선에 닿은 벽돌은 선에서 이만큼(+여유)만 벽
     declare_int("path.con_attach_mm", 300, 600);       // 선에 붙은 벽돌은 붙은 쪽을 이 거리 안의 선까지 막음
     declare_int("path.con_extend_mm", 400, 1000);      // 벽돌에 가려 끊긴 선을 이만큼 이음 (0이면 끔)
-    declare_int("path.con_edge_mm", 60, 300);          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
+    declare_int("path.con_edge_mm", 60, 300);
+    declare_int("path.con_hold_mm", 80, 500);          // 기억한 벽돌 뒷면을 로봇 뒤 끝이 지나고 이만큼 더 가야 그쪽으로 붙음
+    declare_int("path.con_clear_mm", 30, 200);         // 기억한 벽돌과 로봇 옆면 사이 여유          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
     declare_int("path.con_exit_mm", 600, 3000);
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
     declare_int("path.con_sign_frames", 3, 30);     // 공사 표지판이 이만큼 연속으로 보이면 자동 진입
@@ -147,6 +149,8 @@ void PathNode::reload_params()
     con_edge_mm_ = get_parameter("path.con_edge_mm").as_int();
     con_attach_mm_ = get_parameter("path.con_attach_mm").as_int();
     con_extend_mm_ = get_parameter("path.con_extend_mm").as_int();
+    con_hold_mm_ = get_parameter("path.con_hold_mm").as_int();
+    con_clear_mm_ = get_parameter("path.con_clear_mm").as_int();
     con_brick_w_mm_ = get_parameter("path.con_brick_w_mm").as_int();
     con_exit_mm_ = get_parameter("path.con_exit_mm").as_int();
     con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
@@ -321,6 +325,59 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     if (con && con_smooth_mm_ > 0)
         smooth_path(out.path, con_smooth_mm_ / 1000.0);
 
+    // 공사 구간: 벽돌 기억 (박스 아랫변이 BEV 안에 온전히 있을 때만 = 바닥 위치가 맞을 때) → 옆을 지나는 동안 경로를 떼어 놓음
+    if (!con)
+    {
+        con_mem_.clear();
+        con_near_.clear();
+    }
+    else
+    {
+        const double c = std::cos(pose_.th), sn = std::sin(pose_.th);
+        auto to_world = [&](const cv::Point2d &r) { return cv::Point2d(pose_.x + c * r.x - sn * r.y, pose_.y + sn * r.x + c * r.y); };
+        auto to_robot = [&](const cv::Point2d &w)
+        {
+            const double dx = w.x - pose_.x, dy = w.y - pose_.y;
+            return cv::Point2d(c * dx + sn * dy, -sn * dx + c * dy);
+        };
+        for (const auto &b : bricks)
+        {
+            std::vector<cv::Point2f> src{{float(b.x), float(b.y + b.h)}, {float(b.x + b.w), float(b.y + b.h)}}, dst;
+            cv::perspectiveTransform(src, dst, H);
+            if (dst[0].y < 0 || dst[1].y < 0 || dst[0].y >= label.rows - 2 || dst[1].y >= label.rows - 2)
+                continue; // 화면 위로 벗어났거나 박스 아랫변이 영상 아래에서 잘림
+            const cv::Point2d A = lane_path::bev_to_robot({dst[0].x, dst[0].y}, geo_);
+            const cv::Point2d C = lane_path::bev_to_robot({dst[1].x, dst[1].y}, geo_);
+            const cv::Point2d d(0.10, 0.0); // 벽돌 두께 8cm + 여유
+            con_mem_.push_back({to_world(A), to_world(C), to_world(C + d), to_world(A + d)});
+        }
+        // 로봇 뒤로 30cm 넘게 지난 것, 너무 많으면 오래된 것부터 지움
+        con_mem_.erase(std::remove_if(con_mem_.begin(), con_mem_.end(), [&](const obstacles::Quad &q)
+                                      {
+                                          double xm = -1e9;
+                                          for (const auto &w : q)
+                                              xm = std::max(xm, to_robot(w).x);
+                                          return xm < -0.30; }),
+                       con_mem_.end());
+        if (con_mem_.size() > 300)
+            con_mem_.erase(con_mem_.begin(), con_mem_.begin() + (con_mem_.size() - 300));
+
+        // 화면 아랫줄 근처까지 온 벽돌만 (멀리 보이는 벽돌은 스켈레톤이 이미 피함)
+        std::vector<obstacles::Quad> near;
+        for (const auto &q : con_mem_)
+        {
+            obstacles::Quad r;
+            double x0 = 1e9;
+            for (int i = 0; i < 4; ++i)
+                r[i] = to_robot(q[i]), x0 = std::min(x0, r[i].x);
+            if (x0 < geo_.bottom_m + 0.10)
+                near.push_back(r);
+        }
+        // 로봇: 바퀴 축 기준 앞 9cm, 뒤 14cm, 반폭 10.5cm
+        obstacles::keep_clear(out.path, near, 0.09, 0.14, 0.105, con_clear_mm_ / 1000.0, con_hold_mm_ / 1000.0);
+        con_near_ = near;
+    }
+
 
     nav_msgs::msg::Path path;
     path.header.stamp = msg->header.stamp;
@@ -366,6 +423,16 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                 cv::circle(view, p * skel_p_.scale, 1, cv::Scalar(200, 255, 100), -1);
         }
         lane_path::draw_path(view, out, geo_);
+        for (const auto &q : con_near_) // 기억한 벽돌 (주황)
+        {
+            std::vector<cv::Point> px;
+            for (const auto &r : q)
+            {
+                const cv::Point2d b = lane_path::robot_to_bev(r, geo_);
+                px.emplace_back(cvRound(b.x), cvRound(b.y));
+            }
+            cv::polylines(view, px, true, cv::Scalar(0, 140, 255), 1);
+        }
         static const char *turn_txt[] = {"straight", "left", "right"};
         cv::putText(view, std::string(turn_txt[static_cast<int>(turn)]) + (parking_ ? " +park" : "") +
                               (con_on() ? " +con" : ""),
