@@ -340,6 +340,20 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
         const int look = std::max(3, int(p.lookahead_m / (g.my() * K)));
         auto px = trace(sk.skel, start, look, sk.skel.rows * sk.skel.cols, choose, turn);
 
+        // 시작점이 중심선 중간이면(로봇 바로 앞에서 ㄱ자로 꺾여 가로 부분이 정면에 더 가까울 때)
+        // 첫 방향이 로봇 쪽(되돌아가는 쪽)일 수 있음 → 그 방향을 막고 반대로도 따라가 봐서 로봇에서 먼 쪽을 씀
+        // (녹화 con_run4 1.92s: 갈고리 경로를 따라 벽돌 쪽으로 꺾음)
+        // 직진 명령일 때만 (좌/우 명령 중에는 갈림길 선택을 건드리지 않음, sim_fork)
+        if (turn == Turn::Straight && px.size() >= 3 && px.back().y > start.y + 2) { // 끝이 시작점보다 아래(로봇 쪽) = 되돌아감
+            cv::Mat s2 = sk.skel.clone();
+            for (size_t i = 1; i < std::min<size_t>(px.size(), 4); ++i) s2.at<uchar>(px[i]) = 0;
+            auto alt = trace(s2, start, look, sk.skel.rows * sk.skel.cols, choose, turn);
+            const cv::Point2d anchor(sk.skel.cols / 2.0, sk.skel.rows - 1.0);
+            if (alt.size() >= 3 &&
+                cv::norm(cv::Point2d(alt.back()) - anchor) > cv::norm(cv::Point2d(px.back()) - anchor) + 3.0)
+                px.swap(alt);
+        }
+
         // 사각지대 안을 오래 지나는 경로는 거기서 자름.
         // 사각지대에서는 차선이 안 보여서 영역이 벽 너머로 샐 수 있음 (막다른 길 끝 등).
         // 짧게 지나는 것(회전 중 화면 아래 모서리)은 허용
