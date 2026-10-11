@@ -112,4 +112,43 @@ private:
     double cur_stamp_ = -1.0, good_stamp_ = -1.0;
 };
 
+// 날카로운 꺾임(교차로, 벽돌 회피)에서만 쓰는 제자리 회전.
+//  - 코너가 confirm 주기 연속으로 보여야 시작 (스켈레톤 흔들림으로 생기는 가짜 코너 거르기)
+//  - pure pursuit가 감당할 수 있는 keep 각도는 남기고 초과분만 제자리에서 돎
+//  - 안전장치: 코너를 못 찾았는데 목표점이 fallback보다 옆이면, keep 안으로 들어올 때까지만 돎
+struct PivotParams
+{
+    double enter = 1.22;    // 코너가 이보다 크게 꺾이면 피봇 [rad]
+    double keep = 0.35;     // 이 각도까지는 pure pursuit에 맡김 (피봇은 초과분만) [rad]
+    double exit = 0.26;     // 피봇 중 목표점이 이 안으로 들어오면 종료 [rad]
+    double w = 1.57;        // 피봇 각속도 [rad/s]
+    double fallback = 1.31; // 안전장치: 목표점 방향이 이보다 옆이면 바로 피봇 [rad]
+    int confirm = 3;        // 코너가 이만큼 연속으로 보여야 시작 (제어 주기 수)
+    double reach = 0.35;    // 이보다 가까운 코너만 다룸 [m]
+};
+
+class Pivoter
+{
+public:
+    enum class Phase { Follow, Approach, Pivot };
+    PivotParams p;
+
+    void reset();
+    // o: 이번 주기 Follower 결과, v_now·w_now: 지난 주기 실제 출력, dt: 주기
+    // 피봇이 끼어들면 true를 돌려주고 v, w를 덮어씀 (why: "approach" / "pivot")
+    bool step(const Follower::Out &o, double v_now, double w_now, double dt,
+              double v_approach, double &v, double &w, const char *&why);
+    Phase phase() const { return phase_; }
+
+private:
+    Phase phase_ = Phase::Follow;
+    Pt corner_;           // 코너 위치 (로봇 기준, 매 주기 이동만큼 갱신)
+    double turn_ = 0.0;   // 코너에서 꺾이는 각도 (왼쪽 +)
+    double target_ = 0.0; // 이번 피봇에서 돌 각도 (>0)
+    double done_ = 0.0;   // 지금까지 돈 각도
+    bool from_fallback_ = false;
+    int seen_ = 0;        // 같은 방향 코너가 연속으로 보인 횟수
+    int seen_sign_ = 0;
+};
+
 } // namespace tb_drive

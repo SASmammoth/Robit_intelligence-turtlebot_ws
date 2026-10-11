@@ -69,20 +69,7 @@ private:
     double weak_scale_ = 0.6;
     double psd_stop_ = 0.15;
 
-    double pivot_enter_ = 55.0 * M_PI / 180.0;
-    double pivot_exit_ = 15.0 * M_PI / 180.0;
-    double pivot_w_ = 60.0 * M_PI / 180.0;
-    enum class Phase
-    {
-        Follow,
-        Approach,
-        Pivot
-    };
-    Phase phase_ = Phase::Follow;
-    tb_drive::Pt corner_;      // 코너 위치 (로봇 기준, 매 주기 이동만큼 갱신)
-    double corner_turn_ = 0.0; // 돌아야 할 각도
-    double pivot_done_ = 0.0;  // 지금까지 돈 각도
-    double pivot_fallback_ = 70.0 * M_PI / 180.0;
+    tb_drive::Pivoter pivot_; // 날카로운 꺾임에서만 제자리 회전 (pure_pursuit.hpp)
 
     // 모터 출력 (UART)
     bool uart_enable_ = true;

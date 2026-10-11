@@ -36,9 +36,11 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.cmd_timeout_ms", 500, 50, 3000);
     declare_int("drive.weak_src_pct", 60, 0, 100);
 
-    declare_int("drive.pivot_enter_deg", 55, 0, 180);
+    declare_int("drive.pivot_enter_deg", 70, 0, 180);   // 코너가 이보다 크게 꺾이면 피봇
+    declare_int("drive.pivot_keep_deg", 20, 0, 180);    // 이 각도까지는 pure pursuit에 맡기고 초과분만 피봇
+    declare_int("drive.pivot_confirm", 3, 1, 30);       // 코너가 이만큼 연속으로 보여야 피봇 (제어 주기 수)
     declare_int("drive.pivot_exit_deg", 15, 0, 90);
-    declare_int("drive.pivot_w_deg_s", 60, 0, 360);
+    declare_int("drive.pivot_w_deg_s", 90, 0, 360);
     declare_int("drive.pivot_fallback_deg", 75, 0, 180); // 코너를 못 찾았는데 목표점이 이보다 옆이면 바로 피봇
     declare_int("drive.corner_min_x_mm", 200, 0, 1000);  // 이보다 가까운 경로에서는 코너를 찾지 않음 (BEV 아랫줄 거리)
 
@@ -154,10 +156,13 @@ void DriveNode::reload_params()
     cmd_timeout_ = mm("drive.cmd_timeout_ms");
     weak_scale_ = get_parameter("drive.weak_src_pct").as_int() / 100.0;
 
-    pivot_enter_ = deg("drive.pivot_enter_deg");
-    pivot_exit_ = std::min(deg("drive.pivot_exit_deg"), pivot_enter_);
-    pivot_w_ = deg("drive.pivot_w_deg_s");
-    pivot_fallback_ = deg("drive.pivot_fallback_deg");
+    auto &pv = pivot_.p;
+    pv.enter = deg("drive.pivot_enter_deg");
+    pv.keep = std::min(deg("drive.pivot_keep_deg"), pv.enter);
+    pv.confirm = get_parameter("drive.pivot_confirm").as_int();
+    pv.exit = std::min(deg("drive.pivot_exit_deg"), pv.keep);
+    pv.w = deg("drive.pivot_w_deg_s");
+    pv.fallback = deg("drive.pivot_fallback_deg");
 
     psd_enable_ = get_parameter("drive.psd.enable").as_bool();
     psd_stop_ = mm("drive.psd.stop_mm");
@@ -210,7 +215,7 @@ void DriveNode::on_timer()
     if (!enable_)
     {
         lim_.reset();
-        phase_ = Phase::Follow; // 꺼졌다 켜질 때 회전 상태가 남지 않게
+        pivot_.reset(); // 꺼졌다 켜질 때 회전 상태가 남지 않게
     }
     else
     {
@@ -242,64 +247,18 @@ void DriveNode::on_timer()
             wd = o.w;
 
 
-            // 코너를 지난 주기 이동만큼 옮김 (사각지대로 들어가도 추적)
-            if (phase_ != Phase::Follow)
-                corner_ = tb_drive::shift_path({corner_}, lim_.v * dt, 0.0, lim_.w * dt)[0];
-
-            const double tg_ang = o.tg.ok ? std::atan2(o.tg.p.y, o.tg.p.x) : 0.0;
-            switch (phase_)
-            {
-            case Phase::Follow:
-                if (o.has_corner && std::abs(o.corner_turn) > pivot_enter_ && o.corner.x < 0.35)
-                {
-                    phase_ = Phase::Approach;
-                    corner_ = o.corner;
-                    corner_turn_ = o.corner_turn;
-                }
-                else if (o.tg.ok && std::abs(tg_ang) > pivot_fallback_) // 안전장치: 코너 못 찾았는데 목표가 옆
-                {
-                    phase_ = Phase::Pivot;
-                    corner_turn_ = tg_ang;
-                    pivot_done_ = 0.0;
-                }
-                break;
-
-            case Phase::Approach: // 느리게 코너까지 전진
-            {
-                vd = std::max(follower_.p.v_min, 0.5 * follower_.p.v_max);
-                const double d2 = std::max(0.0025, corner_.x * corner_.x + corner_.y * corner_.y);
-                wd = vd * 2.0 * corner_.y / d2;
-                if (corner_.x <= 0.01)
-                {
-                    phase_ = Phase::Pivot;
-                    pivot_done_ = 0.0;
-                }
-                else if (corner_.x > 0.5 || std::abs(corner_.y) > 0.3)
-                    phase_ = Phase::Follow; // 코너가 엉뚱한 곳으로 가면(추측항법 오차) 포기
-                break;
-            }
-
-            case Phase::Pivot: // 제자리에서 corner_turn_ 만큼
-                vd = 0.0;
-                wd = std::copysign(pivot_w_, corner_turn_);
-                pivot_done_ += std::abs(lim_.w) * dt;
-                if ((pivot_done_ >= std::abs(corner_turn_) - 0.26 && std::abs(tg_ang) < pivot_exit_) ||
-                    pivot_done_ > std::abs(corner_turn_) + 0.5) // 과회전 방지
-                    phase_ = Phase::Follow;
-                break;
-            }
-            if (phase_ != Phase::Follow)
-                why = phase_ == Phase::Approach ? "approach" : "pivot";
+            // 날카로운 꺾임에서만 제자리 회전 (자세한 규칙은 Pivoter)
+            pivot_.step(o, lim_.v, lim_.w, dt, std::max(follower_.p.v_min, 0.5 * follower_.p.v_max), vd, wd, why);
         }
         if (mode != DriveCmd::FOLLOW)
-            phase_ = Phase::Follow;
+            pivot_.reset();
 
         // ====== 가감속 제한 → PSD (전진만 막고 즉시 정지)
         lim_.step(vd, wd, dt, follower_.p);
         
         // FOLLOW에서는 가감속 제한 뒤에도 곡률을 유지.
         // 감속이 덜 된 상태에서 w만 작게 나가면 원하는 것보다 크게 돌아 바깥으로 밀림
-        if (mode == DriveCmd::FOLLOW && phase_ == Phase::Follow && o.tg.ok && o.v > 1e-3)
+        if (mode == DriveCmd::FOLLOW && pivot_.phase() == tb_drive::Pivoter::Phase::Follow && o.tg.ok && o.v > 1e-3)
         {
             const double k = o.w / o.v; // 원하는 곡률 (w_max로 깎였으면 그 값)
             double w = lim_.v * k;

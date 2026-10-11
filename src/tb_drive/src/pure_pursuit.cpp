@@ -88,34 +88,44 @@ Target find_target(const std::vector<Pt> &path, double ld)
 
 bool find_corner(const std::vector<Pt> &p, double min_turn, Pt &corner, double &turn, double min_x)
 {
-    if (p.size() < 8)
+    const size_t n = p.size();
+    const size_t C = 3;   // 방향은 6cm 현(chord)으로 잼: 점 하나하나의 방향은 스켈레톤 흔들림에 민감해서
+                          // 45° 꺾임이 80°로 재지는 등 꺾인 각도가 크게 부풀었음
+    const size_t win = 4; // 8cm 떨어진 두 현의 방향을 비교
+    if (n < win + C + 2)
         return false;
-    auto heading = [&](size_t i)
-    { return std::atan2(p[i + 1].y - p[i].y, p[i + 1].x - p[i].x); };
-    const size_t win = 4; // 점 간격 2cm × 4 = 8cm 구간에서 방향 비교
-    for (size_t i = 0; i + win + 1 < p.size(); ++i)
+    auto chord = [&](size_t k)
+    {
+        const size_t e = std::min(k + C, n - 1);
+        return std::atan2(p[e].y - p[k].y, p[e].x - p[k].x);
+    };
+    auto step = [&](size_t k) // 점 하나 사이 방향 (코너 위치 찾기용)
+    { return std::atan2(p[k + 1].y - p[k].y, p[k + 1].x - p[k].x); };
+
+    for (size_t i = 0; i + win + C < n; ++i)
     {
         if (p[i].x < min_x)
             continue; // 사각지대(채운 구간)와 이미 지나간 부분
-        const double d = std::remainder(heading(i + win) - heading(i), 2 * M_PI);
-        if (std::abs(d) > min_turn)
+        const double d = std::remainder(chord(i + win) - chord(i), 2 * M_PI);
+        if (std::abs(d) <= min_turn)
+            continue;
+
+        // 꺾임이 끝날 때까지 따라감: 4cm 앞 현과 방향이 6° 넘게 다르면 아직 도는 중
+        size_t j = i + win;
+        while (j + 2 + C < n && std::abs(std::remainder(chord(j + 2) - chord(j), 2 * M_PI)) > 0.1)
+            ++j;
+        turn = std::remainder(chord(j) - chord(i), 2 * M_PI);
+
+        // 가장 급하게 꺾이는 점을 코너로 (창 가운데로 하면 급한 모서리보다 몇 cm 일찍 잡힘)
+        size_t kb = i;
+        double best = -1.0;
+        for (size_t k = i; k < std::min(i + win + C, n - 1); ++k)
         {
-            size_t j = i + win; // 꺾임이 끝날 때까지 따라가서 전체 회전각 계산
-            while (j + 2 < p.size() &&
-                   std::abs(std::remainder(heading(j + 1) - heading(j), 2 * M_PI)) > 0.05)
-                ++j;
-            // 창 안에서 가장 급하게 꺾이는 점을 코너로 (창 가운데로 하면 급한 모서리보다 몇 cm 일찍 잡힘)
-            size_t kb = i;
-            double best = -1.0;
-            for (size_t k = i; k < i + win; ++k)
-            {
-                const double dk = std::abs(std::remainder(heading(k + 1) - heading(k), 2 * M_PI));
-                if (dk > best) { best = dk; kb = k; }
-            }
-            corner = p[kb + 1];
-            turn = std::remainder(heading(j) - heading(i), 2 * M_PI);
-            return true;
+            const double dk = std::abs(std::remainder(step(k + 1 < n - 1 ? k + 1 : k) - step(k), 2 * M_PI));
+            if (dk > best) { best = dk; kb = k; }
         }
+        corner = p[std::min(kb + 1, n - 1)];
+        return true;
     }
     return false;
 }
@@ -259,6 +269,93 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
     if (o.v == 0.0)
         o.why = "path_end";
     return o;
+}
+
+void Pivoter::reset()
+{
+    phase_ = Phase::Follow;
+    seen_ = 0;
+    seen_sign_ = 0;
+}
+
+bool Pivoter::step(const Follower::Out &o, double v_now, double w_now, double dt,
+                   double v_approach, double &v, double &w, const char *&why)
+{
+    // 코너를 지난 주기 이동만큼 옮김 (사각지대로 들어가도 추적)
+    if (phase_ == Phase::Approach)
+        corner_ = shift_path({corner_}, v_now * dt, 0.0, w_now * dt)[0];
+
+    const double tg_ang = o.tg.ok ? std::atan2(o.tg.p.y, o.tg.p.x) : 0.0;
+
+    if (phase_ == Phase::Follow)
+    {
+        // 코너가 같은 방향으로 연속해서 보이는지 셈
+        const bool sharp = o.has_corner && std::abs(o.corner_turn) > p.enter && o.corner.x < p.reach;
+        const int sign = o.corner_turn > 0 ? 1 : -1;
+        if (sharp && (seen_ == 0 || sign == seen_sign_))
+        {
+            ++seen_;
+            seen_sign_ = sign;
+        }
+        else
+            seen_ = 0;
+
+        if (seen_ >= p.confirm && std::abs(o.corner_turn) - p.keep > 0.17) // 초과분이 10° 넘을 때만
+        {
+            phase_ = Phase::Approach;
+            corner_ = o.corner;
+            turn_ = o.corner_turn;
+            target_ = std::abs(turn_) - p.keep;
+            from_fallback_ = false;
+            seen_ = 0;
+        }
+        else if (o.tg.ok && std::abs(tg_ang) > p.fallback)
+        {
+            phase_ = Phase::Pivot;
+            turn_ = tg_ang;
+            target_ = std::abs(tg_ang) - p.keep;
+            from_fallback_ = true;
+            done_ = 0.0;
+            seen_ = 0;
+        }
+        else
+            return false;
+    }
+
+    if (phase_ == Phase::Approach) // 코너까지 전진
+    {
+        if (corner_.x <= 0.01)
+        {
+            phase_ = Phase::Pivot;
+            done_ = 0.0;
+        }
+        else if (corner_.x > 0.5 || std::abs(corner_.y) > 0.3)
+        {
+            phase_ = Phase::Follow; // 코너가 엉뚱한 곳으로 가면(추측항법 오차) 포기
+            return false;
+        }
+        else
+        {
+            v = v_approach;
+            const double d2 = std::max(0.0025, corner_.x * corner_.x + corner_.y * corner_.y);
+            w = v * 2.0 * corner_.y / d2;
+            why = "approach";
+            return true;
+        }
+    }
+
+    // Pivot: 초과분만 제자리에서
+    done_ += std::abs(w_now) * dt;
+    const bool aligned = o.tg.ok && std::abs(tg_ang) < (from_fallback_ ? p.keep : p.exit);
+    if (done_ >= target_ || (from_fallback_ && aligned) || done_ > target_ + 0.5)
+    {
+        phase_ = Phase::Follow;
+        return false;
+    }
+    v = 0.0;
+    w = std::copysign(p.w, turn_);
+    why = "pivot";
+    return true;
 }
 
 } // namespace tb_drive

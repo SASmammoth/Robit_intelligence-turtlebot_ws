@@ -487,6 +487,8 @@ void MainWindow::setupDriveTab()
       {"drive.pivot_w_deg_s", "피봇 회전 속도", " °/s", 0, 360, 5},
       {"drive.pivot_fallback_deg", "피봇 안전장치 각도", " °", 0, 180, 5},
       {"drive.corner_min_x_mm", "코너 검출 시작 거리", " mm", 0, 1000, 10},
+      {"drive.pivot_keep_deg", "피봇 남길 각도", " °", 0, 180, 5},
+      {"drive.pivot_confirm", "피봇 확인 횟수", " 회", 1, 30, 1},
   };
   constexpr int COLS = 3; // (이름, 스핀박스) 묶음 3개씩 한 줄
 
