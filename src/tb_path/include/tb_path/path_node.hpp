@@ -52,7 +52,7 @@ private:
     int con_depth_mm_ = 200, con_margin_mm_ = 90, con_edge_mm_ = 60, con_exit_mm_ = 600, con_brick_w_mm_ = 200;
     int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
-    int con_lane_w_mm_ = 0, con_sign_frames_ = 3;
+    int con_sign_frames_ = 3;
     bool con_on() const { return (con_manual_ || con_auto_) && !con_done_; }
 
     // 미션 (판단 노드 또는 ros2 topic pub 으로 받음)

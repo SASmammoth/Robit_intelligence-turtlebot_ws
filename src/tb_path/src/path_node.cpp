@@ -84,7 +84,6 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.fill_blind", 1, 2);          // 사각지대를 지나온 경로로 채움: 0 끔, 1 직진 명령일 때만, 2 항상
     declare_int("path.fill_join_mm", 40, 200);     // 기억과 실시간 경로가 이보다 떨어져 있으면 안 채움
     // 공사 구간 (실측: 차폭 56cm, 벽돌 20x8cm 선에 붙어 좌우 번갈아, 빈 공간 40cm)
-    declare_int("path.con_lane_w_mm", 0, 1500);     // 공사 구간 차폭. 0이면 일반 주행과 같은 값 (tb_line lane_w_px)
     declare_int("path.con_brick_depth_mm", 200, 500);  // 공사 구간 벽돌 벽 앞뒤 길이 (일반: brick_depth_mm)
     declare_int("path.con_brick_margin_mm", 90, 300);  // 공사 구간 벽돌 벽 좌우 여유 (일반: brick_margin_mm)
     declare_int("path.con_brick_w_mm", 200, 600);      // 벽돌 실제 가로. 선에 닿은 벽돌은 선에서 이만큼(+여유)만 벽
@@ -140,7 +139,6 @@ void PathNode::reload_params()
     tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
     tp.fill_blind = get_parameter("path.fill_blind").as_int();
     tp.fill_join_m = get_parameter("path.fill_join_mm").as_int() / 1000.0;
-    con_lane_w_mm_ = get_parameter("path.con_lane_w_mm").as_int();
     con_depth_mm_ = get_parameter("path.con_brick_depth_mm").as_int();
     con_margin_mm_ = get_parameter("path.con_brick_margin_mm").as_int();
     con_edge_mm_ = get_parameter("path.con_edge_mm").as_int();
@@ -266,14 +264,9 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                 if (d.label == "brick")
                     bricks.push_back({d.x, d.y, d.w, d.h});
     }
-    // ====== 공사 구간: 진입/이탈, 차선 폭·벽돌 벽 크기 바꿈
+    // ====== 공사 구간: 진입/이탈, 벽돌 벽 크기 바꿈 (차선 폭은 일반 값 그대로: 한쪽 선만 보여도 26cm 차로로 봄)
     update_construction(*msg, !bricks.empty());
     const bool con = con_on();
-    if (con && con_lane_w_mm_ > 0)
-    {
-        geo_.lane_w_px = std::max(8, int(std::lround(con_lane_w_mm_ / 1000.0 / geo_.m_per_px_x)));
-        skel_p_.lane_w = geo_.lane_w_px;
-    }
 
     const cv::Mat H(3, 3, CV_64F, h.data());
     const cv::Mat lines = wall.clone(); // 벽돌 그리기 전 차선만
@@ -380,8 +373,6 @@ void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool
     {
         con_active_ = con_on();
         con_brick_seen_ = false;
-        if (con_lane_w_mm_ > 0)
-            tracker_.reset(); // 차선 폭이 바뀌므로 기억 초기화
         RCLCPP_INFO(get_logger(), "construction: %s", con_active_ ? "시작" : "끝");
     }
     if (!con_active_)
@@ -399,8 +390,6 @@ void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool
         con_auto_ = false;
         con_done_ = true;
         con_active_ = false;
-        if (con_lane_w_mm_ > 0)
-            tracker_.reset();
         RCLCPP_INFO(get_logger(), "construction: 벽돌이 %dmm 동안 안 보임, 일반 주행으로", con_exit_mm_);
     }
 }
