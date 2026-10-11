@@ -87,6 +87,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_brick_depth_mm", 200, 500);  // 공사 구간 벽돌 벽 앞뒤 길이 (일반: brick_depth_mm)
     declare_int("path.con_brick_margin_mm", 90, 300);  // 공사 구간 벽돌 벽 좌우 여유 (일반: brick_margin_mm)
     declare_int("path.con_brick_w_mm", 200, 600);      // 벽돌 실제 가로. 선에 닿은 벽돌은 선에서 이만큼(+여유)만 벽
+    declare_int("path.con_attach_mm", 300, 600);       // 선에 붙은 벽돌은 붙은 쪽을 이 거리 안의 선까지 막음
     declare_int("path.con_edge_mm", 60, 300);          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
     declare_int("path.con_exit_mm", 600, 3000);
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
@@ -143,6 +144,7 @@ void PathNode::reload_params()
     con_depth_mm_ = get_parameter("path.con_brick_depth_mm").as_int();
     con_margin_mm_ = get_parameter("path.con_brick_margin_mm").as_int();
     con_edge_mm_ = get_parameter("path.con_edge_mm").as_int();
+    con_attach_mm_ = get_parameter("path.con_attach_mm").as_int();
     con_brick_w_mm_ = get_parameter("path.con_brick_w_mm").as_int();
     con_exit_mm_ = get_parameter("path.con_exit_mm").as_int();
     con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
@@ -279,7 +281,8 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
         obstacles::draw_boxes(wall, H, bricks, depth / geo_.m_per_px_y, margin / geo_.m_per_px_x,
                               &lines, brick_gap_mm_ / 1000.0 / geo_.m_per_px_x,
                               con ? con_edge_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
-                              con ? con_brick_w_mm_ / 1000.0 / geo_.m_per_px_x : 0.0);
+                              con ? con_brick_w_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
+                              con ? con_attach_mm_ / 1000.0 / geo_.m_per_px_x : 0.0);
     }
 
     // ====== 스켈레톤 → 경로

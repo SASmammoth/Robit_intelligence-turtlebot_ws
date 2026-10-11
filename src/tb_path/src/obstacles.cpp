@@ -15,7 +15,9 @@ namespace {
 //    잡히므로, 반대쪽 끝을 "닿은 선에서 width"까지로 줄임 (반대쪽은 지나갈 길)
 //  - edge > 0이고 양쪽 다 선에 안 닿았으면 (= 화면 밖 선에 붙은 벽돌): 화면 끝에 더 가까운 쪽 하나만
 //    화면 끝까지 막고, 그 아래 화면 끝도 막음 (화면 밖 선 대신)
-void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int edge, int width)
+//  - attach > gap이면: 한쪽만 선에 닿았을 때 그쪽은 벽돌의 모든 줄을 attach 안의 선까지 막음
+//    (곡선에서 선이 벽돌 아래쪽 줄에서 멀어지며 생기는 주머니로 경로가 파고들지 않게)
+void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int edge, int width, int attach)
 {
     struct Row { int y, xl, xr, cl, cr; }; // cl/cr: 왼쪽/오른쪽에 닿은 선 x (-1이면 없음)
     std::vector<Row> rows;
@@ -65,6 +67,19 @@ void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int ed
         return v[v.size() / 2];
     };
     const int mcr = crs.empty() ? -1 : median(crs), mcl = cls.empty() ? -1 : median(cls);
+
+    // 붙은 쪽: 선이 gap보다 멀리 있는 줄도 attach 안이면 선까지
+    if (attach > gap && (att_r || att_l))
+        for (auto &r : rows)
+        {
+            const uchar *lr = lines.ptr<uchar>(r.y);
+            if (att_r && r.cr < 0)
+                for (int x = r.xr + 1; x <= std::min(wall.cols - 1, r.xr + attach); ++x)
+                    if (lr[x]) { r.cr = x; break; }
+            if (att_l && r.cl < 0)
+                for (int x = r.xl - 1; x >= std::max(0, r.xl - attach); --x)
+                    if (lr[x]) { r.cl = x; break; }
+        }
 
     std::vector<cv::Point> side_pts[2]; // [0] 오른쪽, [1] 왼쪽
     for (auto &r : rows)
@@ -125,7 +140,7 @@ void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int ed
 
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
                double depth_px, double margin_px, const cv::Mat *lines, double gap_px, double edge_px,
-               double width_px)
+               double width_px, double attach_px)
 {
     const bool close = lines && !lines->empty() && (gap_px >= 1.0 || edge_px >= 1.0);
     cv::Mat q;
@@ -169,7 +184,7 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
             q.setTo(0);
             cv::fillConvexPoly(q, quad, cv::Scalar(255));
             draw_brick(wall, q, *lines, int(std::lround(gap_px)), int(std::lround(edge_px)),
-                       width_px >= 1.0 ? int(std::lround(width_px + margin_px)) : 0);
+                       width_px >= 1.0 ? int(std::lround(width_px + margin_px)) : 0, int(std::lround(attach_px)));
         }
         else
             cv::fillConvexPoly(wall, quad, cv::Scalar(255));
