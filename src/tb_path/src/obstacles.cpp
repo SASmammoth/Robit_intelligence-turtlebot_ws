@@ -256,7 +256,7 @@ int extend_occluded(const cv::Mat &lines, const cv::Mat &bricks, cv::Mat &out,
 }
 
 void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
-                double front, double rear, double half, double clear, double hold)
+                double front, double rear, double half, double clear, double hold, bool soft)
 {
     for (const auto &q : bricks)
     {
@@ -272,14 +272,17 @@ void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
         if (!right && !left)
             continue;
         const double a = x0 - front - clear, b = x1 + rear + clear + hold;
+        double lim_r = yl + half + clear, lim_l = yr - half - clear;
+        if (soft)
+            lim_r = std::min(lim_r, 0.0), lim_l = std::max(lim_l, 0.0);
         for (auto &p : path)
         {
             if (p.x < a || p.x > b)
                 continue;
             if (right)
-                p.y = std::max(p.y, yl + half + clear);
+                p.y = std::max(p.y, lim_r);
             else
-                p.y = std::min(p.y, yr - half - clear);
+                p.y = std::min(p.y, lim_l);
         }
     }
 }

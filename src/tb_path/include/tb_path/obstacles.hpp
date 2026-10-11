@@ -41,9 +41,11 @@ int extend_occluded(const cv::Mat &lines, const cv::Mat &bricks, cv::Mat &out,
 // 카메라는 로봇 앞 일정 거리부터 보므로 몸통이 벽돌 옆을 지나는 동안 벽돌이 화면에 없고,
 // 그 사이 경로가 벽돌 쪽으로 바뀌면 몸통 옆이 벽돌을 침.
 // 벽돌 앞면 - front ~ 뒷면 + rear + hold 구간의 경로 점은 벽돌 안쪽 끝에서 half + clear 이상 떨어지게 옆으로 밂.
+// soft = true면 로봇 정면 직선(y=0)보다 반대쪽으로는 밀지 않음 = 벽돌 쪽으로 꺾지만 못하게
+//   (박스가 옆면까지 잡혀 안쪽 끝이 실제보다 안쪽이면 경로를 너무 밀어냄. 지금 자리는 이미 안전하다고 봄)
 // 벽돌이 로봇 가운데(y=0)에 걸쳐 있으면 어느 쪽인지 모르므로 건드리지 않음
 using Quad = std::array<cv::Point2d, 4>;
 void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
-                double front, double rear, double half, double clear, double hold);
+                double front, double rear, double half, double clear, double hold, bool soft = false);
 
 } // namespace obstacles

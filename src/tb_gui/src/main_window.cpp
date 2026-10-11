@@ -660,6 +660,7 @@ void MainWindow::setupParamTab()
            {"path.con_extend_mm", "가려진 선 잇기", " mm", 0, 1000, 10},
            {"path.con_edge_mm", "화면 끝까지 막기", " mm", 0, 300, 10},
            {"path.con_dead_end_mm", "막다른 가지 지우기", " mm", 0, 1000, 10},
+           {"path.con_keep", "지난 벽돌 (0끔 1약 2강)", "", 0, 2, 1},
            {"path.con_hold_mm", "지난 벽돌 더 피하기", " mm", 0, 500, 10},
            {"path.con_clear_mm", "지난 벽돌 옆 여유", " mm", 0, 200, 5},
            {"path.con_exit_mm", "벽돌 없이 이만큼 가면 끝", " mm", 0, 3000, 50},
