@@ -191,7 +191,7 @@ std::vector<std::string> QNode::pathParamNames()
           "path.brick_depth_mm", "path.brick_margin_mm", "path.brick_gap_mm", "path.det_max_age_ms", "path.mem_travel_mm",
           "path.max_dev_mm", "path.override_frames", "path.min_len_mm",
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm",
-          "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_edge_mm",
+          "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_edge_mm",
           "path.con_exit_mm", "path.con_sign_frames"};
 }
 
@@ -204,7 +204,7 @@ std::vector<std::string> QNode::driveParamNames(bool with_enable)
       "drive.accel_mm_s2", "drive.decel_mm_s2", "drive.w_accel_deg_s2",
       "drive.ld_min_mm", "drive.ld_max_mm", "drive.ld_time_ms", "drive.ld_sharp_mm", "drive.sharp_turn_deg", "drive.sharp_hold_ms", "drive.curv_slow_mm", "drive.stop_dist_mm",
       "drive.path_timeout_ms", "drive.hold_ms", "drive.cmd_timeout_ms", "drive.weak_src_pct", "drive.con_v_mm_s",
-      "drive.con_ld_min_mm", "drive.con_pivot_enter_deg", "drive.con_pivot_keep_deg",
+      "drive.con_ld_min_mm", "drive.con_ld_sharp_mm", "drive.con_pivot_enter_deg", "drive.con_pivot_keep_deg",
       "drive.pivot_enter_deg", "drive.pivot_keep_deg", "drive.pivot_confirm", "drive.pivot_exit_deg", "drive.pivot_w_deg_s", "drive.pivot_fallback_deg", "drive.corner_min_x_mm",
       "drive.psd.stop_mm"};
   if (with_enable)

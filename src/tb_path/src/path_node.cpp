@@ -88,7 +88,8 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_brick_margin_mm", 90, 300);  // 공사 구간 벽돌 벽 좌우 여유 (일반: brick_margin_mm)
     declare_int("path.con_brick_w_mm", 200, 600);      // 벽돌 실제 가로. 선에 닿은 벽돌은 선에서 이만큼(+여유)만 벽
     declare_int("path.con_edge_mm", 60, 300);          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
-    declare_int("path.con_exit_mm", 600, 3000);        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
+    declare_int("path.con_exit_mm", 600, 3000);
+    declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
     declare_int("path.con_sign_frames", 3, 30);     // 공사 표지판이 이만큼 연속으로 보이면 자동 진입
 
     reload_params();
@@ -144,6 +145,7 @@ void PathNode::reload_params()
     con_edge_mm_ = get_parameter("path.con_edge_mm").as_int();
     con_brick_w_mm_ = get_parameter("path.con_brick_w_mm").as_int();
     con_exit_mm_ = get_parameter("path.con_exit_mm").as_int();
+    con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
     con_sign_frames_ = std::max(1, int(get_parameter("path.con_sign_frames").as_int()));
 }
 
@@ -294,6 +296,10 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     const auto turn = static_cast<lane_path::Turn>(std::min<uint8_t>(turn_, 2));
     lane_path::Output out = tracker_.update(skel, skel_p_.scale, white, yellow, valid, geo_, turn, pose_);
 
+    // 공사 구간: 스켈레톤 경로는 벽돌 앞에서 ㄱ자로 꺾이므로 모서리를 둥글게 (기억에는 원래 경로가 남음)
+    if (con && con_smooth_mm_ > 0)
+        smooth_path(out.path, con_smooth_mm_ / 1000.0);
+
 
     nav_msgs::msg::Path path;
     path.header.stamp = msg->header.stamp;
@@ -391,6 +397,34 @@ void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool
         con_done_ = true;
         con_active_ = false;
         RCLCPP_INFO(get_logger(), "construction: 벽돌이 %dmm 동안 안 보임, 일반 주행으로", con_exit_mm_);
+    }
+}
+
+// 경로 점을 앞뒤 half 거리 안의 점들 평균으로 2번 (끝점은 그대로, 끝 가까이는 창을 줄임)
+void PathNode::smooth_path(std::vector<cv::Point2d> &path, double half)
+{
+    const size_t n = path.size();
+    if (n < 5)
+        return;
+    std::vector<double> s(n, 0.0); // 누적 길이
+    for (size_t i = 1; i < n; ++i)
+        s[i] = s[i - 1] + cv::norm(path[i] - path[i - 1]);
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        std::vector<cv::Point2d> out(path);
+        for (size_t i = 1; i + 1 < n; ++i)
+        {
+            const double h = std::min({half, s[i] - s[0], s[n - 1] - s[i]}); // 양쪽 같은 폭
+            cv::Point2d sum(0, 0);
+            int cnt = 0;
+            for (size_t j = i; j-- > 0 && s[i] - s[j] <= h;)
+                sum += path[j], ++cnt;
+            for (size_t j = i; j < n && s[j] - s[i] <= h; ++j)
+                sum += path[j], ++cnt;
+            if (cnt > 0)
+                out[i] = sum * (1.0 / cnt);
+        }
+        path.swap(out);
     }
 }
 

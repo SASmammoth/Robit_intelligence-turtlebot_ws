@@ -41,8 +41,9 @@ drive_node:
       weak_src_pct: 60       # path_source가 memory/color_rule이면 속도를 이 %로
       # ── 공사 구간 (/lane/construction이 켜지면 아래 값으로 바뀜. 경로는 일반 주행과 같음)
       con_v_mm_s: 100          # 최고 속도
-      con_ld_min_mm: 120       # 최소 lookahead (작을수록 벽돌 사이 경로를 바짝 따라감)
-      con_pivot_enter_deg: 90  # 피봇 시작 각도. 60은 곡선에서도 피봇이 걸림 (실차 확인). 벽돌 앞 회전이 늦으면 조금씩 낮춤
+      con_ld_min_mm: 250       # 최소 lookahead. 길게 = 멀리 보고 ㄱ자 경로를 미리 완만하게 꺾음 (120은 늦게 꺾어 벽돌에 박음)
+      con_ld_sharp_mm: 0       # 급한 곳 lookahead. 0 = 공사 구간에서는 안 줄임
+      con_pivot_enter_deg: 180 # 피봇 시작 각도. 180 = 코너 피봇 안 함 (60은 곡선에서도 걸리고, 벽돌 옆 피봇은 뒤가 쓸림)
       con_pivot_keep_deg: 15   # 이만큼은 전진하며 돌고 초과분만 피봇
 
       # ── PSD 비상정지 (★ STM32 브리지가 Range 토픽을 내면 켜기)

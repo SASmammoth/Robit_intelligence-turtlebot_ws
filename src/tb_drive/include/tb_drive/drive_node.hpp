@@ -72,7 +72,8 @@ private:
     // 공사 구간 (/lane/construction): 경로는 일반과 같고 속도·lookahead·피봇만 바꿈
     bool construction_ = false;
     double con_v_ = 0.10;                   // 최고 속도 [m/s]
-    double ld_min_normal_ = 0.17, ld_min_con_ = 0.12;
+    double ld_min_normal_ = 0.17, ld_min_con_ = 0.25;
+    double ld_sharp_normal_ = 0.12, ld_sharp_con_ = 0.0;
     tb_drive::PivotParams pv_normal_, pv_con_;
     void apply_profile();                   // construction_에 맞는 값을 follower_·pivot_에 넣음
     double psd_stop_ = 0.15;
