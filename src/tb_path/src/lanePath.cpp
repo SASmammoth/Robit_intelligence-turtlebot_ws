@@ -55,6 +55,22 @@ double poly_len(const Pts &p)
     return L;
 }
 
+// 경로가 차선 픽셀을 처음 지나는 지점 앞에서 자름
+Pts clip_at_wall(const Pts &path, const cv::Mat &wall, const Geo &g)
+{
+    Pts out;
+    const cv::Rect R(0, 0, wall.cols, wall.rows);
+    for (const auto &q : path)
+    {
+        const cv::Point2d b = robot_to_bev(q, g);
+        const cv::Point p(cvRound(b.x), cvRound(b.y));
+        if (R.contains(p) && wall.at<uchar>(p))
+            break;
+        out.push_back(q);
+    }
+    return out;
+}
+
 // 일정 간격으로 다시 찍기
 Pts resample(const Pts &in, double step)
 {
@@ -348,6 +364,9 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
         out.path = live;
         return out;
     }
+
+    const cv::Mat wall = white | yellow;
+    mem_r = clip_at_wall(mem_r, wall, g);
 
     // ── 3) 기억으로 버티기
     if (mem_r.size() >= 2 && poly_len(mem_r) >= p.min_len_m * 0.5 && travelled < p.mem_travel_m) {

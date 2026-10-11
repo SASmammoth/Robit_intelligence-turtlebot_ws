@@ -94,6 +94,34 @@ void PathNode::reload_params()
     tracker_.p.mem_travel_m = get_parameter("path.mem_travel_mm").as_int() / 1000.0;
 }
 
+// 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽
+// 반환: 벽까지 거리 [m], 없으면 -1. angle: 벽 기울기 (피봇 각도 보정용)
+double front_wall(const cv::Mat &wall, const cv::Mat &valid, const lane_path::Geo &g, double &angle)
+{
+    const int cx = g.bev_size / 2, half = g.lane_w_px / 2 - 6;
+    std::vector<cv::Point2f> hits;
+    int cols = 0;
+    for (int x = cx - half; x <= cx + half; x += 2)
+    {
+        ++cols;
+        for (int y = wall.rows - 1; y >= 0; --y)
+            if (valid.at<uchar>(y, x) && wall.at<uchar>(y, x))
+            {
+                hits.emplace_back(x, y);
+                break;
+            }
+    }
+    if (hits.size() < 0.7 * cols)
+        return -1; // 앞이 뚫려 있음
+    cv::Vec4f L;
+    cv::fitLine(hits, L, cv::DIST_HUBER, 0, 0.01, 0.01);
+    angle = std::atan2(-L[1], L[0]); // 수평 기준 기울기
+    if (std::abs(angle) > 0.5)
+        return -1; // 30° 넘게 기울면 벽 아님 (커브)
+    const double ymid = L[3] + (cx - L[2]) * L[1] / L[0];
+    return lane_path::bev_to_robot({double(cx), ymid}, g).x;
+}
+
 // /odom 이 0.5초 안에 왔으면 그대로, 아니면 /cmd_vel 적분
 void PathNode::update_pose(const rclcpp::Time &t)
 {
