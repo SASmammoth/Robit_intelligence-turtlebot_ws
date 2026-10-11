@@ -139,16 +139,17 @@ void command(const Target &t, const Params &p, double limit, double &v, double &
     if (limit <= 0.0)
         return;
 
-    double vc = limit / (1.0 + p.curv_slow * std::abs(t.kappa));            // 커브 감속
+    const double kappa = t.kappa * p.turn_gain; // 회전 세기 배율 (lookahead는 그대로, 도는 반경만 줄임)
+    double vc = limit / (1.0 + p.curv_slow * std::abs(kappa));              // 커브 감속
     vc = std::min(vc, std::sqrt(2.0 * p.decel * (t.end_dist - p.stop_dist))); // 경로 끝 감속
     vc = std::max(vc, std::min(p.v_min, limit));
 
-    double wc = vc * t.kappa;
+    double wc = vc * kappa;
     if (std::abs(wc) > p.w_max)
     {
         // 각속도가 모자라면 곡률을 지키도록 속도를 낮춤
         wc = std::copysign(p.w_max, wc);
-        vc = p.w_max / std::abs(t.kappa);
+        vc = p.w_max / std::abs(kappa);
     }
     v = vc;
     w = wc;

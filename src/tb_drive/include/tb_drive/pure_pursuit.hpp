@@ -24,6 +24,7 @@ struct Params
     double ld_max = 0.35;   // lookahead 최대 [m]
     double ld_time = 1.0;   // lookahead = 속도 × ld_time [s]
     double curv_slow = 0.1; // v = limit / (1 + curv_slow·|곡률|) [m]
+    double turn_gain = 1.0; // pure pursuit 곡률 배율. 1보다 크면 같은 lookahead에서 더 작게 돎 (공사 구간)
     double stop_dist = 0.04; // 경로 끝까지 이만큼 남으면 정지 [m]
     double corner_min_x = 0.20; // 이보다 가까운 경로에서는 코너를 찾지 않음 [m] (= BEV 아랫줄 거리)
     // 급한 곳에서 lookahead 줄이기: 앞 sharp_look 안에서 경로가 로봇 방향과 sharp_turn만큼 틀어지면 ld_sharp까지

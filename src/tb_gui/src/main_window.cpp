@@ -738,6 +738,7 @@ void MainWindow::setupDriveTab()
       {"drive.con_v_mm_s", "공사 구간 속도", " mm/s", 0, 1000, 10},
       {"drive.con_ld_min_mm", "공사 ld_min", " mm", 0, 1000, 10},
       {"drive.con_ld_sharp_mm", "공사 ld_sharp (0=끔)", " mm", 0, 1000, 10},
+      {"drive.con_turn_gain_pct", "공사 회전 세기", " %", 50, 300, 5},
       {"drive.con_pivot_enter_deg", "공사 피봇 시작", " °", 0, 180, 5},
       {"drive.con_pivot_keep_deg", "공사 피봇 맡김", " °", 0, 180, 5},
       {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},

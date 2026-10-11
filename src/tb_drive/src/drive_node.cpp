@@ -40,7 +40,8 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.weak_src_pct", 60, 0, 100);
     declare_int("drive.con_v_mm_s", 100, 0, 1000);        // 공사 구간 최고 속도
     declare_int("drive.con_ld_min_mm", 250, 0, 1000);     // 공사 구간 최소 lookahead (길게: 멀리 보고 미리 완만하게 꺾음)
-    declare_int("drive.con_ld_sharp_mm", 0, 0, 1000);     // 공사 구간 급한 곳 lookahead (0이면 안 줄임. 줄이면 ㄱ자에서 늦게 꺾음)
+    declare_int("drive.con_ld_sharp_mm", 0, 0, 1000);
+    declare_int("drive.con_turn_gain_pct", 130, 50, 300); // 공사 구간 회전 세기 % (130 = 같은 lookahead에서 반경 0.77배)     // 공사 구간 급한 곳 lookahead (0이면 안 줄임. 줄이면 ㄱ자에서 늦게 꺾음)
     declare_int("drive.con_pivot_enter_deg", 180, 0, 180); // 공사 구간 피봇 시작 각도 (180 = 코너 피봇 안 함. 벽돌 옆 피봇은 뒤가 쓸림)
     declare_int("drive.con_pivot_keep_deg", 15, 0, 180);  // 공사 구간에서 pure pursuit에 맡기는 각도
 
@@ -139,6 +140,7 @@ void DriveNode::apply_profile()
 {
     follower_.p.ld_min = construction_ ? ld_min_con_ : ld_min_normal_;
     follower_.p.ld_sharp = construction_ ? ld_sharp_con_ : ld_sharp_normal_;
+    follower_.p.turn_gain = construction_ ? turn_gain_con_ : 1.0;
     follower_.p.ld_max = std::max(follower_.p.ld_max, follower_.p.ld_min);
     pivot_.p = construction_ ? pv_con_ : pv_normal_;
 }
@@ -174,6 +176,7 @@ void DriveNode::reload_params()
     p.ld_time = mm("drive.ld_time_ms"); // ms → s 도 /1000
     ld_sharp_normal_ = mm("drive.ld_sharp_mm");
     ld_sharp_con_ = mm("drive.con_ld_sharp_mm");
+    turn_gain_con_ = get_parameter("drive.con_turn_gain_pct").as_int() / 100.0;
     p.sharp_turn = deg("drive.sharp_turn_deg");
     p.sharp_hold = mm("drive.sharp_hold_ms");
     p.curv_slow = mm("drive.curv_slow_mm");

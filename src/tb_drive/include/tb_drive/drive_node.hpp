@@ -74,6 +74,7 @@ private:
     double con_v_ = 0.10;                   // 최고 속도 [m/s]
     double ld_min_normal_ = 0.17, ld_min_con_ = 0.25;
     double ld_sharp_normal_ = 0.12, ld_sharp_con_ = 0.0;
+    double turn_gain_con_ = 1.3;            // 공사 구간 회전 세기 배율
     tb_drive::PivotParams pv_normal_, pv_con_;
     void apply_profile();                   // construction_에 맞는 값을 follower_·pivot_에 넣음
     double psd_stop_ = 0.15;
