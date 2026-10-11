@@ -39,6 +39,7 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.pivot_enter_deg", 55, 0, 180);
     declare_int("drive.pivot_exit_deg", 15, 0, 90);
     declare_int("drive.pivot_w_deg_s", 60, 0, 360);
+    declare_int("drive.pivot_fallback_deg", 70, 0, 180); // 코너를 못 찾았는데 목표점이 이보다 옆이면 바로 피봇
 
     declare_bool("drive.psd.enable", false);
     declare_int("drive.psd.stop_mm", 150, 0, 1000);
@@ -153,6 +154,7 @@ void DriveNode::reload_params()
     pivot_enter_ = deg("drive.pivot_enter_deg");
     pivot_exit_ = std::min(deg("drive.pivot_exit_deg"), pivot_enter_);
     pivot_w_ = deg("drive.pivot_w_deg_s");
+    pivot_fallback_ = deg("drive.pivot_fallback_deg");
 
     psd_enable_ = get_parameter("drive.psd.enable").as_bool();
     psd_stop_ = mm("drive.psd.stop_mm");
@@ -204,6 +206,7 @@ void DriveNode::on_timer()
     if (!enable_)
     {
         lim_.reset();
+        phase_ = Phase::Follow; // 꺼졌다 켜질 때 회전 상태가 남지 않게
     }
     else
     {
@@ -267,6 +270,8 @@ void DriveNode::on_timer()
                     phase_ = Phase::Pivot;
                     pivot_done_ = 0.0;
                 }
+                else if (corner_.x > 0.5 || std::abs(corner_.y) > 0.3)
+                    phase_ = Phase::Follow; // 코너가 엉뚱한 곳으로 가면(추측항법 오차) 포기
                 break;
             }
 

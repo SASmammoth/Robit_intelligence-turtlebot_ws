@@ -105,6 +105,15 @@ void PathNode::reload_params()
     brick_margin_mm_ = get_parameter("path.brick_margin_mm").as_int();
     det_max_age_ms_ = get_parameter("path.det_max_age_ms").as_int();
     tracker_.p.mem_travel_m = get_parameter("path.mem_travel_mm").as_int() / 1000.0;
+
+    // 선언만 되어 있고 읽지 않던 값들 (yaml·GUI에서 바꿔도 반영이 안 됐음)
+    skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
+    auto &tp = tracker_.p;
+    tp.max_dev_m = get_parameter("path.max_dev_mm").as_int() / 1000.0;
+    tp.override_frames = get_parameter("path.override_frames").as_int();
+    tp.min_len_m = get_parameter("path.min_len_mm").as_int() / 1000.0;
+    tp.lookahead_m = get_parameter("path.branch_look_mm").as_int() / 1000.0;
+    tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
 }
 
 // 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽

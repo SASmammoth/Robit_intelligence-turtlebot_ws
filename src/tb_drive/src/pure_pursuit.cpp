@@ -239,16 +239,6 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
 
     o.has_corner = find_corner(pts, 0.6, o.corner, o.corner_turn); // 8cm 안에서 35° 넘게 꺾이면 코너
 
-    struct Out
-    {
-        double v = 0.0, w = 0.0;
-        Target tg;
-        bool held = false;
-        const char *why = "";
-        bool has_corner = false;  // 경로에 큰 꺾임이 있음
-        Pt corner;                // 꺾이는 지점 (base_link)
-        double corner_turn = 0.0; // 꺾인 각도 [rad], 왼쪽 +
-    };
 
     const double ld = std::clamp(p.ld_time * std::abs(v_now), p.ld_min, p.ld_max);
     o.tg = find_target(pts, ld);

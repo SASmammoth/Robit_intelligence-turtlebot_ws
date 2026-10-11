@@ -379,7 +379,10 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
         return out;
     }
 
-    const cv::Mat wall = white | yellow;
+    // 차선을 조금 깎아서 씀: 기억 경로가 선을 살짝 스치는 건(추측항법 오차) 무시하고,
+    // 선을 가로질러 넘어가는 경우만 자름. 깎지 않으면 섬 갈림길에서 기억이 너무 짧아져 lost가 됨 (sim_fork)
+    cv::Mat wall = white | yellow;
+    cv::erode(wall, wall, cv::getStructuringElement(cv::MORPH_RECT, {5, 5}));
     mem_r = clip_at_wall(mem_r, wall, g);
 
     // ── 3) 기억으로 버티기
