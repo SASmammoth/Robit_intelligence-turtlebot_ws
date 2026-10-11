@@ -300,26 +300,34 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
         bool turn_used = false;
         // 분기 선택: 기억한 경로가 이 분기 너머까지 있으면 그것과 가장 가까운 가지,
         // 없으면 이번 경로의 첫 분기는 turn 명령, 그다음 분기는 가장 곧은 가지
-        const Chooser choose = [&](cv::Point cur, cv::Point2d din, const std::vector<cv::Point> &ends) {
-            if (mem_r.size() >= 2) {
+                const Chooser choose = [&](cv::Point cur, cv::Point2d din, const std::vector<cv::Point> &ends)
+        {
+            // turn 방향으로 가장 맞는 가지
+            const Turn t = turn_used ? Turn::Straight : turn;
+            turn_used = true;
+            int turn_pick = 0;
+            double bv = -DBL_MAX;
+            for (int i = 0; i < (int)ends.size(); ++i)
+            {
+                const double a = turn_angle(din, cv::Point2d(ends[i] - cur));
+                const double v = t == Turn::Left ? a : t == Turn::Right ? -a : -std::abs(a);
+                if (v > bv) { bv = v; turn_pick = i; }
+            }
+
+            // 기억한 경로와 확실히 일치하는 가지가 있으면, 직진 명령이거나 turn과 같은 가지일 때만 기억을 따름
+            if (mem_r.size() >= 2)
+            {
                 std::vector<double> d;
                 for (const auto &e : ends) d.push_back(poly_dist(px_small_to_robot(e), mem_r));
                 std::vector<int> idx(d.size());
                 for (size_t i = 0; i < idx.size(); ++i) idx[i] = int(i);
                 std::sort(idx.begin(), idx.end(), [&](int a, int b) { return d[a] < d[b]; });
                 const double b0 = d[idx[0]], b1 = d[idx[1]];
-                if (b0 < 0.025 && (b1 > 2 * b0 || b1 > 0.04)) return idx[0];
+                if (b0 < 0.025 && (b1 > 2 * b0 || b1 > 0.04))
+                    if (t == Turn::Straight || idx[0] == turn_pick)
+                        return idx[0];
             }
-            const Turn t = turn_used ? Turn::Straight : turn;
-            turn_used = true;
-            int best = 0;
-            double bv = -DBL_MAX;
-            for (int i = 0; i < (int)ends.size(); ++i) {
-                const double a = turn_angle(din, cv::Point2d(ends[i] - cur));
-                const double v = t == Turn::Left ? a : t == Turn::Right ? -a : -std::abs(a);
-                if (v > bv) { bv = v; best = i; }
-            }
-            return best;
+            return turn_pick;
         };
 
         const cv::Point start(sk.seed.x / K, sk.seed.y / K);

@@ -69,6 +69,12 @@ private:
     double weak_scale_ = 0.6;
     double psd_stop_ = 0.15;
 
+    double pivot_enter_ = 55.0 * M_PI / 180.0;
+    double pivot_exit_ = 15.0 * M_PI / 180.0;
+    double pivot_w_ = 60.0 * M_PI / 180.0;
+    bool pivoting_ = false;
+    int pivot_dir_ = 0;
+
     // 모터 출력 (UART)
     bool uart_enable_ = true;
     bool invert_l_ = false, invert_r_ = false;

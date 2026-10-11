@@ -1,0 +1,18 @@
+path_node:
+  ros__parameters:
+    skel:
+      seal_len: 30          # 끊긴 차선 끝 연장 (BEV px)
+      prune_len: 20         # 잔가지 삭제 길이 (BEV px)
+      dash_len: 40          # ★ 노란 점선 한 칸 길이 / m_per_px_y
+      max_lane_thick: 20    # ★ 차선 두께 / m_per_px_x 보다 여유 있게
+
+    path:
+      brick_depth_mm: 100    # ★ 벽돌 앞뒤 길이
+      brick_margin_mm: 50   # ★ 박스 좌우 여유
+      det_max_age_ms: 300
+      mem_travel_mm: 600    # 기억만으로 갈 수 있는 최대 거리
+      max_dev_mm: 50        # 새 경로가 기억과 이만큼 넘게 다르면 의심
+      override_frames: 10   # 의심이 이만큼 연속되면 새 경로를 믿음
+      min_len_mm: 100       # 이보다 짧은 경로는 무효
+      branch_look_mm: 40    # 분기에서 각 가지를 미리 보는 길이
+      blind_max_mm: 250     # 사각지대를 연속으로 지날 수 있는 최대 길이

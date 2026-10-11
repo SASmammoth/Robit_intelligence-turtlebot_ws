@@ -36,6 +36,10 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.cmd_timeout_ms", 500, 50, 3000);
     declare_int("drive.weak_src_pct", 60, 0, 100);
 
+    declare_int("drive.pivot_enter_deg", 55, 0, 180);
+    declare_int("drive.pivot_exit_deg", 15, 0, 90);
+    declare_int("drive.pivot_w_deg_s", 60, 0, 360);
+
     declare_bool("drive.psd.enable", false);
     declare_int("drive.psd.stop_mm", 150, 0, 1000);
     declare_parameter("drive.psd.topics", std::vector<std::string>{"/psd/front"}); // 시작할 때만 읽음
@@ -146,6 +150,10 @@ void DriveNode::reload_params()
     cmd_timeout_ = mm("drive.cmd_timeout_ms");
     weak_scale_ = get_parameter("drive.weak_src_pct").as_int() / 100.0;
 
+    pivot_enter_ = deg("drive.pivot_enter_deg");
+    pivot_exit_ = std::min(deg("drive.pivot_exit_deg"), pivot_enter_);
+    pivot_w_ = deg("drive.pivot_w_deg_s");
+
     psd_enable_ = get_parameter("drive.psd.enable").as_bool();
     psd_stop_ = mm("drive.psd.stop_mm");
 
@@ -225,8 +233,25 @@ void DriveNode::on_timer()
             o = follower_.follow(t, lim_.v, limit);
             vd = o.v;
             wd = o.w;
-            why = o.why;
+
+            // 목표점이 옆으로 많이 틀어져 있으면 제자리 회전
+            const double ang = std::atan2(o.tg.p.y, o.tg.p.x); // 왼쪽 +
+            if (!pivoting_ && o.tg.ok && std::abs(ang) > pivot_enter_)
+            {
+                pivoting_ = true;
+                pivot_dir_ = ang > 0 ? 1 : -1; // 회전 중에는 방향 고정
+            }
+            if (pivoting_ && (!o.tg.ok || std::abs(ang) < pivot_exit_))
+                pivoting_ = false;
+            if (pivoting_)
+            {
+                vd = 0.0;
+                wd = pivot_dir_ * pivot_w_;
+                why = "pivot";
+            }
         }
+        if (mode != DriveCmd::FOLLOW)
+            pivoting_ = false;
 
         // ====== 가감속 제한 → PSD (전진만 막고 즉시 정지)
         lim_.step(vd, wd, dt, follower_.p);

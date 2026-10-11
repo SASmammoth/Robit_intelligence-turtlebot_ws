@@ -64,8 +64,21 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.brick_margin_mm", 30, 300);
     declare_int("path.det_max_age_ms", 300, 2000);
     declare_int("path.mem_travel_mm", 600, 3000);
+    declare_int("skel.max_lane_thick", 20, 200);
+    declare_int("path.max_dev_mm", 50, 500);
+    declare_int("path.override_frames", 10, 100);
+    declare_int("path.min_len_mm", 100, 1000);
+    declare_int("path.branch_look_mm", 40, 300);
+    declare_int("path.blind_max_mm", 250, 1000);
 
     reload_params();
+    skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
+    auto &tp = tracker_.p;
+    tp.max_dev_m = get_parameter("path.max_dev_mm").as_int() / 1000.0;
+    tp.override_frames = get_parameter("path.override_frames").as_int();
+    tp.min_len_m = get_parameter("path.min_len_mm").as_int() / 1000.0;
+    tp.lookahead_m = get_parameter("path.branch_look_mm").as_int() / 1000.0;
+    tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
     post_cb_handle_ = add_post_set_parameters_callback(
         [this](const std::vector<rclcpp::Parameter> &) { reload_params(); });
 

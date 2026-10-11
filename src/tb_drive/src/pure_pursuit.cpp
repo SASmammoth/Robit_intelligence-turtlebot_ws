@@ -3,10 +3,31 @@
 #include <algorithm>
 #include <cmath>
 
+
+
 namespace tb_drive {
 namespace {
 double norm(const Pt &p) { return std::hypot(p.x, p.y); }
+// 경로를 따라 s번째 점에서 arc 만큼 간 점
+Pt point_along(const std::vector<Pt> &path, size_t s, double arc)
+{
+    for (size_t i = s + 1; i < path.size(); ++i)
+    {
+        const double L = std::hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+        if (L >= arc)
+        {
+            const double r = arc / L;
+            return {path[i - 1].x + (path[i].x - path[i - 1].x) * r,
+                    path[i - 1].y + (path[i].y - path[i - 1].y) * r};
+        }
+        arc -= L;
+    }
+    return path.back();
+}
 } // namespace
+
+
+
 
 Target find_target(const std::vector<Pt> &path, double ld)
 {
@@ -26,7 +47,7 @@ Target find_target(const std::vector<Pt> &path, double ld)
 
     if (norm(path[s]) >= ld)
     {
-        t.p = path[s]; // 사각지대 때문에 경로가 ld 밖에서 시작
+        t.p = point_along(path, s, ld); // 사각지대 때문에 경로가 ld 밖에서 시작
     }
     else
     {
@@ -66,6 +87,8 @@ Target find_target(const std::vector<Pt> &path, double ld)
     t.ok = true;
     return t;
 }
+
+
 
 void command(const Target &t, const Params &p, double limit, double &v, double &w)
 {

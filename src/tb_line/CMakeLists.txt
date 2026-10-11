@@ -22,6 +22,6 @@ ament_target_dependencies(lineDetect_node rclcpp sensor_msgs cv_bridge tb_interf
 target_link_libraries(lineDetect_node ${OpenCV_LIBS})
 
 install(TARGETS lineDetect_node DESTINATION lib/${PROJECT_NAME})
-install(DIRECTORY launch scripts DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY launch scripts config DESTINATION share/${PROJECT_NAME})
 
 ament_package()

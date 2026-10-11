@@ -24,7 +24,9 @@ def share_or_empty(pkg, *rel):
 
 def generate_launch_description():
     default_engine = share_or_empty('tb_signs', 'models', 'sign.engine')
-    drive_yaml = share_or_empty('tb_drive', 'config', 'drive.yaml')
+    drive_yaml = share_or_empty("tb_drive", "config", "drive.yaml")
+    line_yaml = share_or_empty("tb_line", "config", "line.yaml")
+    path_yaml = share_or_empty("tb_path", "config", "path.yaml")
 
     signs = LaunchConfiguration('signs')
     engine = LaunchConfiguration('engine')
@@ -34,11 +36,13 @@ def generate_launch_description():
 
     # 카메라가 장치를 연 뒤 노출 고정
     cam_setup = ExecuteProcess(
-        cmd=['bash', os.path.join(get_package_share_directory('tb_lane'), 'scripts', 'cam_setup.sh')],
+        cmd=['bash', os.path.join(get_package_share_directory('tb_line'), 'scripts', 'cam_setup.sh')],
         output='screen')
 
-    line = Node(package='tb_line', executable='lineDetect_node', name='lineDetect_node', output='screen')
-    path = Node(package='tb_path', executable='path_node', name='path_node', output='screen')
+    line = Node(package='tb_line', executable='lineDetect_node', name='lineDetect_node', output='screen',
+                parameters=[line_yaml] if os.path.exists(line_yaml) else [])
+    path = Node(package='tb_path', executable='path_node', name='path_node', output='screen',
+                parameters=[path_yaml] if os.path.exists(path_yaml) else [])
     yolo = Node(package='tb_signs', executable='sign_detect_node', name='signs_node', output='screen',
                 parameters=[{'engine_path': engine}],
                 condition=IfCondition(signs))

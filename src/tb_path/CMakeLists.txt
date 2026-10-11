@@ -33,5 +33,6 @@ ament_target_dependencies(path_node rclcpp sensor_msgs nav_msgs geometry_msgs st
 target_link_libraries(path_node path_core)
 
 install(TARGETS path_node DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
 ament_package()

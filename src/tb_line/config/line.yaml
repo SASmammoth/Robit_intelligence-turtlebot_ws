@@ -1,0 +1,24 @@
+lineDetect_node:
+  ros__parameters:
+    # ── HSV
+    white:  {h_min: 75, h_max: 179, s_min: 0,  s_max: 160, v_min: 200, v_max: 255}
+    yellow: {h_min: 35, h_max: 60,  s_min: 60, s_max: 255, v_min: 60,  v_max: 255}
+
+    morph:
+      open: 3
+      close: 9
+      min_area: 150
+
+    # ── BEV 사다리꼴 (원본 영상 %). 직선에서 두 차선이 수직·평행해지게
+    bev:
+      top_y: 40
+      bot_y: 100
+      top_w: 32
+      bot_w: 100
+      lane_w_px: 172      # ★ BEV에서 차선 안쪽 간격
+
+    # ── 실측 (★ 자로 잰 값)
+    geo:
+      lane_w_mm: 260      # 두 차선 안쪽 간격
+      bev_depth_mm: 540   # BEV 맨 아랫줄 ~ 맨 윗줄 바닥 거리
+      bev_bottom_mm: 205  # 바퀴 축 ~ BEV 맨 아랫줄 (최소 인식 거리)
