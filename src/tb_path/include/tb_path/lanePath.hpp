@@ -40,6 +40,8 @@ struct TrackerParams {
     double step_m          = 0.02;  // 출력 경로 점 간격
     double lookahead_m     = 0.04;  // 분기 판단 때 각 가지를 미리 보는 길이
     double blind_max_m     = 0.25;  // 경로가 사각지대 안을 연속으로 지날 수 있는 최대 길이
+    int    fill_blind      = 1;     // 사각지대(로봇 ~ BEV 아랫줄)를 지나온 경로로 채움: 0 끔, 1 직진 명령일 때만, 2 항상
+    double fill_join_m     = 0.04;  // 기억과 실시간 경로 시작점이 이보다 멀면 채우지 않음
 };
 
 struct Output {
@@ -57,7 +59,7 @@ public:
                   const cv::Mat &white, const cv::Mat &yellow, const cv::Mat &valid,
                   const Geo &g, Turn turn, const Pose2D &pose);
 
-    void reset() { mem_.clear(); suspicious_ = 0; }
+    void reset() { mem_.clear(); trail_.clear(); suspicious_ = 0; }
 
     // 기억한 경로를 지금 자세로 옮겨서, BEV 아래쪽에 처음 들어오는 점 (스켈레톤 시드 힌트).
     // 커브에서는 BEV 하단 중앙이 차선 바깥에 놓여서, 그 근처에서 시드를 찾으면
@@ -67,6 +69,7 @@ public:
 private:
     std::vector<cv::Point2d> mem_;  // 기억한 경로 (월드 좌표)
     Pose2D mem_pose_;               // 기억을 마지막으로 갱신한 자세
+    std::vector<cv::Point2d> trail_; // 사각지대 채움용: 지나온 경로 + 마지막 실시간 경로 (월드 좌표)
     int suspicious_ = 0;
 };
 

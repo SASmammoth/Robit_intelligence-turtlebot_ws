@@ -70,6 +70,8 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.min_len_mm", 100, 1000);
     declare_int("path.branch_look_mm", 40, 300);
     declare_int("path.blind_max_mm", 250, 1000);
+    declare_int("path.fill_blind", 1, 2);          // 사각지대를 지나온 경로로 채움: 0 끔, 1 직진 명령일 때만, 2 항상
+    declare_int("path.fill_join_mm", 40, 200);     // 기억과 실시간 경로가 이보다 떨어져 있으면 안 채움
 
     reload_params();
     skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
@@ -79,6 +81,8 @@ PathNode::PathNode() : Node("path_node")
     tp.min_len_m = get_parameter("path.min_len_mm").as_int() / 1000.0;
     tp.lookahead_m = get_parameter("path.branch_look_mm").as_int() / 1000.0;
     tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
+    tp.fill_blind = get_parameter("path.fill_blind").as_int();
+    tp.fill_join_m = get_parameter("path.fill_join_mm").as_int() / 1000.0;
     post_cb_handle_ = add_post_set_parameters_callback(
         [this](const std::vector<rclcpp::Parameter> &) { reload_params(); });
 
@@ -114,6 +118,8 @@ void PathNode::reload_params()
     tp.min_len_m = get_parameter("path.min_len_mm").as_int() / 1000.0;
     tp.lookahead_m = get_parameter("path.branch_look_mm").as_int() / 1000.0;
     tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
+    tp.fill_blind = get_parameter("path.fill_blind").as_int();
+    tp.fill_join_m = get_parameter("path.fill_join_mm").as_int() / 1000.0;
 }
 
 // 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽

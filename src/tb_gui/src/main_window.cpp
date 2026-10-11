@@ -407,6 +407,8 @@ void MainWindow::setupParamTab()
            {"path.min_len_mm", "최소 경로 길이", " mm", 0, 1000, 10},
            {"path.branch_look_mm", "분기 미리보기", " mm", 0, 300, 5},
            {"path.blind_max_mm", "사각지대 통과 최대", " mm", 0, 1000, 10},
+           {"path.fill_blind", "사각지대 채움 (0끔/1직진만/2항상)", "", 0, 2, 1},
+           {"path.fill_join_mm", "채움 연결 허용", " mm", 0, 200, 5},
        }},
   };
   constexpr int COLS = 3;

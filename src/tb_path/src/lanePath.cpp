@@ -371,11 +371,38 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
 
     if (live_ok) {
         suspicious_ = 0;
+        // 사각지대(로봇 ~ BEV 맨 아랫줄, 약 20cm)는 카메라가 못 보므로 직전 기억으로 채움.
+        // 경로가 로봇 바로 앞부터 이어져야 pure pursuit가 커브에서 바깥으로 밀리지 않음
+        // (시뮬레이션: 90° 커브 R26cm에서 최대 오차 6cm → 2cm 이하)
+        // 채움은 출력 경로에만 씀. 분기 선택·의심 판단에 쓰는 기억(mem_)은 예전처럼 실시간 경로만 저장
+        // (채운 점까지 기억에 넣으면 이동량 오차가 판단에 섞여 섬 갈림길에서 경로를 잃음, sim_fork)
+        Pts full;
+        // 갈림길(turn 명령 중)에서는 채운 구간이 분기 판단을 흔들 수 있어 기본은 직진 명령일 때만 (sim_fork)
+        const bool fill = p.fill_blind == 2 || (p.fill_blind == 1 && turn == Turn::Straight);
+        if (fill && trail_.size() >= 2) {
+            Pts tr;
+            for (const auto &w : trail_) {
+                const cv::Point2d q = to_robot(w, pose);
+                if (q.x > 0.0) tr.push_back(q);             // 이미 지나간 점은 버림
+            }
+            size_t j = 0;                                   // 실시간 경로 시작점과 가장 가까운 점
+            double bd = DBL_MAX;
+            for (size_t i = 0; i < tr.size(); ++i) {
+                const double d = cv::norm(tr[i] - live.front());
+                if (d < bd) { bd = d; j = i; }
+            }
+            if (bd < p.fill_join_m)                         // 잘 이어질 때만 (틀어졌으면 버림)
+                full.assign(tr.begin(), tr.begin() + j);
+        }
+        full.insert(full.end(), live.begin(), live.end());
+        trail_.clear();
+        for (const auto &q : full) trail_.push_back(to_world(q, pose));
+
         mem_.clear();
         for (const auto &q : live) mem_.push_back(to_world(q, pose));
         mem_pose_ = pose;
         out.src = Source::Live;
-        out.path = live;
+        out.path = full;
         return out;
     }
 

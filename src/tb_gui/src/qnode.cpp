@@ -185,7 +185,7 @@ std::vector<std::string> QNode::pathParamNames()
   return {"skel.seal_len", "skel.prune_len", "skel.dash_len", "skel.max_lane_thick",
           "path.brick_depth_mm", "path.brick_margin_mm", "path.det_max_age_ms", "path.mem_travel_mm",
           "path.max_dev_mm", "path.override_frames", "path.min_len_mm",
-          "path.branch_look_mm", "path.blind_max_mm"};
+          "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm"};
 }
 
 std::vector<std::string> QNode::driveParamNames(bool with_enable)
