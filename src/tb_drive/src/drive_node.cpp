@@ -292,6 +292,21 @@ void DriveNode::on_timer()
 
         // ====== 가감속 제한 → PSD (전진만 막고 즉시 정지)
         lim_.step(vd, wd, dt, follower_.p);
+        
+        // FOLLOW에서는 가감속 제한 뒤에도 곡률을 유지.
+        // 감속이 덜 된 상태에서 w만 작게 나가면 원하는 것보다 크게 돌아 바깥으로 밀림
+        if (mode == DriveCmd::FOLLOW && phase_ == Phase::Follow && o.tg.ok && o.v > 1e-3)
+        {
+            const double k = o.w / o.v; // 원하는 곡률 (w_max로 깎였으면 그 값)
+            double w = lim_.v * k;
+            if (std::abs(w) > follower_.p.w_max)
+            {
+                w = std::copysign(follower_.p.w_max, w);
+                lim_.v = follower_.p.w_max / std::abs(k); // 각속도가 모자라면 속도를 바로 낮춤
+            }
+            lim_.w = w;
+        }
+
         if (lim_.v > 0.0 && psd_blocked(now_t))
         {
             lim_.v = 0.0;
