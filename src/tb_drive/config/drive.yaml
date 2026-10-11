@@ -45,8 +45,8 @@ drive_node:
       uart:
         enable: true
         wheel_radius_m: 0.0475
-        wheel_sep_m: 0.1933
-        rpm_per_unit: 0.229     # MX-64 Protocol 2.0. Protocol 1.0이면 0.114
+        rpm_per_unit: 0.43     # 실측 보정: 직진 0.1m/s × 5s → 51cm (기존 0.229는 약 1.9배 빠름)
+        wheel_sep_m: 0.165     # 실측 보정: 제자리 회전 2바퀴 (실제 간격 0.1933)
         max_raw: 275            # MX-64 12V 무부하 약 63rpm. 넘으면 L/R 비율 유지하며 축소
         invert_left: false      # GUI WASD와 같은 규칙(전진 = 둘 다 양수)이면 false
         invert_right: false
