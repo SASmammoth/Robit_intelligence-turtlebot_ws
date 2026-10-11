@@ -652,7 +652,7 @@ void MainWindow::setupParamTab()
        }},
       {"공사 구간 (path_node) — 표지판 또는 View 탭 C키",
        {
-           {"path.con_lane_w_mm", "차폭", " mm", 0, 1500, 10},
+           {"path.con_lane_w_mm", "차폭 (0=일반과 같게)", " mm", 0, 1500, 10},
            {"path.con_brick_depth_mm", "벽돌 벽 앞뒤", " mm", 0, 500, 10},
            {"path.con_brick_margin_mm", "벽돌 벽 좌우 여유", " mm", 0, 300, 5},
            {"path.con_brick_w_mm", "벽돌 실제 가로", " mm", 0, 600, 10},
