@@ -35,7 +35,6 @@ LineDetectNode::LineDetectNode() : Node("lineDetect_node")
     hsv_ranges_[idx(Target::YellowLine)] = {cv::Scalar(35, 60, 60), cv::Scalar(60, 255, 255)};
     hsv_ranges_[idx(Target::RedLine)] = {cv::Scalar(0, 60, 0), cv::Scalar(30, 255, 255)};
 
-
     for (size_t i = 0; i < idx(Target::COUNT); ++i)
     {
         const std::string prefix = target_name(static_cast<Target>(i));
@@ -115,15 +114,19 @@ void LineDetectNode::image_callback(const sensor_msgs::msg::Image::ConstSharedPt
 
     cv::Mat white_bin = make_mask(hsv, Target::WhiteLine);
     cv::Mat yellow_bin = make_mask(hsv, Target::YellowLine);
+    cv::Mat red_bin = make_mask(hsv, Target::RedLine);
 
     // 사각지대 경계의 색 번짐 제거
     cv::bitwise_and(white_bin, bev_valid_, white_bin);
     cv::bitwise_and(yellow_bin, bev_valid_, yellow_bin);
+    cv::bitwise_and(red_bin, bev_valid_, red_bin);
 
-    // ====== 라벨 영상: 0 없음, 1 흰, 2 노랑, 255 사각지대
+    // ====== 라벨 영상: 0 없음, 1 흰, 2 노랑, 250 빨강, 255 사각지대
+    // 겹치면 노랑 > 빨강 > 흰 (주행에 쓰는 노란선이 빨강에 먹히지 않게)
     cv::Mat label(bev.size(), CV_8U, cv::Scalar(LABEL_NONE));
     label.setTo(LABEL_WHITE, white_bin);
-    label.setTo(LABEL_YELLOW, yellow_bin); // 겹치면 노란색 우선
+    label.setTo(LABEL_RED, red_bin);
+    label.setTo(LABEL_YELLOW, yellow_bin);
     label.setTo(LABEL_BLIND, bev_valid_ == 0);
 
     tb_interfaces::msg::LaneMask out;
@@ -162,10 +165,11 @@ void LineDetectNode::image_callback(const sensor_msgs::msg::Image::ConstSharedPt
     }
     if (debug_mask_pub_->get_subscription_count() > 0)
     {
-        // 흰선은 흰색, 노란선은 노란색, 사각지대는 진회색으로 한 장에
+        // 흰선은 흰색, 빨간선은 빨간색, 노란선은 노란색, 사각지대는 진회색으로 한 장에
         cv::Mat view(bev.size(), CV_8UC3, cv::Scalar(0, 0, 0));
         view.setTo(cv::Scalar(60, 60, 60), bev_valid_ == 0);
         view.setTo(cv::Scalar(255, 255, 255), white_bin);
+        view.setTo(cv::Scalar(0, 0, 255), red_bin);
         view.setTo(cv::Scalar(0, 220, 255), yellow_bin);
         publish_debug(debug_mask_pub_, view, msg->header);
     }

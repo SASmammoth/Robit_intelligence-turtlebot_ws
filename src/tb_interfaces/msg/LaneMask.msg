@@ -1,7 +1,7 @@
 # tb_line → tb_path : BEV 차선 라벨 영상과 거리 환산값
 std_msgs/Header header
 
-# mono8 BEV 영상. 0 = 차선 없음, 1 = 흰선, 2 = 노란선, 255 = 사각지대(카메라가 못 보는 곳)
+# mono8 BEV 영상. 0 = 차선 없음, 1 = 흰선, 2 = 노란선, 250 = 빨간선, 255 = 사각지대(카메라가 못 보는 곳)
 sensor_msgs/Image label
 
 float32 m_per_px_x        # 가로 1px당 거리 [m]

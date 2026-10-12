@@ -150,6 +150,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     if (!checked) return;
     current_target_ = "yellow";
     loadTargetToSliders(); });
+  connect(ui->radioBtn1, &QRadioButton::toggled, this, [this](bool checked)
+          {
+    if (!checked) return;
+    current_target_ = "red";
+    loadTargetToSliders(); });
 
   // ====== 노드에서 읽어온 값 반영
   connect(qnode, &QNode::paramLoaded, this, [this](const QString &name, int v)
@@ -161,7 +166,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
       applyGlobalParam(name, v);
       return;
     }
-    if (name.startsWith("white.") || name.startsWith("yellow."))
+    if (name.startsWith("white.") || name.startsWith("yellow.") || name.startsWith("red."))
     {
       hsv_cache_[name] = v;
       if (name.startsWith(current_target_ + "."))

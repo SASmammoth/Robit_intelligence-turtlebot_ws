@@ -175,7 +175,7 @@ bool QNode::isDriveParam(const QString &n)
 std::vector<std::string> QNode::lineParamNames()
 {
   std::vector<std::string> names;
-  for (const char *t : {"white", "yellow"})
+  for (const char *t : {"white", "yellow", "red"})
     for (const char *k : {"h_min", "h_max", "s_min", "s_max", "v_min", "v_max"})
       names.push_back(std::string(t) + "." + k);
   for (const char *n : {"morph.open", "morph.close", "morph.min_area",

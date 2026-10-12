@@ -3,6 +3,7 @@ lineDetect_node:
     # ── HSV
     white:  {h_min: 75, h_max: 179, s_min: 0,  s_max: 160, v_min: 200, v_max: 255}
     yellow: {h_min: 35, h_max: 60,  s_min: 60, s_max: 255, v_min: 60,  v_max: 255}
+    red:    {h_min: 0,  h_max: 30,  s_min: 60, s_max: 255, v_min: 0,   v_max: 255}
 
     morph:
       open: 3
