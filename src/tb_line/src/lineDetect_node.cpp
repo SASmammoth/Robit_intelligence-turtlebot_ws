@@ -33,6 +33,8 @@ LineDetectNode::LineDetectNode() : Node("lineDetect_node")
     // ====== HSV
     hsv_ranges_[idx(Target::WhiteLine)] = {cv::Scalar(75, 0, 200), cv::Scalar(179, 160, 255)};
     hsv_ranges_[idx(Target::YellowLine)] = {cv::Scalar(35, 60, 60), cv::Scalar(60, 255, 255)};
+    hsv_ranges_[idx(Target::RedLine)] = {cv::Scalar(0, 60, 0), cv::Scalar(30, 255, 255)};
+
 
     for (size_t i = 0; i < idx(Target::COUNT); ++i)
     {

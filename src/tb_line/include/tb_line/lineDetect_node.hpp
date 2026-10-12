@@ -17,6 +17,7 @@ public:
     {
         WhiteLine = 0,
         YellowLine,
+        RedLine,
         COUNT
     };
 
@@ -30,6 +31,8 @@ public:
             return "white";
         case Target::YellowLine:
             return "yellow";
+        case Target::RedLine:
+            return "red";
         default:
             return "";
         }
@@ -39,6 +42,7 @@ public:
     static constexpr uint8_t LABEL_NONE = 0;
     static constexpr uint8_t LABEL_WHITE = 1;
     static constexpr uint8_t LABEL_YELLOW = 2;
+    static constexpr uint8_t LABEL_RED = 250;
     static constexpr uint8_t LABEL_BLIND = 255;
 
 private:
