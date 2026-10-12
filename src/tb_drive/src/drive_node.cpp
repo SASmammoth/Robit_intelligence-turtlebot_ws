@@ -93,6 +93,14 @@ DriveNode::DriveNode() : Node("drive_node")
             apply_profile();
             RCLCPP_INFO(get_logger(), "construction profile: %s", construction_ ? "ON" : "off"); });
 
+    pause_sub_ = create_subscription<std_msgs::msg::Bool>(          //pause 토픽 추가
+        "/mission/pause", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+        {
+            if (m->data == paused_)
+                return;
+            paused_ = m->data;
+            RCLCPP_INFO(get_logger(), "mission pause: %s", paused_ ? "ON" : "off"); });
+
     cmd_sub_ = create_subscription<DriveCmd>(
         "/drive/cmd", 10, [this](const DriveCmd::ConstSharedPtr m)
         {
@@ -292,6 +300,17 @@ void DriveNode::on_timer()
         }
         if (mode != DriveCmd::FOLLOW)
             pivot_.reset();
+
+            
+        // ====== 일시정지 (/mission/pause): 목표 속도를 0으로. 이후 lim_.step의 감속 제한으로 부드럽게 멈춤
+        if (paused_)
+        {
+            vd = 0.0;
+            wd = 0.0;
+            pivot_.reset(); // 정지 중에 제자리 회전이 시작되지 않게
+            if (!*why)
+                why = "pause";
+        }
 
         // ====== 가감속 제한 → PSD (전진만 막고 즉시 정지)
         lim_.step(vd, wd, dt, follower_.p);

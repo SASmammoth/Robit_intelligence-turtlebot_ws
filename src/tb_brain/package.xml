@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>tb_brain</name>
+  <version>0.1.0</version>
+  <description>표지판 검출(/signs/detections)에 따라 미션 토픽(turn/construction/pause)을 발행하는 판단 노드</description>
+  <maintainer email="hi-mammoth@naver.com">kyungmin</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>tb_interfaces</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
