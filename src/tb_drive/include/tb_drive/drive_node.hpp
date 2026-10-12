@@ -39,6 +39,9 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr src_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
+
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_; // /mission/pause
+
     rclcpp::Subscription<DriveCmd>::SharedPtr cmd_sub_;
     std::vector<rclcpp::Subscription<sensor_msgs::msg::Range>::SharedPtr> psd_subs_;
 
@@ -61,6 +64,8 @@ private:
     double last_tick_ = -1.0;
     unsigned tick_ = 0;
     std::string last_state_;
+
+    bool paused_ = false; // /mission/pause 수신값 (true면 정지)
 
     // ====== 파라미터
     bool enable_ = false;
