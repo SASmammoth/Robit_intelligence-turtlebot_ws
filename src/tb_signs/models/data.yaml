@@ -1,4 +1,4 @@
-path: /home/SASmammoth/datasets/turtlebot_signs/dataset
+path: /home/sasmammoth/datasets/turtlebot_signs/dataset
 train: images/train
 val: images/val
 names:
@@ -9,3 +9,7 @@ names:
   4: left
   5: parking
   6: right
+  7: tl_green
+  8: tl_off
+  9: tl_red
+  10: tl_yellow
