@@ -34,6 +34,8 @@ DriveNode::DriveNode() : Node("drive_node")
     // 교차로 명령(/mission/turn)이 없을 때: 일반 곡선(최대 ~75°)에서는 줄이지 않고, 헤어핀·명령 없는 급코너만
     declare_int("drive.sharp_curve_start_deg", 85, 0, 180);  // 이보다 덜 틀어지면 lookahead 안 줄임
     declare_int("drive.sharp_curve_full_deg", 105, 1, 180);  // 이만큼 틀어지면 ld_sharp를 다 씀
+    // 교차로 명령·공사 구간이 아닐 때 경로 x에 더할 거리. bev_bottom 실측(205) - 설정값(130) = 75
+    declare_int("drive.curve_x_offset_mm", 0, -200, 200);
     declare_int("drive.curv_slow_mm", 100, 0, 1000);
     declare_int("drive.stop_dist_mm", 40, 0, 300);
 
@@ -167,6 +169,8 @@ void DriveNode::apply_profile()
     // 교차로 명령 중에는 예전처럼 0°부터 비례, 아니면 일반 곡선에서는 lookahead를 줄이지 않음
     follower_.p.sharp_start = turning_ ? 0.0 : sharp_curve_start_;
     follower_.p.sharp_turn = turning_ ? sharp_turn_cross_ : std::max(sharp_curve_full_, sharp_curve_start_ + 1e-3);
+    // 거리 보정은 일반 주행에서만 (교차로·공사 구간은 지금 맞춰진 값 그대로)
+    follower_.p.x_offset = (turning_ || construction_) ? 0.0 : curve_x_offset_;
 }
 
 void DriveNode::reload_params()
@@ -204,6 +208,7 @@ void DriveNode::reload_params()
     sharp_turn_cross_ = deg("drive.sharp_turn_deg");
     sharp_curve_start_ = deg("drive.sharp_curve_start_deg");
     sharp_curve_full_ = deg("drive.sharp_curve_full_deg");
+    curve_x_offset_ = mm("drive.curve_x_offset_mm");
     p.sharp_hold = mm("drive.sharp_hold_ms");
     p.curv_slow = mm("drive.curv_slow_mm");
     p.stop_dist = mm("drive.stop_dist_mm");

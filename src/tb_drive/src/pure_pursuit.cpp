@@ -256,6 +256,9 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
         hist_.delta(stamp, t, dx, dy, dth);
         pts = shift_path(pts, dx, dy, dth);
     }
+    if (p.x_offset != 0.0)
+        for (auto &q : pts)
+            q.x += p.x_offset;
 
     o.has_corner = find_corner(pts, 0.6, o.corner, o.corner_turn, p.corner_min_x); // 8cm 안에서 35° 넘게 꺾이면 코너
 

@@ -85,6 +85,7 @@ private:
     bool turning_ = false;
     double sharp_turn_cross_ = 0.79;                     // 교차로: 0°부터 비례, 이 각도에서 다 씀
     double sharp_curve_start_ = 1.48, sharp_curve_full_ = 1.83; // 일반 곡선: start 아래는 안 줄임
+    double curve_x_offset_ = 0.0;           // 일반 주행에서 경로 x에 더할 거리 [m]
     double turn_gain_con_ = 1.3;            // 공사 구간 회전 세기 배율
     tb_drive::PivotParams pv_normal_, pv_con_;
     void apply_profile();                   // construction_·turning_에 맞는 값을 follower_·pivot_에 넣음

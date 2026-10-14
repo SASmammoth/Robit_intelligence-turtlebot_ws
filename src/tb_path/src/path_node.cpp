@@ -100,6 +100,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_exit_mm", 600, 3000);
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
     declare_int("path.con_sign_frames", 3, 30);     // 공사 표지판이 이만큼 연속으로 보이면 자동 진입
+    declare_int("path.con_sign_min_h_px", 0, 480);  // 표지판 박스 높이가 이보다 작으면(멀면) 무시. 0이면 거리 상관없이
 
     reload_params();
     skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
@@ -167,6 +168,7 @@ void PathNode::reload_params()
     con_exit_mm_ = get_parameter("path.con_exit_mm").as_int();
     con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
     con_sign_frames_ = std::max(1, int(get_parameter("path.con_sign_frames").as_int()));
+    con_sign_min_h_ = int(get_parameter("path.con_sign_min_h_px").as_int());
 }
 
 // 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽
@@ -515,11 +517,17 @@ void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool
         std::abs((stamp - rclcpp::Time(last_det_->header.stamp)).seconds()) * 1000.0 <= det_max_age_ms_;
 
     // 표지판으로 자동 진입 (연속 con_sign_frames 프레임)
+    // 멀리 있는 표지판(작은 박스)은 무시: T자 출구에서 다음 구간 표지판이 보여 일찍 들어가는 것 방지
     bool sign = false;
+    int sign_h = 0;
     if (det_fresh)
         for (const auto &d : last_det_->detections)
             if (d.label == "construction")
-                sign = true;
+            {
+                sign_h = std::max(sign_h, int(d.h));
+                if (d.h >= con_sign_min_h_)
+                    sign = true;
+            }
     con_sign_seen_ = sign ? con_sign_seen_ + 1 : 0;
     if (sign)
         con_sign_time_ = stamp;
@@ -528,7 +536,7 @@ void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool
     if (!con_auto_ && !con_done_ && con_sign_seen_ >= con_sign_frames_)
     {
         con_auto_ = true;
-        RCLCPP_INFO(get_logger(), "construction: 표지판으로 진입");
+        RCLCPP_INFO(get_logger(), "construction: 표지판으로 진입 (박스 높이 %dpx)", sign_h);
     }
 
     if (con_on() != con_active_)

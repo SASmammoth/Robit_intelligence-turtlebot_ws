@@ -65,6 +65,7 @@ private:
     int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
     int con_sign_frames_ = 3;
+    int con_sign_min_h_ = 0;   // 이보다 작은 표지판 박스는 무시 [px]
     int turn_radius_mm_ = 150, turn_min_deg_ = 45; // 급한 모서리를 원호로 (lanePath fillet_corners)
     bool con_on() const { return (con_manual_ || con_auto_) && !con_done_; }
 

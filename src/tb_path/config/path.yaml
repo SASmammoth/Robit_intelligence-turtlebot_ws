@@ -37,3 +37,4 @@ path_node:
       con_smooth_mm: 80        # 공사 구간 경로 모서리를 이 폭으로 둥글게 (0이면 끔)
       con_exit_mm: 600         # 벽돌을 본 뒤 이만큼 가는 동안 벽돌이 안 보이면 일반 주행 (표지판 진입일 때만)
       con_sign_frames: 3    # 공사 표지판이 이만큼 연속으로 보이면 자동 진입
+      con_sign_min_h_px: 0  # 표지판 박스 높이가 이보다 작으면(멀면) 무시. 0 = 거리 상관없이 (/signs/detections의 h로 정함)

@@ -32,6 +32,9 @@ struct Params
     double sharp_start = 0.0;   // 이보다 덜 틀어지면 lookahead를 줄이지 않음 [rad]
     double sharp_turn = 1.05;   // 이만큼 틀어지면 ld_sharp를 다 씀 (sharp_start~sharp_turn 사이는 비례) [rad]
     double sharp_look = 0.35;   // 앞 이 길이 안의 경로를 봄 [m]
+    // 경로 x에 더할 값 [m]. geo.bev_bottom_mm을 실측보다 작게 쓰면 경로가 그만큼 가깝게 와서
+    // 곡선을 일찍·급하게 꺾음(안쪽을 밟음) → 차이(실측 - 설정)만큼 넣으면 조향 계산만 실제 거리로
+    double x_offset = 0.0;
     double sharp_hold = 1.0;    // 급한 곳을 본 뒤 이 시간 동안은 ld_sharp 유지 (피봇·코너 빠져나올 때까지) [s]
 };
 
