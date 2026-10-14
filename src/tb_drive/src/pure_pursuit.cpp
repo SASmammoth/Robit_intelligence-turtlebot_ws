@@ -8,6 +8,22 @@
 namespace tb_drive {
 namespace {
 double norm(const Pt &p) { return std::hypot(p.x, p.y); }
+// 경로를 따라 s번째 점에서 arc 만큼 간 점
+Pt point_along(const std::vector<Pt> &path, size_t s, double arc)
+{
+    for (size_t i = s + 1; i < path.size(); ++i)
+    {
+        const double L = std::hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+        if (L >= arc)
+        {
+            const double r = arc / L;
+            return {path[i - 1].x + (path[i].x - path[i - 1].x) * r,
+                    path[i - 1].y + (path[i].y - path[i - 1].y) * r};
+        }
+        arc -= L;
+    }
+    return path.back();
+}
 } // namespace
 
 
@@ -29,10 +45,7 @@ Target find_target(const std::vector<Pt> &path, double ld)
 
     if (norm(path[s]) >= ld)
     {
-        // 사각지대 때문에 경로가 ld 밖에서 시작 → 보이는 첫 점을 목표로 (헤더 설명대로)
-        // 예전처럼 첫 점에서 ld만큼 더 가면 실제 lookahead가 bev_bottom+ld(≈37cm)로 길어져
-        // 곡선·교차로에서 안쪽을 깎음 → bev_bottom을 실측보다 작게 두는 원인이었음 (test/turn_sim xb)
-        t.p = path[s];
+        t.p = point_along(path, s, ld); // 사각지대 때문에 경로가 ld 밖에서 시작
     }
     else
     {
@@ -259,7 +272,8 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
             dev = std::max(dev, std::abs(std::atan2(pts[i + 3].y - pts[i].y, pts[i + 3].x - pts[i].x)));
             run += std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
         }
-        double r = std::clamp(dev / p.sharp_turn, 0.0, 1.0);
+        // sharp_start 아래는 줄이지 않고, sharp_turn에서 ld_sharp를 다 씀 (그 사이는 비례)
+        double r = std::clamp((dev - p.sharp_start) / std::max(1e-3, p.sharp_turn - p.sharp_start), 0.0, 1.0);
         if (r >= 1.0)
             sharp_t_ = t;            // 급한 곳: 이 시각부터 sharp_hold 동안 짧게 유지
         else if (t - sharp_t_ < p.sharp_hold)

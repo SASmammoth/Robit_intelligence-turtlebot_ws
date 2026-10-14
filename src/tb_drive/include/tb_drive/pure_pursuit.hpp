@@ -29,7 +29,8 @@ struct Params
     double corner_min_x = 0.20; // 이보다 가까운 경로에서는 코너를 찾지 않음 [m] (= BEV 아랫줄 거리)
     // 급한 곳에서 lookahead 줄이기: 앞 sharp_look 안에서 경로가 로봇 방향과 sharp_turn만큼 틀어지면 ld_sharp까지
     double ld_sharp = 0.0;      // 0이면 끔 [m]
-    double sharp_turn = 1.05;   // 이만큼 틀어지면 ld_sharp를 다 씀 (그 사이는 비례) [rad]
+    double sharp_start = 0.0;   // 이보다 덜 틀어지면 lookahead를 줄이지 않음 [rad]
+    double sharp_turn = 1.05;   // 이만큼 틀어지면 ld_sharp를 다 씀 (sharp_start~sharp_turn 사이는 비례) [rad]
     double sharp_look = 0.35;   // 앞 이 길이 안의 경로를 봄 [m]
     double sharp_hold = 1.0;    // 급한 곳을 본 뒤 이 시간 동안은 ld_sharp 유지 (피봇·코너 빠져나올 때까지) [s]
 };

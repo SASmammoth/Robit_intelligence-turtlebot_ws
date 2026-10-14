@@ -29,7 +29,9 @@ drive_node:
       ld_max_mm: 350         # ★ 카메라가 보는 가장 먼 거리보다 짧게
       ld_time_ms: 1000       # lookahead = 속도 × 이 시간
       ld_sharp_mm: 120       # ★ 급한 곳(교차로, 벽돌)에서 줄일 lookahead. 0이면 끔
-      sharp_turn_deg: 60     # 앞 35cm 경로가 로봇 방향에서 이만큼 틀어지면 ld_sharp를 다 씀 (그 사이는 비례)
+      sharp_turn_deg: 60     # 교차로 명령(/mission/turn≠0) 중: 앞 35cm 경로가 이만큼 틀어지면 ld_sharp를 다 씀 (0°부터 비례)
+      sharp_curve_start_deg: 85  # 명령 없을 때(일반 곡선): 이보다 덜 틀어지면 lookahead를 안 줄임 (실측 일반 곡선 최대 ~75°, T ~105°+)
+      sharp_curve_full_deg: 105  # 명령 없을 때: 이만큼 틀어지면 ld_sharp를 다 씀
       sharp_hold_ms: 1000    # 급한 곳을 본 뒤 이 시간 동안은 짧게 유지 (코너를 빠져나올 때까지)
       curv_slow_mm: 100      # 커브 감속 세기 (0이면 감속 없음)
       stop_dist_mm: 40       # 경로 끝까지 이만큼 남으면 정지

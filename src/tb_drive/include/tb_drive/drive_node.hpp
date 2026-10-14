@@ -12,6 +12,7 @@
 #include <sensor_msgs/msg/range.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/u_int8.hpp>
 
 #include "tb_interfaces/msg/drive_cmd.hpp"
 #include "tb_drive/pure_pursuit.hpp"
@@ -41,6 +42,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
 
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_; // /mission/pause
+    rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr turn_sub_; // /mission/turn (0이 아니면 교차로)
 
     rclcpp::Subscription<DriveCmd>::SharedPtr cmd_sub_;
     std::vector<rclcpp::Subscription<sensor_msgs::msg::Range>::SharedPtr> psd_subs_;
@@ -79,9 +81,13 @@ private:
     double con_v_ = 0.10;                   // 최고 속도 [m/s]
     double ld_min_normal_ = 0.17, ld_min_con_ = 0.25;
     double ld_sharp_normal_ = 0.12, ld_sharp_con_ = 0.0;
+    // 급한 곳 lookahead를 켜는 각도: 교차로 명령(/mission/turn ≠ 0) 중 / 일반 곡선
+    bool turning_ = false;
+    double sharp_turn_cross_ = 0.79;                     // 교차로: 0°부터 비례, 이 각도에서 다 씀
+    double sharp_curve_start_ = 1.48, sharp_curve_full_ = 1.83; // 일반 곡선: start 아래는 안 줄임
     double turn_gain_con_ = 1.3;            // 공사 구간 회전 세기 배율
     tb_drive::PivotParams pv_normal_, pv_con_;
-    void apply_profile();                   // construction_에 맞는 값을 follower_·pivot_에 넣음
+    void apply_profile();                   // construction_·turning_에 맞는 값을 follower_·pivot_에 넣음
     double psd_stop_ = 0.15;
 
     tb_drive::Pivoter pivot_; // 날카로운 꺾임에서만 제자리 회전 (pure_pursuit.hpp)

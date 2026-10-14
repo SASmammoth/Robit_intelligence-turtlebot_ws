@@ -31,6 +31,9 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.ld_sharp_mm", 120, 0, 1000);       // 급한 곳에서 줄일 lookahead (0이면 끔)
     declare_int("drive.sharp_turn_deg", 60, 1, 180);      // 앞 경로가 이만큼 틀어지면 ld_sharp를 다 씀
     declare_int("drive.sharp_hold_ms", 1000, 0, 5000);    // 급한 곳을 본 뒤 이 시간 동안 짧게 유지
+    // 교차로 명령(/mission/turn)이 없을 때: 일반 곡선(최대 ~75°)에서는 줄이지 않고, 헤어핀·명령 없는 급코너만
+    declare_int("drive.sharp_curve_start_deg", 85, 0, 180);  // 이보다 덜 틀어지면 lookahead 안 줄임
+    declare_int("drive.sharp_curve_full_deg", 105, 1, 180);  // 이만큼 틀어지면 ld_sharp를 다 씀
     declare_int("drive.curv_slow_mm", 100, 0, 1000);
     declare_int("drive.stop_dist_mm", 40, 0, 300);
 
@@ -93,6 +96,16 @@ DriveNode::DriveNode() : Node("drive_node")
             apply_profile();
             RCLCPP_INFO(get_logger(), "construction profile: %s", construction_ ? "ON" : "off"); });
 
+    turn_sub_ = create_subscription<std_msgs::msg::UInt8>(
+        "/mission/turn", 10, [this](const std_msgs::msg::UInt8::ConstSharedPtr m)
+        {
+            const bool t = m->data != 0;
+            if (t == turning_)
+                return;
+            turning_ = t;
+            apply_profile();
+            RCLCPP_INFO(get_logger(), "sharp profile: %s", turning_ ? "intersection" : "curve"); });
+
     pause_sub_ = create_subscription<std_msgs::msg::Bool>(          //pause 토픽 추가
         "/mission/pause", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
         {
@@ -151,6 +164,9 @@ void DriveNode::apply_profile()
     follower_.p.turn_gain = construction_ ? turn_gain_con_ : 1.0;
     follower_.p.ld_max = std::max(follower_.p.ld_max, follower_.p.ld_min);
     pivot_.p = construction_ ? pv_con_ : pv_normal_;
+    // 교차로 명령 중에는 예전처럼 0°부터 비례, 아니면 일반 곡선에서는 lookahead를 줄이지 않음
+    follower_.p.sharp_start = turning_ ? 0.0 : sharp_curve_start_;
+    follower_.p.sharp_turn = turning_ ? sharp_turn_cross_ : std::max(sharp_curve_full_, sharp_curve_start_ + 1e-3);
 }
 
 void DriveNode::reload_params()
@@ -185,7 +201,9 @@ void DriveNode::reload_params()
     ld_sharp_normal_ = mm("drive.ld_sharp_mm");
     ld_sharp_con_ = mm("drive.con_ld_sharp_mm");
     turn_gain_con_ = get_parameter("drive.con_turn_gain_pct").as_int() / 100.0;
-    p.sharp_turn = deg("drive.sharp_turn_deg");
+    sharp_turn_cross_ = deg("drive.sharp_turn_deg");
+    sharp_curve_start_ = deg("drive.sharp_curve_start_deg");
+    sharp_curve_full_ = deg("drive.sharp_curve_full_deg");
     p.sharp_hold = mm("drive.sharp_hold_ms");
     p.curv_slow = mm("drive.curv_slow_mm");
     p.stop_dist = mm("drive.stop_dist_mm");
@@ -352,8 +370,8 @@ void DriveNode::on_timer()
     if (tick_ % std::max(1, control_hz_ / 10) == 0)
     {
         char buf[200];
-        std::snprintf(buf, sizeof(buf), "%s src=%s v=%.3f w=%.2f ld=%.2f end=%.2f%s%s%s",
-                      mode_txt.c_str(), path_src_.c_str(), lim_.v, lim_.w, o.tg.ld, o.tg.end_dist,
+        std::snprintf(buf, sizeof(buf), "%s src=%s v=%.3f w=%.2f ld=%.2f end=%.2f%s%s%s%s",
+                      mode_txt.c_str(), path_src_.c_str(), lim_.v, lim_.w, o.tg.ld, o.tg.end_dist, turning_ ? " X" : "",
                       o.held ? " HOLD" : "", *why ? " stop:" : "", why);
         std_msgs::msg::String s;
         s.data = buf;
