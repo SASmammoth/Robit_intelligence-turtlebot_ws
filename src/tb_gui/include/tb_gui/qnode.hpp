@@ -35,6 +35,7 @@ public:
   void setParams(const QMap<QString, int> &params);
   bool setBoolParam(const QString &name, bool on); // drive.enable 등 (/drive_node). 연결 안 됐으면 false
   bool requestParams();                 // 세 노드 모두 요청했으면 true
+  void refreshParams();                 // 연결된 노드의 현재 값을 다시 읽음 (주기적으로 호출 → 화면이 항상 노드 값)
   void saveParams(const QString &path); // 연결된 노드의 현재 값 → YAML (drive.enable 제외)
   void loadParams(const QString &path); // YAML → 각 노드에 설정 (drive.enable 제외)
 
@@ -42,6 +43,7 @@ public:
   void publishTurn(int turn); // 0 직진, 1 좌, 2 우
   void publishParking(bool on);
   void publishConstruction(bool on); // /mission/construction (공사 구간 모드 수동 켜기/끄기)
+  void publishConstructionExit();    // /mission/construction_exit (지금 공사 모드 끝내기: 표지판 자동 진입도)
   void publishDriveStop();           // /drive/cmd STOP 한 번 (차단바 흉내: 10Hz 이상으로 계속 불러야 유지됨)
 
   // ====== UART (tb_uart_node: TB_Uart_RX로 명령 문자열 전송)
@@ -60,6 +62,9 @@ private:
   static std::vector<std::string> lineParamNames();
   static std::vector<std::string> pathParamNames();
   static std::vector<std::string> driveParamNames(bool with_enable); // 정수 + bool
+  void requestFrom(rclcpp::AsyncParametersClient::SharedPtr client, const std::vector<std::string> &names);
+  void sendParams(rclcpp::AsyncParametersClient::SharedPtr client, const char *node_name,
+                  const std::vector<rclcpp::Parameter> &ps);
 
   std::shared_ptr<rclcpp::Node> node;
 
@@ -79,6 +84,8 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr parking_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr construction_state_sub_; // path_node가 실제로 공사 구간 모드인지
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_exit_pub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr construction_info_sub_; // /lane/construction_info
   rclcpp::Publisher<tb_interfaces::msg::DriveCmd>::SharedPtr drive_cmd_pub_;
 
   // UART
@@ -119,11 +126,13 @@ Q_SIGNALS:
   void turnReceived(int turn);
   void parkingReceived(bool on);
   void constructionStateReceived(bool on); // /lane/construction (path_node 상태: 표지판 자동 진입 포함)
+  void constructionInfoReceived(const QString &text); // "ON 표지판 brick=1 dist=0.42 ..." / "off ..."
 
   // 파라미터
   void paramLoaded(const QString &name, int value);
   void boolParamLoaded(const QString &name, bool value);
   void paramFileStatus(const QString &text);
+  void paramMessage(const QString &text); // 설정 실패 등 (상태 줄에 잠깐 표시)
 
   // 주행 (tb_drive)
   void driveStateReceived(const QString &text);

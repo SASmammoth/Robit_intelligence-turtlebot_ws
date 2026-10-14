@@ -66,6 +66,12 @@ private:
     rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
     int con_sign_frames_ = 3;
     int con_sign_min_h_ = 0;   // 이보다 작은 표지판 박스는 무시 [px]
+    int con_no_brick_mm_ = 2000; // 표지판 진입 후 벽돌을 못 보고 이만큼 가면 끝
+    bool con_exit_requested_ = false;
+    lane_path::Pose2D con_start_pose_; // 공사 모드 시작 위치
+    std::string con_reason_ = "-";     // 마지막 시작·끝 이유 (표시용)
+    void end_construction(const std::string &why);
+    std::string construction_info() const;
     int turn_radius_mm_ = 150, turn_min_deg_ = 45; // 급한 모서리를 원호로 (lanePath fillet_corners)
     bool con_on() const { return (con_manual_ || con_auto_) && !con_done_; }
 
@@ -94,7 +100,9 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr turn_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr parking_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_exit_sub_;  // /mission/construction_exit
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr con_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr con_info_pub_;  // /lane/construction_info (GUI 표시용)
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
 

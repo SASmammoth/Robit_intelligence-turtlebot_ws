@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace {
 // tb_line 라벨 값
@@ -60,11 +61,22 @@ PathNode::PathNode() : Node("path_node")
             if (!m->data)
                 con_done_ = false; });
 
+    // 지금 공사 모드를 바로 끝냄 (표지판 자동 진입도). true 한 번이면 됨.
+    // 끝낸 뒤 표지판이 3초 넘게 안 보여야 다시 자동 진입 (/mission/construction 수동 켜기는 그대로 가능)
+    con_exit_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "/mission/construction_exit", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+        {
+            if (!m->data)
+                return;
+            con_exit_requested_ = true;
+            RCLCPP_INFO(get_logger(), "construction: 끝내기 요청"); });
+
     // ====== 출력
     path_pub_ = create_publisher<nav_msgs::msg::Path>("/lane/path", 10);
     src_pub_ = create_publisher<std_msgs::msg::String>("/lane/path_source", 10);
     debug_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/skel/compressed", 10);
     con_pub_ = create_publisher<std_msgs::msg::Bool>("/lane/construction", 10);
+    con_info_pub_ = create_publisher<std_msgs::msg::String>("/lane/construction_info", 10);
 
     // ====== 파라미터
     declare_int("skel.seal_len", 30, 100);
@@ -100,6 +112,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_exit_mm", 600, 3000);
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
     declare_int("path.con_sign_frames", 3, 30);     // 공사 표지판이 이만큼 연속으로 보이면 자동 진입
+    declare_int("path.con_no_brick_mm", 2000, 10000); // 표지판으로 들어가서 벽돌을 한 번도 못 보고 이만큼 가면 끝 (0이면 끔)
     declare_int("path.con_sign_min_h_px", 0, 480);  // 표지판 박스 높이가 이보다 작으면(멀면) 무시. 0이면 거리 상관없이
 
     reload_params();
@@ -169,6 +182,7 @@ void PathNode::reload_params()
     con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
     con_sign_frames_ = std::max(1, int(get_parameter("path.con_sign_frames").as_int()));
     con_sign_min_h_ = int(get_parameter("path.con_sign_min_h_px").as_int());
+    con_no_brick_mm_ = int(get_parameter("path.con_no_brick_mm").as_int());
 }
 
 // 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽
@@ -472,6 +486,9 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     std_msgs::msg::Bool con_state;
     con_state.data = con_on();
     con_pub_->publish(con_state);
+    std_msgs::msg::String con_info;
+    con_info.data = construction_info();
+    con_info_pub_->publish(con_info);
 
     // ====== 디버그: 라벨을 색으로 그리고 스켈레톤·경로·벽돌 표시
     if (debug_pub_->get_subscription_count() > 0)
@@ -539,14 +556,36 @@ void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool
         RCLCPP_INFO(get_logger(), "construction: 표지판으로 진입 (박스 높이 %dpx)", sign_h);
     }
 
+    // 끝내기 요청 (GUI 버튼, brain): 수동·자동 모두 끔
+    if (con_exit_requested_)
+    {
+        con_exit_requested_ = false;
+        if (con_on())
+        {
+            end_construction("끝내기 요청");
+            con_manual_ = false;
+            con_sign_time_ = stamp; // 지금 보이는 표지판으로 바로 다시 들어가지 않게
+        }
+    }
+
     if (con_on() != con_active_)
     {
         con_active_ = con_on();
         con_brick_seen_ = false;
+        con_start_pose_ = pose_;
+        con_reason_ = con_active_ ? (con_manual_ ? "수동" : "표지판") : con_reason_;
         RCLCPP_INFO(get_logger(), "construction: %s", con_active_ ? "시작" : "끝");
     }
     if (!con_active_)
         return;
+
+    // 표지판으로 들어갔는데 벽돌을 한 번도 못 보고 con_no_brick_mm 넘게 가면 잘못 들어간 것으로 보고 끝
+    if (!con_brick_seen_ && !brick_seen && con_auto_ && !con_manual_ && con_no_brick_mm_ > 0 &&
+        std::hypot(pose_.x - con_start_pose_.x, pose_.y - con_start_pose_.y) * 1000.0 > con_no_brick_mm_)
+    {
+        end_construction("벽돌 없이 " + std::to_string(con_no_brick_mm_) + "mm");
+        return;
+    }
 
     // 벽돌을 본 뒤 con_exit_mm 가는 동안 벽돌이 안 보이면 끝 (자동 진입일 때만. 수동은 끌 때까지)
     if (brick_seen)
@@ -557,11 +596,31 @@ void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool
     else if (con_brick_seen_ && con_auto_ && !con_manual_ && con_exit_mm_ > 0 &&
              std::hypot(pose_.x - con_brick_pose_.x, pose_.y - con_brick_pose_.y) * 1000.0 > con_exit_mm_)
     {
-        con_auto_ = false;
-        con_done_ = true;
-        con_active_ = false;
-        RCLCPP_INFO(get_logger(), "construction: 벽돌이 %dmm 동안 안 보임, 일반 주행으로", con_exit_mm_);
+        end_construction("벽돌이 " + std::to_string(con_exit_mm_) + "mm 동안 안 보임");
     }
+}
+
+void PathNode::end_construction(const std::string &why)
+{
+    con_auto_ = false;
+    con_done_ = true;
+    con_active_ = false;
+    con_reason_ = "끝: " + why;
+    RCLCPP_INFO(get_logger(), "construction: %s, 일반 주행으로", why.c_str());
+}
+
+// GUI 표시용 한 줄: "ON 표지판 brick=1 dist=0.42" / "off 끝: 끝내기 요청"
+std::string PathNode::construction_info() const
+{
+    char buf[160];
+    if (con_on())
+        std::snprintf(buf, sizeof(buf), "ON %s brick=%d dist=%.2f sign_h>=%d",
+                      con_manual_ ? "수동" : "표지판", con_brick_seen_ ? 1 : 0,
+                      std::hypot(pose_.x - con_start_pose_.x, pose_.y - con_start_pose_.y), con_sign_min_h_);
+    else
+        std::snprintf(buf, sizeof(buf), "off %s%s sign_h>=%d", con_reason_.c_str(),
+                      con_done_ ? " (표지판 안 보일 때까지 대기)" : "", con_sign_min_h_);
+    return buf;
 }
 
 // 경로 점을 앞뒤 half 거리 안의 점들 평균으로 2번 (끝점은 그대로, 끝 가까이는 창을 줄임)

@@ -87,6 +87,9 @@ private:
   QWidget *view_tab_ = nullptr;
   QLabel *label_mode_ = nullptr, *label_keys_ = nullptr, *label_drive_brief_ = nullptr;
   QCheckBox *check_construction_ = nullptr, *check_barrier_ = nullptr;
+  QLabel *label_con_ = nullptr;        // 공사 모드 상태 배지 (/lane/construction_info)
+  void showConstructionInfo(const QString &info);
+  void exitConstruction();             // 공사 모드 끝내기 (버튼, X키)
   QList<int> turn_keys_;               // 누르고 있는 A/D (나중에 누른 것이 우선)
   QTimer barrier_timer_;
   QTimer status_timeout_; // 경로 출처가 1초 넘게 안 오면 회색
@@ -124,6 +127,8 @@ private:
   QMap<QString, int> pending_;
   QTimer send_timer_;
   QTimer param_poll_timer_;
+  QTimer param_refresh_timer_; // 노드 값을 주기적으로 다시 읽어 화면과 맞춤
+  void makeTabsScrollable();   // 아래 탭 페이지를 스크롤 영역으로 감쌈
 };
 
 #endif // tb_gui_MAIN_WINDOW_H

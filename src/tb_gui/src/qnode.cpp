@@ -5,6 +5,7 @@
  **/
 #include "../include/tb_gui/qnode.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <sstream>
@@ -106,6 +107,10 @@ QNode::QNode()
   construction_state_sub_ = node->create_subscription<std_msgs::msg::Bool>(
       "/lane/construction", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
       { Q_EMIT constructionStateReceived(m->data); });
+  construction_exit_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/construction_exit", 10);
+  construction_info_sub_ = node->create_subscription<std_msgs::msg::String>(
+      "/lane/construction_info", 10, [this](const std_msgs::msg::String::ConstSharedPtr m)
+      { Q_EMIT constructionInfoReceived(QString::fromStdString(m->data)); });
   drive_cmd_pub_ = node->create_publisher<tb_interfaces::msg::DriveCmd>("/drive/cmd", 10);
 
   // ====== 주행 상태 (tb_drive, 10Hz 문자열)
@@ -192,7 +197,7 @@ std::vector<std::string> QNode::pathParamNames()
           "path.max_dev_mm", "path.override_frames", "path.min_len_mm",
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm", "path.turn_radius_mm", "path.turn_min_deg",
           "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_attach_mm", "path.con_extend_mm", "path.con_edge_mm", "path.con_dead_end_mm", "path.con_keep", "path.con_keep_rear_mm", "path.con_hold_mm", "path.con_clear_mm",
-          "path.con_exit_mm", "path.con_sign_frames"};
+          "path.con_exit_mm", "path.con_sign_frames", "path.con_sign_min_h_px", "path.con_no_brick_mm"};
 }
 
 std::vector<std::string> QNode::driveParamNames(bool with_enable)
@@ -203,6 +208,7 @@ std::vector<std::string> QNode::driveParamNames(bool with_enable)
       "drive.v_max_mm_s", "drive.v_min_mm_s", "drive.w_max_deg_s",
       "drive.accel_mm_s2", "drive.decel_mm_s2", "drive.w_accel_deg_s2",
       "drive.ld_min_mm", "drive.ld_max_mm", "drive.ld_time_ms", "drive.ld_sharp_mm", "drive.sharp_turn_deg", "drive.sharp_hold_ms", "drive.curv_slow_mm", "drive.stop_dist_mm",
+      "drive.sharp_curve_start_deg", "drive.sharp_curve_full_deg", "drive.curve_x_offset_mm",
       "drive.path_timeout_ms", "drive.hold_ms", "drive.cmd_timeout_ms", "drive.weak_src_pct", "drive.con_v_mm_s",
       "drive.con_ld_min_mm", "drive.con_ld_sharp_mm", "drive.con_turn_gain_pct", "drive.con_pivot_enter_deg", "drive.con_pivot_keep_deg",
       "drive.pivot_enter_deg", "drive.pivot_keep_deg", "drive.pivot_confirm", "drive.pivot_exit_deg", "drive.pivot_w_deg_s", "drive.pivot_fallback_deg", "drive.corner_min_x_mm",
@@ -222,12 +228,76 @@ void QNode::setParams(const QMap<QString, int> &params)
     dst.emplace_back(it.key().toStdString(), it.value());
   }
 
-  if (!line.empty() && line_client_->service_is_ready())
-    line_client_->set_parameters(line);
-  if (!path.empty() && path_client_->service_is_ready())
-    path_client_->set_parameters(path);
-  if (!drive.empty() && drive_client_->service_is_ready())
-    drive_client_->set_parameters(drive);
+  sendParams(line_client_, LINE_NODE, line);
+  sendParams(path_client_, PATH_NODE, path);
+  sendParams(drive_client_, DRIVE_NODE, drive);
+}
+
+// 보내고 결과 확인: 노드가 거절하면(범위 밖, 없는 이름 등) 알리고 노드 값을 다시 읽어 화면을 되돌림
+void QNode::sendParams(rclcpp::AsyncParametersClient::SharedPtr client, const char *node_name,
+                       const std::vector<rclcpp::Parameter> &ps)
+{
+  if (ps.empty())
+    return;
+  if (!client->service_is_ready())
+  {
+    Q_EMIT paramMessage(QString("%1 연결 안 됨: 값이 적용되지 않았습니다").arg(QString(node_name)));
+    return;
+  }
+  std::vector<std::string> names;
+  for (const auto &p : ps)
+    names.push_back(p.get_name());
+  client->set_parameters(ps, [this, client, names, node_name](std::shared_future<std::vector<rcl_interfaces::msg::SetParametersResult>> f)
+                         {
+    QStringList bad;
+    try {
+      const auto res = f.get();
+      for (size_t i = 0; i < res.size() && i < names.size(); ++i)
+        if (!res[i].successful)
+          bad << QString("%1 (%2)").arg(QString::fromStdString(names[i]), QString::fromStdString(res[i].reason));
+    } catch (const std::exception &e) {
+      bad << QString("응답 없음: %1").arg(e.what());
+    }
+    if (!bad.isEmpty())
+      Q_EMIT paramMessage(QString("%1 설정 거절: %2").arg(QString(node_name), bad.join(", ")));
+    requestFrom(client, names); }); // 노드가 실제로 가진 값으로 화면을 맞춤
+}
+
+void QNode::requestFrom(rclcpp::AsyncParametersClient::SharedPtr client, const std::vector<std::string> &names)
+{
+  client->get_parameters(names, [this, client, names](std::shared_future<std::vector<rclcpp::Parameter>> f)
+                         {
+    size_t got = 0;
+    try {
+      const auto ps = f.get();
+      got = ps.size();
+      for (const auto &p : ps)
+      {
+        const QString name = QString::fromStdString(p.get_name());
+        if (p.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER)
+          Q_EMIT paramLoaded(name, static_cast<int>(p.as_int()));
+        else if (p.get_type() == rclcpp::ParameterType::PARAMETER_BOOL)
+          Q_EMIT boolParamLoaded(name, p.as_bool());
+      }
+    } catch (const std::exception &) {
+    }
+    // 노드에 없는 이름(Nano가 구버전 등)이 하나라도 섞이면 노드가 빈 응답을 줌 → 하나씩 다시 (나머지는 보이게)
+    if (got < names.size() && names.size() > 1)
+      for (const auto &n : names)
+        requestFrom(client, {n}); });
+}
+
+void QNode::refreshParams()
+{
+  // 노드 재시작, ros2 param set, launch 파일로 바뀐 값도 화면에 반영 (노드마다 요청 한 번)
+  auto each = [this](rclcpp::AsyncParametersClient::SharedPtr c, const std::vector<std::string> &names)
+  {
+    if (c->service_is_ready())
+      requestFrom(c, names);
+  };
+  each(line_client_, lineParamNames());
+  each(path_client_, pathParamNames());
+  each(drive_client_, driveParamNames(true));
 }
 
 bool QNode::setBoolParam(const QString &name, bool on)
@@ -356,19 +426,27 @@ void QNode::saveParams(const QString &path)
                                .arg(saved.join(", ")));
   };
 
+  // 노드에 실제로 있는 이름만 요청 (없는 이름이 하나라도 섞이면 노드가 빈 응답을 줘서 그 노드 값이 통째로 빠짐)
   for (size_t i = 0; i < targets.size(); ++i)
-    targets[i].client->get_parameters(targets[i].names,
-                                      [st, finish, i](std::shared_future<std::vector<rclcpp::Parameter>> f)
-                                      {
-                                        try
-                                        {
-                                          st->nodes[i].second = f.get();
-                                        }
-                                        catch (...)
-                                        {
-                                        }
-                                        finish();
-                                      });
+  {
+    auto client = targets[i].client;
+    const auto wanted = targets[i].names;
+    client->list_parameters({}, 0, [st, finish, i, client, wanted](std::shared_future<rcl_interfaces::msg::ListParametersResult> lf)
+                            {
+      std::vector<std::string> names;
+      try {
+        const auto have = lf.get().names;
+        for (const auto &n : wanted)
+          if (std::find(have.begin(), have.end(), n) != have.end())
+            names.push_back(n);
+      } catch (...) {
+        names = wanted;
+      }
+      client->get_parameters(names, [st, finish, i](std::shared_future<std::vector<rclcpp::Parameter>> f)
+                             {
+        try { st->nodes[i].second = f.get(); } catch (...) {}
+        finish(); }); });
+  }
 }
 
 void QNode::loadParams(const QString &path)
@@ -453,6 +531,13 @@ void QNode::publishConstruction(bool on)
   construction_pub_->publish(m);
 }
 
+void QNode::publishConstructionExit()
+{
+  std_msgs::msg::Bool m;
+  m.data = true;
+  construction_exit_pub_->publish(m);
+}
+
 void QNode::publishDriveStop()
 {
   tb_interfaces::msg::DriveCmd m;
@@ -490,7 +575,7 @@ void QNode::onDetections(const tb_interfaces::msg::DetectionArray &msg)
   std::lock_guard<std::mutex> lk(seen_mtx_);
   for (const auto &d : msg.detections)
   {
-    text += QString("%1  %2\n").arg(QString::fromStdString(d.label)).arg(d.score, 0, 'f', 2);
+    text += QString("%1  %2  h=%3\n").arg(QString::fromStdString(d.label)).arg(d.score, 0, 'f', 2).arg(d.h); // h: 박스 높이 (가까울수록 큼)
     last_seen_[QString::fromStdString(d.label)] = node->now();
   }
   Q_EMIT detectionsReceived(text.isEmpty() ? QString("(없음)") : text.trimmed());

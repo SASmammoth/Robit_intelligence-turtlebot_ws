@@ -375,8 +375,9 @@ void DriveNode::on_timer()
     if (tick_ % std::max(1, control_hz_ / 10) == 0)
     {
         char buf[200];
-        std::snprintf(buf, sizeof(buf), "%s src=%s v=%.3f w=%.2f ld=%.2f end=%.2f%s%s%s%s",
-                      mode_txt.c_str(), path_src_.c_str(), lim_.v, lim_.w, o.tg.ld, o.tg.end_dist, turning_ ? " X" : "",
+        std::snprintf(buf, sizeof(buf), "%s src=%s v=%.3f w=%.2f ld=%.2f end=%.2f prof=%s%s%s%s",
+                      mode_txt.c_str(), path_src_.c_str(), lim_.v, lim_.w, o.tg.ld, o.tg.end_dist,
+                      construction_ ? "con" : turning_ ? "cross" : "curve",
                       o.held ? " HOLD" : "", *why ? " stop:" : "", why);
         std_msgs::msg::String s;
         s.data = buf;

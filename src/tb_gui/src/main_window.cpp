@@ -10,6 +10,8 @@
 #include <QFileInfo>
 #include <QGroupBox>
 #include <QScrollArea>
+#include <QStatusBar>
+#include <QVariant>
 #include <QSettings>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -180,6 +182,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     if (qnode->requestParams())
       param_poll_timer_.stop(); });
   param_poll_timer_.start();
+
+  // 노드가 재시작되거나 다른 곳(ros2 param set, brain, launch)에서 값이 바뀌어도 2초 안에 화면에 반영
+  // (입력 중인 스핀박스·끌고 있는 슬라이더·보내기 대기 중인 값은 덮어쓰지 않음)
+  param_refresh_timer_.setInterval(2000);
+  connect(&param_refresh_timer_, &QTimer::timeout, this, [this]
+          { qnode->refreshParams(); });
+  param_refresh_timer_.start();
+  connect(qnode, &QNode::paramMessage, this, [this](const QString &t)
+          { statusBar()->showMessage(t, 8000); });
 
   // ====== 상태 패널
   connect(qnode, &QNode::pathSourceReceived, this, &MainWindow::showPathSource);
@@ -356,8 +367,69 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
   // ====== 거리·경로 파라미터 (Params 탭, 코드로 생성)
   setupParamTab();
 
+  // ====== 아래 탭 페이지 스크롤 (창이 작아도 모든 항목에 닿게)
+  makeTabsScrollable();
+
   // ====== View 탭 (카메라 크게 + 키보드 조작)
   setupViewTab();
+}
+
+void MainWindow::makeTabsScrollable()
+{
+  QTabWidget *tw = ui->tabWidget;
+  tw->setUsesScrollButtons(true); // 탭이 많으면 탭 이름 줄도 좌우로 넘김
+  for (int i = 0; i < tw->count(); ++i)
+  {
+    QWidget *page = tw->widget(i);
+    if (qobject_cast<QScrollArea *>(page))
+      continue; // Params 탭처럼 이미 스크롤
+    const QString title = tw->tabText(i);
+    const QIcon icon = tw->tabIcon(i);
+    tw->removeTab(i);
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    page->setMinimumSize(page->minimumSizeHint()); // 줄어들면 찌그러지지 않고 스크롤
+    scroll->setWidget(page);
+    tw->insertTab(i, scroll, icon, title);
+  }
+}
+
+// /lane/construction_info: "ON 표지판 brick=1 dist=0.42 sign_h>=0" / "off 끝: 끝내기 요청 ..."
+void MainWindow::showConstructionInfo(const QString &info)
+{
+  if (!label_con_)
+    return;
+  const bool on = info.startsWith("ON");
+  QString text;
+  if (info.isEmpty())
+    text = "공사 모드: (no data)";
+  else if (on)
+  {
+    QString s = info.mid(3);
+    s.replace("brick=1", "벽돌 봄").replace("brick=0", "벽돌 아직").replace("dist=", "진입 후 ");
+    text = "공사 모드 ON  —  " + s;
+  }
+  else
+    text = "공사 모드 off  —  " + info.mid(4);
+  label_con_->setText(text);
+  label_con_->setStyleSheet(QString("font-weight: bold; border-radius: 4px; padding: 3px; color: white; background: %1;")
+                                .arg(info.isEmpty() ? "#555555" : on ? "#d35400" : "#7f8c8d"));
+}
+
+void MainWindow::exitConstruction()
+{
+  // 수동 체크를 끄되 /mission/construction false는 보내지 않음
+  // (false는 path_node에서 '다시 진입 허용'으로 처리돼, 보이는 표지판으로 바로 재진입할 수 있음)
+  if (check_construction_ && check_construction_->isChecked())
+  {
+    QSignalBlocker block(check_construction_);
+    check_construction_->setChecked(false);
+    construction_ = false;
+  }
+  qnode->publishConstructionExit();
+  statusBar()->showMessage("공사 모드 끝내기 요청 보냄", 3000);
+  showMission();
 }
 
 // ───────── View 탭 ─────────
@@ -412,6 +484,20 @@ void MainWindow::setupViewTab()
                                                      ui->radioTurnLeft, ui->radioTurnRight, ui->radioTurnStraight})
     w->setFocusPolicy(Qt::NoFocus);
 
+  // 공사 모드 상태 배지 + 끝내기 버튼 (표지판으로 자동 진입한 것도 끝낼 수 있음)
+  label_con_ = new QLabel(ui->groupStatus);
+  label_con_->setAlignment(Qt::AlignCenter);
+  label_con_->setWordWrap(true);
+  auto *btn_con_exit = new QPushButton("공사 끝내기 (X)", ui->groupStatus);
+  btn_con_exit->setFocusPolicy(Qt::NoFocus);
+  btn_con_exit->setToolTip("/mission/construction_exit: 수동·표지판 진입 모두 끔. 표지판이 3초 넘게 안 보여야 다시 자동 진입");
+  box->insertWidget(park_idx + 3, label_con_);
+  box->insertWidget(park_idx + 4, btn_con_exit);
+  connect(btn_con_exit, &QPushButton::clicked, this, [this] { exitConstruction(); });
+  connect(qnode, &QNode::constructionInfoReceived, this, &MainWindow::showConstructionInfo);
+  showConstructionInfo("");
+
+  check_construction_->setToolTip("체크 = 수동으로 공사 모드 켜기 (/mission/construction). 표지판 자동 진입과 별개");
   connect(check_construction_, &QCheckBox::toggled, this, [this](bool on)
           {
     construction_ = on;
@@ -517,8 +603,8 @@ void MainWindow::refreshViewStatus()
   label_mode_->setStyleSheet(QString("font-size: 18px; font-weight: bold; border-radius: 4px; color: white; "
                                      "padding: 4px; background: %1;").arg(color[i]));
   label_keys_->setText(driveMode() == DriveMode::Auto
-                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사  B 차단바   Esc 정지"
-                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사  B 차단바   Esc 정지");
+                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Esc 정지"
+                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Esc 정지");
 }
 
 void MainWindow::setTurnMomentary(int key, bool press)
@@ -576,6 +662,10 @@ bool MainWindow::handleViewKey(QKeyEvent *ke, bool press)
     if (press && !repeat)
       check_construction_->toggle();
     return true;
+  case Qt::Key_X:
+    if (press && !repeat)
+      exitConstruction();
+    return true;
   case Qt::Key_B:
     if (press && !repeat)
       setBarrier(!check_barrier_->isChecked());
@@ -611,8 +701,23 @@ void MainWindow::addParamSpin(QGridLayout *grid, QWidget *parent, int idx, int c
   grid->addWidget(label, idx / cols, (idx % cols) * 2);
   grid->addWidget(sp, idx / cols, (idx % cols) * 2 + 1);
   global_widgets_[name] = {nullptr, nullptr, sp}; // paramLoaded → applyGlobalParam 로 동기화
-  connect(sp, qOverload<int>(&QSpinBox::valueChanged), this, [this, name](int v)
-          { queueParam(name, v); });
+  // 숫자를 쳤는데 아직 안 보낸 상태(Enter·다른 곳 클릭 전)면 노란색으로 표시
+  // (입력 중인 칸은 노드 값으로 덮어쓰지 않고, 보낸 뒤에는 포커스가 남아 있어도 노드 값을 따라감)
+  sp->setProperty("editing", false);
+  auto done = [sp]
+  {
+    sp->setProperty("editing", false);
+    sp->setStyleSheet("");
+  };
+  connect(sp, &QSpinBox::textChanged, this, [sp](const QString &)
+          {
+    sp->setProperty("editing", true);
+    sp->setStyleSheet("QSpinBox { background: #fff3a0; color: black; }"); });
+  connect(sp, qOverload<int>(&QSpinBox::valueChanged), this, [this, name, done](int v)
+          {
+    done();
+    queueParam(name, v); });
+  connect(sp, &QSpinBox::editingFinished, this, done);
 }
 
 // ───────── Params 탭 (실측 거리, 경로 계산) ─────────
@@ -673,6 +778,8 @@ void MainWindow::setupParamTab()
            {"path.con_clear_mm", "지난 벽돌 옆 여유", " mm", 0, 200, 5},
            {"path.con_exit_mm", "벽돌 없이 이만큼 가면 끝", " mm", 0, 3000, 50},
            {"path.con_sign_frames", "표지판 연속 프레임", "", 1, 30, 1},
+           {"path.con_sign_min_h_px", "표지판 최소 높이 (0=거리 무관)", " px", 0, 480, 5},
+           {"path.con_no_brick_mm", "벽돌 못 보고 이만큼 가면 끝 (0=끔)", " mm", 0, 10000, 100},
        }},
   };
   constexpr int COLS = 3;
@@ -739,8 +846,11 @@ void MainWindow::setupDriveTab()
       {"drive.ld_max_mm", "lookahead 최대", " mm", 30, 1500, 10},
       {"drive.ld_time_ms", "lookahead 시간", " ms", 0, 5000, 100},
       {"drive.ld_sharp_mm", "급한 곳 lookahead", " mm", 0, 1000, 10},
-      {"drive.sharp_turn_deg", "급한 곳 판단 각도", " °", 1, 180, 5},
+      {"drive.sharp_turn_deg", "교차로: 급한 곳 판단 각도", " °", 1, 180, 5},
       {"drive.sharp_hold_ms", "급한 곳 유지 시간", " ms", 0, 5000, 100},
+      {"drive.sharp_curve_start_deg", "일반 곡선: 급한 곳 시작 각도", " °", 0, 180, 5},
+      {"drive.sharp_curve_full_deg", "일반 곡선: 급한 곳 최대 각도", " °", 1, 180, 5},
+      {"drive.curve_x_offset_mm", "일반 곡선 거리 보정", " mm", -200, 200, 5},
       {"drive.curv_slow_mm", "커브 감속", " mm", 0, 1000, 10},
       {"drive.stop_dist_mm", "경로 끝 정지", " mm", 0, 300, 5},
       {"drive.hold_ms", "경로 유지", " ms", 0, 3000, 50},
@@ -870,8 +980,10 @@ void MainWindow::showDriveState(const QString &text)
           .arg(colors.value(mode, "#555555")));
 
   ui->labelDriveVel->setText(QString("v: %1 m/s   w: %2 rad/s").arg(kv.value("v", "-"), kv.value("w", "-")));
-  ui->labelDriveInfo->setText(QString("src: %1   ld: %2 m   end: %3 m")
-                                  .arg(kv.value("src", "-"), kv.value("ld", "-"), kv.value("end", "-")));
+  static const QMap<QString, QString> prof_name = {{"curve", "일반"}, {"cross", "교차로"}, {"con", "공사"}};
+  ui->labelDriveInfo->setText(QString("src: %1   ld: %2 m   end: %3 m   프로필: %4")
+                                  .arg(kv.value("src", "-"), kv.value("ld", "-"), kv.value("end", "-"),
+                                       prof_name.value(kv.value("prof"), kv.value("prof", "-"))));
 }
 
 // ───────── 주행 (WASD) ─────────
@@ -1035,7 +1147,10 @@ void MainWindow::applyGlobalParam(const QString &name, int v)
     if (w.label)
       w.label->setNum(v);
   }
-  if (w.spin && !w.spin->hasFocus())
+  // addParamSpin으로 만든 칸은 'editing'으로, 나머지(Tab 1 스핀박스)는 포커스로 입력 중인지 판단
+  const QVariant editing = w.spin ? w.spin->property("editing") : QVariant();
+  const bool busy = w.spin && (editing.isValid() ? editing.toBool() : w.spin->hasFocus());
+  if (w.spin && !busy)
   {
     QSignalBlocker block(w.spin);
     w.spin->setValue(v);
