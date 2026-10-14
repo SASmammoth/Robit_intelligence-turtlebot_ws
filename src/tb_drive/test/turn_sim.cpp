@@ -1,6 +1,7 @@
 // ROS 없이 커브·코너 주행 시뮬레이션 (tb_drive의 Follower + Pivoter 그대로 사용)
 //   g++ -O2 -std=c++17 -Iinclude test/turn_sim.cpp src/pure_pursuit.cpp -o turn_sim
 //   ./turn_sim v .30 ldmin .17 bottom .02 R .03 ang 90 seed 3   # 반경 3cm 90° 꺾임 (seed: 흔들림 난수)
+//   xb .075 = 경로 x를 7.5cm 가깝게 줌 (bev_bottom 실측 205를 130으로 둔 경우)
 //   ldsharp 0 = 가변 lookahead 끔, pivot 0 = 피봇 끔, enter/keep = 피봇 각도
 //   ./turn_sim v .30 ldmin .17 bottom .02 R .26 ang 180 pivot 0 # 피봇 끄고 반경 26cm 헤어핀
 // 90° 커브(중심선 반경 R) 주행 시뮬레이션. tb_drive의 실제 Follower/Limiter + drive_node의 곡률 유지 로직 사용
@@ -15,7 +16,7 @@
 using namespace tb_drive;
 
 struct Cfg { int seed=1; double hold=1.0; double ldsharp=0.12, sharpturn=60; double noise=0.005; int confirm=3; double enter=100, keep=20; bool pivot=true; double ang=90; double v_max=.15, w_max_deg=150, w_acc_deg=600, ld_min=.21, ld_max=.35, ld_time=1.0, curv=.35;
-             double R=.26, bottom=.205, depth=.54, half_w=.24, latency=.04; bool extend=false, lat_comp=false; };
+             double R=.26, bottom=.205, depth=.54, half_w=.24, latency=.04; double xb=0; bool extend=false, lat_comp=false; };
 
 // 트랙 중심선: (0,0)에서 +x로 1m 직진 → 반경 R 좌회전 90° → +y로 1m
 static std::vector<Pt> track(double R, double ang) {
@@ -53,7 +54,7 @@ int main(int argc, char **argv) {
         if (k == "v") c.v_max = v; else if (k == "ldmin") c.ld_min = v; else if (k == "ldmax") c.ld_max = v;
         else if (k == "curv") c.curv = v; else if (k == "wmax") c.w_max_deg = v; else if (k == "wacc") c.w_acc_deg = v;
         else if (k == "ext") c.extend = v > 0; else if (k == "lat") c.latency = v; else if (k == "comp") c.lat_comp = v > 0;
-        else if (k == "R") c.R = v; else if (k == "bottom") c.bottom = v; else if (k == "ang") c.ang = v; else if (k == "noise") c.noise = v; else if (k == "confirm") c.confirm = int(v); else if (k == "enter") c.enter = v; else if (k == "keep") c.keep = v; else if (k == "pivot") c.pivot = v > 0; else if (k == "ldsharp") c.ldsharp = v; else if (k == "sharpturn") c.sharpturn = v; else if (k == "hold") c.hold = v; else if (k == "seed") c.seed = int(v); else if (k == "halfw") c.half_w = v;
+        else if (k == "R") c.R = v; else if (k == "bottom") c.bottom = v; else if (k == "ang") c.ang = v; else if (k == "noise") c.noise = v; else if (k == "confirm") c.confirm = int(v); else if (k == "enter") c.enter = v; else if (k == "keep") c.keep = v; else if (k == "pivot") c.pivot = v > 0; else if (k == "ldsharp") c.ldsharp = v; else if (k == "sharpturn") c.sharpturn = v; else if (k == "hold") c.hold = v; else if (k == "seed") c.seed = int(v); else if (k == "halfw") c.half_w = v; else if (k == "xb") c.xb = v;
     }
     const auto C = track(c.R, c.ang);
     Follower f; f.p.v_max = c.v_max; f.p.v_min = .04; f.p.w_max = c.w_max_deg * M_PI / 180; f.p.accel = .3; f.p.decel = .6;
@@ -83,7 +84,7 @@ int main(int argc, char **argv) {
                 if (vis) { if (path.empty() || std::hypot(rx - path.back().x, ry - path.back().y) >= .02) path.push_back({rx, ry}); started = true; }
                 else if (started) break;
             }
-            for (auto &q : path) q.y += nd(rng);
+            for (auto &q : path) { q.y += nd(rng); q.x -= c.xb; }
             if (c.extend) extend_tail(path, c.ld_max, .35);
             f.set_path(path, s.t);
         }
@@ -106,5 +107,5 @@ int main(int argc, char **argv) {
         const double d = dev(C, x, y, near);
         if (d > max_out) max_out = d; if (d < max_in) max_in = d;
     }
-    std::printf("최대 오차 %4.1fcm  피봇 %d회 (총 %3.0f°)\n", std::max(max_out, -max_in) * 100, n_pivot, pivot_total * 180 / M_PI);
+    std::printf("최대 오차 %4.1fcm (안쪽 %4.1f 바깥 %4.1f)  피봇 %d회 (총 %3.0f°)\n", std::max(max_out, -max_in) * 100, -max_in * 100, max_out * 100, n_pivot, pivot_total * 180 / M_PI);
 }
