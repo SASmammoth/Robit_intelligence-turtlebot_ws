@@ -30,23 +30,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
   qnode = new QNode();
   QObject::connect(qnode, &QNode::rosShutDown, this, &MainWindow::close);
 
-  // ====== 영상 표시 (라벨이 영상 크기로 늘어나 레이아웃이 커지는 것 방지)
-  for (QLabel *d : {ui->displayUsb, ui->displayMask, ui->displayBev, ui->displayRoi, ui->displaySkel})
-  {
-    d->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
-    d->setMinimumSize(1, 1);
-  }
-
-  connect(qnode, &QNode::usbImageReceived, this, [this](const QImage &img)
-          { showImage(ui->displayUsb, img); });
-  connect(qnode, &QNode::maskImageReceived, this, [this](const QImage &img)
-          { showImage(ui->displayMask, img); });
-  connect(qnode, &QNode::bevImageReceived, this, [this](const QImage &img)
-          { showImage(ui->displayBev, img); });
-  connect(qnode, &QNode::roiImageReceived, this, [this](const QImage &img)
-          { showImage(ui->displayRoi, img); });
-  connect(qnode, &QNode::skelImageReceived, this, [this](const QImage &img)
-          { showImage(ui->displaySkel, img); });
+  // ====== 영상 표시: 위쪽 영상 칸을 "주행 / 튜닝" 탭으로 나눔 (setupDisplayTabs)
+  //  같은 영상이 두 탭에 다 있을 수 있어서, 영상 종류마다 라벨 목록에 보내고 보이는 라벨만 그림
+  setupDisplayTabs();
+  connect(qnode, &QNode::usbImageReceived, this, [this](const QImage &img) { showStream("usb", img); });
+  connect(qnode, &QNode::maskImageReceived, this, [this](const QImage &img) { showStream("mask", img); });
+  connect(qnode, &QNode::bevImageReceived, this, [this](const QImage &img) { showStream("bev", img); });
+  connect(qnode, &QNode::roiImageReceived, this, [this](const QImage &img) { showStream("roi", img); });
+  connect(qnode, &QNode::skelImageReceived, this, [this](const QImage &img) { showStream("skel", img); });
 
   // ====== HSV 슬라이더 (흰/노랑 대상 전환)
   hsv_widgets_ = {
@@ -471,6 +462,7 @@ void MainWindow::setupViewTab()
   connect(btn_auto, &QPushButton::clicked, this, [this] { setDriveMode(DriveMode::Auto); });
 
   label_drive_brief_ = new QLabel("drive: -", ui->groupStatus);
+  label_drive_brief_->setWordWrap(true); // 긴 /drive/state 한 줄 때문에 상태 상자가 넓어지지 않게
   box->insertWidget(2, label_drive_brief_);
 
   // 기존 주차 체크박스 옆에 공사 구간, 차단바
@@ -528,6 +520,8 @@ void MainWindow::setupViewTab()
           {
     applyViewTabSize();
     refreshViewStatus();
+    if (viewTabActive() && display_tabs_) // 아래 View 탭(키보드 주행)으로 오면 위 영상도 주행 탭으로
+      display_tabs_->setCurrentIndex(0);
     if (!viewTabActive() && !turn_keys_.isEmpty()) // 탭을 떠나면 누르고 있던 A/D는 놓은 것으로
     {
       turn_keys_.clear();
@@ -1122,6 +1116,121 @@ void MainWindow::showUart(const QString &text)
     ui->labelUartLog->setText(text);
     ui->labelUartLog->setStyleSheet("color: #c0392b;");
   }
+}
+
+// ───────── 위쪽 영상 칸: 주행 / 튜닝 탭 ─────────
+//
+//  [주행]  USB(YOLO) | 경로 보기 | Skeleton          ← 달릴 때 볼 것만 크게
+//  [튜닝]  USB  | Mask | BEV                         ← 차선·BEV·경로 파라미터 맞출 때
+//          ROI  | Skeleton | 경로 보기
+//  Status / Mission 상자는 탭 밖 오른쪽에 그대로 (어느 탭이든 미션 조작 가능)
+//  .ui 파일은 그대로 두고, 원래 영상 라벨은 숨긴 뒤 코드로 새로 배치함
+void MainWindow::setupDisplayTabs()
+{
+  // 원래 .ui의 영상 라벨·제목은 숨김 (빈 칸이 되어 자리를 차지하지 않음)
+  for (QWidget *w : std::initializer_list<QWidget *>{ui->displayUsb, ui->labelUsb, ui->displayMask, ui->labelMask,
+                                                     ui->displayBev, ui->labelDisplay_4, ui->displayRoi, ui->labelDisplay_5,
+                                                     ui->displaySkel, ui->labelDisplay_6})
+    w->hide();
+
+  // 칸 하나 = 내용 + 아래 제목
+  auto cell = [](QWidget *content, const QString &title)
+  {
+    auto *box = new QWidget;
+    auto *vl = new QVBoxLayout(box);
+    vl->setContentsMargins(0, 0, 0, 0);
+    vl->setSpacing(2);
+    content->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored); // 영상 크기로 레이아웃이 커지지 않게
+    content->setMinimumSize(1, 1);
+    vl->addWidget(content, 1);
+    auto *t = new QLabel(title, box);
+    t->setAlignment(Qt::AlignCenter);
+    vl->addWidget(t, 0);
+    return box;
+  };
+  // 영상 칸 (stream 이름으로 등록 → showStream이 보이는 것만 그림)
+  auto image = [this, &cell](const QString &stream, const QString &title)
+  {
+    auto *l = new QLabel(stream);
+    l->setAlignment(Qt::AlignCenter);
+    l->setStyleSheet("color: gray;");
+    streams_[stream].append(l);
+    return cell(l, title);
+  };
+  auto path = [this, &cell]()
+  {
+    PathView *v = makePathView();
+    v->setMinimumSize(200, 1);
+    return cell(v, "Path (/lane/path → drive)");
+  };
+
+  display_tabs_ = new QTabWidget(ui->groupStatus->parentWidget());
+  display_tabs_->setDocumentMode(true);
+
+  // ====== 주행: 한 줄로 크게
+  auto *drive_page = new QWidget;
+  auto *dg = new QGridLayout(drive_page);
+  dg->setContentsMargins(2, 2, 2, 2);
+  dg->setSpacing(5);
+  dg->addWidget(image("usb", "USB (YOLO)"), 0, 0);
+  dg->addWidget(path(), 0, 1);
+  dg->addWidget(image("skel", "Skeleton"), 0, 2);
+  dg->setColumnStretch(0, 4);
+  dg->setColumnStretch(1, 3);
+  dg->setColumnStretch(2, 3);
+  display_tabs_->addTab(drive_page, "주행");
+
+  // ====== 튜닝: 2 x 3
+  auto *tune_page = new QWidget;
+  auto *tg = new QGridLayout(tune_page);
+  tg->setContentsMargins(2, 2, 2, 2);
+  tg->setSpacing(5);
+  tg->addWidget(image("usb", "USB"), 0, 0);
+  tg->addWidget(image("mask", "Lane mask"), 0, 1);
+  tg->addWidget(image("bev", "BEV"), 0, 2);
+  tg->addWidget(image("roi", "ROI"), 1, 0);
+  tg->addWidget(image("skel", "Skeleton"), 1, 1);
+  tg->addWidget(path(), 1, 2);
+  for (int c = 0; c < 3; ++c)
+    tg->setColumnStretch(c, 1);
+  display_tabs_->addTab(tune_page, "튜닝");
+
+  // 원래 3열 그리드 자리에 탭을 넣고, Status 상자는 오른쪽 열에 세로로 길게
+  ui->gridLayout_7->removeWidget(ui->groupStatus);
+  ui->gridLayout_7->addWidget(display_tabs_, 0, 0, 2, 2);
+  ui->gridLayout_7->addWidget(ui->groupStatus, 0, 2, 2, 1);
+  ui->gridLayout_7->setColumnStretch(0, 1);
+  ui->gridLayout_7->setColumnStretch(1, 1);
+  ui->gridLayout_7->setColumnStretch(2, 0);
+  ui->groupStatus->setMaximumWidth(420); // 영상 탭에 자리를 더 줌
+
+  // 마지막으로 본 탭 기억
+  QSettings settings("tb_gui", "tb_gui");
+  display_tabs_->setCurrentIndex(settings.value("display_tab", 0).toInt());
+  connect(display_tabs_, &QTabWidget::currentChanged, this, [](int i)
+          { QSettings("tb_gui", "tb_gui").setValue("display_tab", i); });
+}
+
+// 경로 보기 하나 만들고 토픽·파라미터 연결 (주행·튜닝 탭에 하나씩)
+PathView *MainWindow::makePathView()
+{
+  auto *v = new PathView;
+  connect(qnode, &QNode::pathReceived, v, &PathView::setPath);
+  connect(qnode, &QNode::pathSourceReceived, v, &PathView::setSource);
+  connect(qnode, &QNode::targetReceived, v, &PathView::setTarget);
+  connect(qnode, &QNode::driveStateReceived, v, &PathView::setDriveState);
+  connect(qnode, &QNode::uartCommandSeen, v, &PathView::setUartCommand);
+  connect(qnode, &QNode::paramLoaded, v, &PathView::setIntParam);      // bev.*, geo.* (나머지 이름은 무시)
+  connect(qnode, &QNode::doubleParamLoaded, v, &PathView::setDoubleParam);
+  return v;
+}
+
+// 같은 영상을 보여주는 라벨 중 지금 화면에 보이는 것만 그림 (숨은 탭은 크기 조정 안 함)
+void MainWindow::showStream(const QString &stream, const QImage &img)
+{
+  for (QLabel *l : streams_.value(stream))
+    if (l->isVisible())
+      showImage(l, img);
 }
 
 void MainWindow::showImage(QLabel *label, const QImage &img)

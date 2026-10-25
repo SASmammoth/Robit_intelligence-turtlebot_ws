@@ -16,9 +16,13 @@
 #include <opencv2/opencv.hpp>
 #include "tb_interfaces/msg/detection_array.hpp"
 #include "tb_interfaces/msg/drive_cmd.hpp"
+#include <nav_msgs/msg/path.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #endif
 #include <QThread>
 #include <QImage>
+#include <QPolygonF>
+#include <QPointF>
 #include <QMap>
 #include <QString>
 #include <atomic>
@@ -62,6 +66,7 @@ private:
   static std::vector<std::string> lineParamNames();
   static std::vector<std::string> pathParamNames();
   static std::vector<std::string> driveParamNames(bool with_enable); // 정수 + bool
+  static std::vector<std::string> driveDoubleNames();                // 실수, 읽기만 (GUI에서 안 바꿈, 파일 저장 안 함)
   void requestFrom(rclcpp::AsyncParametersClient::SharedPtr client, const std::vector<std::string> &names);
   void sendParams(rclcpp::AsyncParametersClient::SharedPtr client, const char *node_name,
                   const std::vector<rclcpp::Parameter> &ps);
@@ -94,6 +99,11 @@ private:
 
   // 주행 상태 (/drive/state)
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr drive_state_sub_;
+
+  // 경로 보기 (/lane/path, /drive/target)
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr target_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr uart_cmd_sub_; // TB_Uart_RX (모터로 실제 보낸 명령)
 
   // 파라미터
   rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_, drive_client_;
@@ -131,11 +141,15 @@ Q_SIGNALS:
   // 파라미터
   void paramLoaded(const QString &name, int value);
   void boolParamLoaded(const QString &name, bool value);
+  void doubleParamLoaded(const QString &name, double value); // 실수 파라미터 (표시만: drive.uart.* 등)
   void paramFileStatus(const QString &text);
   void paramMessage(const QString &text); // 설정 실패 등 (상태 줄에 잠깐 표시)
 
   // 주행 (tb_drive)
   void driveStateReceived(const QString &text);
+  void pathReceived(const QPolygonF &pts);   // /lane/path (base_link, m)
+  void targetReceived(const QPointF &p);     // /drive/target (base_link, m)
+  void uartCommandSeen(const QString &text); // TB_Uart_RX (drive, WASD 등 누가 보냈든)
 
   // UART (TB_Uart_TX 수신 문자열)
   void uartReceived(const QString &text);

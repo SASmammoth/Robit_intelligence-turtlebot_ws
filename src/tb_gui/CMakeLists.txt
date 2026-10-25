@@ -19,6 +19,8 @@ find_package(cv_bridge REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tb_interfaces REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 find_package(
@@ -46,7 +48,7 @@ add_executable(${PROJECT_NAME}
     ${QT_UI_HPP} 
   )
   
-ament_target_dependencies(${PROJECT_NAME} rclcpp sensor_msgs cv_bridge Boost std_msgs tb_interfaces)
+ament_target_dependencies(${PROJECT_NAME} rclcpp sensor_msgs cv_bridge Boost std_msgs tb_interfaces nav_msgs geometry_msgs)
 target_link_libraries(${PROJECT_NAME} Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Network ${OpenCV_LIBRARIES})
 install(TARGETS ${PROJECT_NAME} DESTINATION lib/${PROJECT_NAME})
 if(BUILD_TESTING)

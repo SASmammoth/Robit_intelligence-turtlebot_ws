@@ -18,11 +18,15 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QGridLayout>
+#include <QTabWidget>
+#include <QMap>
+#include <QList>
 #include <vector>
 #include <QIcon>
 #include <QSet>
 #include <QKeyEvent>
 #include "qnode.hpp"
+#include "path_view.hpp"
 #include "ui_mainwindow.h"
 
 class MainWindow : public QMainWindow
@@ -42,6 +46,13 @@ private:
   void closeEvent(QCloseEvent *event);
 
   void showImage(QLabel *label, const QImage &img);
+
+  // 위쪽 영상 칸: 주행 / 튜닝 탭 (setupDisplayTabs 참고)
+  void setupDisplayTabs();
+  PathView *makePathView();                              // 경로 보기 + 토픽·파라미터 연결
+  void showStream(const QString &stream, const QImage &img); // 보이는 라벨에만 그림
+  QTabWidget *display_tabs_ = nullptr;
+  QMap<QString, QList<QLabel *>> streams_;               // "usb", "mask", "bev", "roi", "skel" → 라벨들
   void queueParam(const QString &name, int v); // 50ms 묶음 전송
 
   // HSV (대상별)

@@ -118,6 +118,24 @@ QNode::QNode()
       "/drive/state", 10, [this](const std_msgs::msg::String::ConstSharedPtr m)
       { Q_EMIT driveStateReceived(QString::fromStdString(m->data)); });
 
+  // ====== 경로 보기: path_node가 낸 경로, drive가 고른 목표점
+  //  (/drive/target은 구독자가 있을 때만 발행되므로 여기서 구독하면 켜짐)
+  path_sub_ = node->create_subscription<nav_msgs::msg::Path>(
+      "/lane/path", 10, [this](const nav_msgs::msg::Path::ConstSharedPtr m)
+      {
+        QPolygonF pts;
+        pts.reserve(static_cast<int>(m->poses.size()));
+        for (const auto &ps : m->poses)
+          pts << QPointF(ps.pose.position.x, ps.pose.position.y);
+        Q_EMIT pathReceived(pts); });
+  target_sub_ = node->create_subscription<geometry_msgs::msg::PointStamped>(
+      "/drive/target", 10, [this](const geometry_msgs::msg::PointStamped::ConstSharedPtr m)
+      { Q_EMIT targetReceived(QPointF(m->point.x, m->point.y)); });
+  // 모터로 실제 나간 "velocity L R" (drive_node가 보낸 것 + GUI WASD 것 모두)
+  uart_cmd_sub_ = node->create_subscription<std_msgs::msg::String>(
+      "TB_Uart_RX", 10, [this](const std_msgs::msg::String::ConstSharedPtr m)
+      { Q_EMIT uartCommandSeen(QString::fromStdString(m->data)); });
+
   // ====== UART (tb_uart_node)
   uart_pub_ = node->create_publisher<std_msgs::msg::String>("TB_Uart_RX", 10);
   uart_sub_ = node->create_subscription<std_msgs::msg::String>(
@@ -144,6 +162,8 @@ QNode::QNode()
               Q_EMIT paramLoaded(name, static_cast<int>(p.value.integer_value));
             else if (p.value.type == rcl_interfaces::msg::ParameterType::PARAMETER_BOOL)
               Q_EMIT boolParamLoaded(name, p.value.bool_value);
+            else if (p.value.type == rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE)
+              Q_EMIT doubleParamLoaded(name, p.value.double_value);
           }
       });
 
@@ -218,6 +238,12 @@ std::vector<std::string> QNode::driveParamNames(bool with_enable)
   return names;
 }
 
+// 하드웨어 값 (drive.yaml에서 정함). 경로 보기 창의 바퀴 그림·속도 계산에만 씀
+std::vector<std::string> QNode::driveDoubleNames()
+{
+  return {"drive.uart.wheel_sep_m", "drive.uart.pivot_sep_m"};
+}
+
 void QNode::setParams(const QMap<QString, int> &params)
 {
   std::vector<rclcpp::Parameter> line, path, drive;
@@ -278,6 +304,8 @@ void QNode::requestFrom(rclcpp::AsyncParametersClient::SharedPtr client, const s
           Q_EMIT paramLoaded(name, static_cast<int>(p.as_int()));
         else if (p.get_type() == rclcpp::ParameterType::PARAMETER_BOOL)
           Q_EMIT boolParamLoaded(name, p.as_bool());
+        else if (p.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
+          Q_EMIT doubleParamLoaded(name, p.as_double());
       }
     } catch (const std::exception &) {
     }
@@ -298,6 +326,7 @@ void QNode::refreshParams()
   each(line_client_, lineParamNames());
   each(path_client_, pathParamNames());
   each(drive_client_, driveParamNames(true));
+  each(drive_client_, driveDoubleNames());
 }
 
 bool QNode::setBoolParam(const QString &name, bool on)
