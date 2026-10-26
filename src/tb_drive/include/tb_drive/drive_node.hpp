@@ -87,6 +87,10 @@ private:
     double sharp_curve_start_ = 1.48, sharp_curve_full_ = 1.83; // 일반 곡선: start 아래는 안 줄임
     double curve_x_offset_ = 0.0;           // 일반 주행에서 경로 x에 더할 거리 [m]
     double turn_gain_con_ = 1.3;            // 공사 구간 회전 세기 배율
+    double turn_gain_normal_ = 1.0;         // 일반 주행 회전 세기 배율 (drive.turn_gain_pct)
+    double turn_gain_cross_ = 1.0;          // 교차로 명령 중 회전 세기 배율 (drive.cross_turn_gain_pct)
+    double ld_min_cross_ = 0.0;             // 교차로 명령 중 최소 lookahead [m] (0이면 일반 값)
+    double cross_v_ = 0.0;                  // 교차로 명령 중 최고 속도 [m/s] (0이면 끔)
     tb_drive::PivotParams pv_normal_, pv_con_;
     void apply_profile();                   // construction_·turning_에 맞는 값을 follower_·pivot_에 넣음
     double psd_stop_ = 0.15;

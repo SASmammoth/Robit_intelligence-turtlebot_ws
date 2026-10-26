@@ -48,6 +48,12 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.hold_ms", 600, 0, 3000);
     declare_int("drive.cmd_timeout_ms", 500, 50, 3000);
     declare_int("drive.weak_src_pct", 60, 0, 100);
+    // 일반 주행 회전 세기 % (pure pursuit 곡률 배율. 120 = 같은 lookahead에서 반경 0.83배)
+    declare_int("drive.turn_gain_pct", 100, 50, 300);
+    // 교차로 명령(/mission/turn ≠ 0) 중: 최고 속도·회전 세기·최소 lookahead (공사 구간이면 공사 값이 우선)
+    declare_int("drive.cross_v_mm_s", 0, 0, 1000);         // 0이면 끔 (v_max 그대로)
+    declare_int("drive.cross_turn_gain_pct", 100, 50, 300);
+    declare_int("drive.cross_ld_min_mm", 0, 0, 1000);      // 0이면 ld_min_mm 그대로
     declare_int("drive.con_v_mm_s", 100, 0, 1000);        // 공사 구간 최고 속도
     declare_int("drive.con_ld_min_mm", 250, 0, 1000);     // 공사 구간 최소 lookahead (길게: 멀리 보고 미리 완만하게 꺾음)
     declare_int("drive.con_ld_sharp_mm", 0, 0, 1000);
@@ -166,9 +172,11 @@ void DriveNode::declare_bool(const std::string &name, bool def)
 
 void DriveNode::apply_profile()
 {
-    follower_.p.ld_min = construction_ ? ld_min_con_ : ld_min_normal_;
+    // 우선순위: 공사 구간 > 교차로 명령 > 일반
+    const bool cross = turning_ && !construction_;
+    follower_.p.ld_min = construction_ ? ld_min_con_ : (cross && ld_min_cross_ > 0.0) ? ld_min_cross_ : ld_min_normal_;
     follower_.p.ld_sharp = construction_ ? ld_sharp_con_ : ld_sharp_normal_;
-    follower_.p.turn_gain = construction_ ? turn_gain_con_ : 1.0;
+    follower_.p.turn_gain = construction_ ? turn_gain_con_ : cross ? turn_gain_cross_ : turn_gain_normal_;
     follower_.p.ld_max = std::max(follower_.p.ld_max, follower_.p.ld_min);
     pivot_.p = construction_ ? pv_con_ : pv_normal_;
     // 교차로 명령 중에는 예전처럼 0°부터 비례, 아니면 일반 곡선에서는 lookahead를 줄이지 않음
@@ -213,6 +221,10 @@ void DriveNode::reload_params()
     ld_sharp_normal_ = mm("drive.ld_sharp_mm");
     ld_sharp_con_ = mm("drive.con_ld_sharp_mm");
     turn_gain_con_ = get_parameter("drive.con_turn_gain_pct").as_int() / 100.0;
+    turn_gain_normal_ = get_parameter("drive.turn_gain_pct").as_int() / 100.0;
+    turn_gain_cross_ = get_parameter("drive.cross_turn_gain_pct").as_int() / 100.0;
+    ld_min_cross_ = mm("drive.cross_ld_min_mm");
+    cross_v_ = mm("drive.cross_v_mm_s");
     sharp_turn_cross_ = deg("drive.sharp_turn_deg");
     sharp_curve_start_ = deg("drive.sharp_curve_start_deg");
     sharp_curve_full_ = deg("drive.sharp_curve_full_deg");
@@ -321,6 +333,8 @@ void DriveNode::on_timer()
                 limit *= weak_scale_;
             if (construction_ && con_v_ > 0.0)
                 limit = std::min(limit, con_v_);
+            else if (turning_ && cross_v_ > 0.0) // 교차로 명령 중 (공사 구간이면 공사 속도)
+                limit = std::min(limit, cross_v_);
 
             o = follower_.follow(t, lim_.v, limit);
             vd = o.v;

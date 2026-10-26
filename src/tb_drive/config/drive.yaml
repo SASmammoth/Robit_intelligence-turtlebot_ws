@@ -46,6 +46,12 @@ drive_node:
       hold_ms: 600           # 경로가 비면 마지막 경로를 추측항법으로 이만큼 더 따라감
       cmd_timeout_ms: 500    # /drive/cmd 유효 시간
       weak_src_pct: 60       # path_source가 memory/color_rule이면 속도를 이 %로
+      # ── 회전 세기 (pure pursuit 곡률 배율 %, 100 = 예전과 같음. 올리면 같은 경로에서 더 작게 돎: 120 → 반경 0.83배)
+      turn_gain_pct: 100       # 일반 주행
+      # ── 교차로 명령 중 (/mission/turn이 좌/우일 때. 공사 구간이면 공사 값이 우선)
+      cross_v_mm_s: 0          # 최고 속도 (0 = v_max 그대로)
+      cross_turn_gain_pct: 100 # 회전 세기
+      cross_ld_min_mm: 0       # 최소 lookahead (0 = ld_min_mm 그대로). 줄이면 더 늦고 급하게 꺾음
       # ── 공사 구간 (/lane/construction이 켜지면 아래 값으로 바뀜. 경로는 일반 주행과 같음)
       con_v_mm_s: 100          # 최고 속도
       con_ld_min_mm: 250       # 최소 lookahead. 길게 = 멀리 보고 ㄱ자 경로를 미리 완만하게 꺾음 (120은 늦게 꺾어 벽돌에 박음)
