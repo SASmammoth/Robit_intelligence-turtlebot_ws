@@ -4,6 +4,8 @@
 //   xb .075 = 경로 x를 7.5cm 가깝게 줌 (bev_bottom 실측 205를 130으로 둔 경우)
 //   ldsharp 0 = 가변 lookahead 끔, pivot 0 = 피봇 끔, enter/keep = 피봇 각도
 //   ./turn_sim v .30 ldmin .17 bottom .02 R .26 ang 180 pivot 0 # 피봇 끄고 반경 26cm 헤어핀
+//   vcurve .20 = 코너 속도 (cstart/cfull = 시작·도달 각도 °), holdmm .15 = 급한 곳 유지를 거리로
+//   tau .15 = 모터 응답 지연 (실제 v,w가 명령을 이 시정수로 따라감. 0 = 즉시)
 // 90° 커브(중심선 반경 R) 주행 시뮬레이션. tb_drive의 실제 Follower/Limiter + drive_node의 곡률 유지 로직 사용
 // 카메라: 로봇 기준 x ∈ [bev_bottom, bev_bottom+depth], |y| ≤ half_w 안에 보이는 중심선만 경로로 받음
 #include "tb_drive/pure_pursuit.hpp"
@@ -16,7 +18,8 @@
 using namespace tb_drive;
 
 struct Cfg { int seed=1; double hold=1.0; double ldsharp=0.12, sharpturn=60; double noise=0.005; int confirm=3; double enter=100, keep=20; bool pivot=true; double ang=90; double v_max=.15, w_max_deg=150, w_acc_deg=600, ld_min=.21, ld_max=.35, ld_time=1.0, curv=.35;
-             double R=.26, bottom=.205, depth=.54, half_w=.24, latency=.04; double xb=0; bool extend=false, lat_comp=false; };
+             double R=.26, bottom=.205, depth=.54, half_w=.24, latency=.04; double xb=0; bool extend=false, lat_comp=false;
+             double vcurve=0, cstart=20, cfull=60, holdmm=0, tau=0; };
 
 // 트랙 중심선: (0,0)에서 +x로 1m 직진 → 반경 R 좌회전 90° → +y로 1m
 static std::vector<Pt> track(double R, double ang) {
@@ -55,17 +58,21 @@ int main(int argc, char **argv) {
         else if (k == "curv") c.curv = v; else if (k == "wmax") c.w_max_deg = v; else if (k == "wacc") c.w_acc_deg = v;
         else if (k == "ext") c.extend = v > 0; else if (k == "lat") c.latency = v; else if (k == "comp") c.lat_comp = v > 0;
         else if (k == "R") c.R = v; else if (k == "bottom") c.bottom = v; else if (k == "ang") c.ang = v; else if (k == "noise") c.noise = v; else if (k == "confirm") c.confirm = int(v); else if (k == "enter") c.enter = v; else if (k == "keep") c.keep = v; else if (k == "pivot") c.pivot = v > 0; else if (k == "ldsharp") c.ldsharp = v; else if (k == "sharpturn") c.sharpturn = v; else if (k == "hold") c.hold = v; else if (k == "seed") c.seed = int(v); else if (k == "halfw") c.half_w = v; else if (k == "xb") c.xb = v;
+        else if (k == "vcurve") c.vcurve = v; else if (k == "cstart") c.cstart = v; else if (k == "cfull") c.cfull = v;
+        else if (k == "holdmm") c.holdmm = v; else if (k == "tau") c.tau = v;
     }
     const auto C = track(c.R, c.ang);
     Follower f; f.p.v_max = c.v_max; f.p.v_min = .04; f.p.w_max = c.w_max_deg * M_PI / 180; f.p.accel = .3; f.p.decel = .6;
     f.p.w_accel = c.w_acc_deg * M_PI / 180; f.p.ld_min = c.ld_min; f.p.ld_max = c.ld_max; f.p.ld_time = c.ld_time;
     f.p.curv_slow = c.curv; f.p.ld_sharp = c.ldsharp; f.p.sharp_turn = c.sharpturn * M_PI / 180; f.p.sharp_hold = c.hold; f.p.stop_dist = .04; f.latency_comp = c.lat_comp;
+    f.p.v_curve = c.vcurve; f.p.curve_start = c.cstart * M_PI / 180; f.p.curve_full = c.cfull * M_PI / 180; f.p.sharp_hold_dist = c.holdmm;
     Limiter lim;
     Pivoter pv; pv.p.enter = c.enter * M_PI / 180; pv.p.keep = c.keep * M_PI / 180; pv.p.confirm = c.confirm;
     pv.p.exit = 15 * M_PI / 180; pv.p.w = 90 * M_PI / 180; pv.p.fallback = 75 * M_PI / 180;
     std::mt19937 rng(c.seed); std::normal_distribution<double> nd(0, c.noise);
     int n_pivot = 0; double pivot_total = 0; bool was_pivot = false;
     double x = 0, y = 0, th = 0, t = 0, next_cam = 0, max_out = 0, max_in = 0;
+    double vr = 0, wr = 0, v_entry = 0, t_end = 0; // 실제 속도(모터 지연), 커브 진입 속도, 도착 시각
     const double dt = 1.0 / 30;
     struct Snap { double t, x, y, th; }; std::vector<Snap> hist;
     size_t near = 0;
@@ -103,9 +110,13 @@ int main(int argc, char **argv) {
             lim.w = w;
         }
         f.record(t, lim.v, lim.w);
-        x += lim.v * dt * std::cos(th + .5 * lim.w * dt); y += lim.v * dt * std::sin(th + .5 * lim.w * dt); th += lim.w * dt;
+        if (c.tau > 0) { vr += (lim.v - vr) * std::min(1.0, dt / c.tau); wr += (lim.w - wr) * std::min(1.0, dt / c.tau); }
+        else { vr = lim.v; wr = lim.w; }
+        x += vr * dt * std::cos(th + .5 * wr * dt); y += vr * dt * std::sin(th + .5 * wr * dt); th += wr * dt;
         const double d = dev(C, x, y, near);
+        if (near < 200) v_entry = vr;                       // 커브 시작(직진 1m = 200점) 직전 속도
+        if (t_end == 0 && near + 40 >= C.size()) t_end = t; // 커브 뒤 직선을 거의 다 간 시각
         if (d > max_out) max_out = d; if (d < max_in) max_in = d;
     }
-    std::printf("최대 오차 %4.1fcm (안쪽 %4.1f 바깥 %4.1f)  피봇 %d회 (총 %3.0f°)\n", std::max(max_out, -max_in) * 100, -max_in * 100, max_out * 100, n_pivot, pivot_total * 180 / M_PI);
+    std::printf("최대 오차 %4.1fcm (안쪽 %4.1f 바깥 %4.1f)  피봇 %d회 (총 %3.0f°)  진입 %.2fm/s  %.1fs\n", std::max(max_out, -max_in) * 100, -max_in * 100, max_out * 100, n_pivot, pivot_total * 180 / M_PI, v_entry, t_end);
 }

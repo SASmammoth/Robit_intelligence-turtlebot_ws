@@ -20,6 +20,10 @@ DriveNode::DriveNode() : Node("drive_node")
 
     declare_int("drive.v_max_mm_s", 150, 0, 1000);
     declare_int("drive.v_min_mm_s", 40, 0, 500);
+    // 코너 속도: 앞 경로(lookahead + 제동거리)가 curve_start~curve_full만큼 틀어지면 상한을 v_max → v_curve로
+    declare_int("drive.v_curve_mm_s", 0, 0, 1000);      // 코너 속도 상한 (0이면 끔 = 예전처럼 v_max에 curv_slow 배율만)
+    declare_int("drive.curve_start_deg", 20, 0, 180);   // 앞 경로가 이보다 덜 틀어지면 최고 속도
+    declare_int("drive.curve_full_deg", 60, 1, 180);    // 이만큼 틀어지면 코너 속도
     declare_int("drive.w_max_deg_s", 90, 0, 720);
     declare_int("drive.accel_mm_s2", 300, 10, 5000);
     declare_int("drive.decel_mm_s2", 600, 10, 5000);
@@ -31,6 +35,7 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.ld_sharp_mm", 120, 0, 1000);       // 급한 곳에서 줄일 lookahead (0이면 끔)
     declare_int("drive.sharp_turn_deg", 60, 1, 180);      // 앞 경로가 이만큼 틀어지면 ld_sharp를 다 씀
     declare_int("drive.sharp_hold_ms", 1000, 0, 5000);    // 급한 곳을 본 뒤 이 시간 동안 짧게 유지
+    declare_int("drive.sharp_hold_mm", 0, 0, 2000);       // >0이면 시간 대신 이 거리를 가는 동안 유지 (속도와 무관)
     // 교차로 명령(/mission/turn)이 없을 때: 일반 곡선(최대 ~75°)에서는 줄이지 않고, 헤어핀·명령 없는 급코너만
     declare_int("drive.sharp_curve_start_deg", 85, 0, 180);  // 이보다 덜 틀어지면 lookahead 안 줄임
     declare_int("drive.sharp_curve_full_deg", 105, 1, 180);  // 이만큼 틀어지면 ld_sharp를 다 씀
@@ -194,6 +199,9 @@ void DriveNode::reload_params()
     auto &p = follower_.p;
     p.v_max = mm("drive.v_max_mm_s");
     p.v_min = mm("drive.v_min_mm_s");
+    p.v_curve = mm("drive.v_curve_mm_s");
+    p.curve_start = deg("drive.curve_start_deg");
+    p.curve_full = std::max(deg("drive.curve_full_deg"), p.curve_start + 1e-3);
     p.w_max = deg("drive.w_max_deg_s");
     p.accel = mm("drive.accel_mm_s2");
     p.decel = mm("drive.decel_mm_s2");
@@ -210,6 +218,7 @@ void DriveNode::reload_params()
     sharp_curve_full_ = deg("drive.sharp_curve_full_deg");
     curve_x_offset_ = mm("drive.curve_x_offset_mm");
     p.sharp_hold = mm("drive.sharp_hold_ms");
+    p.sharp_hold_dist = mm("drive.sharp_hold_mm");
     p.curv_slow = mm("drive.curv_slow_mm");
     p.stop_dist = mm("drive.stop_dist_mm");
     p.corner_min_x = mm("drive.corner_min_x_mm");
@@ -374,9 +383,10 @@ void DriveNode::on_timer()
     // ====== 상태 (10Hz)
     if (tick_ % std::max(1, control_hz_ / 10) == 0)
     {
-        char buf[200];
-        std::snprintf(buf, sizeof(buf), "%s src=%s v=%.3f w=%.2f ld=%.2f end=%.2f prof=%s%s%s%s",
+        char buf[240];
+        std::snprintf(buf, sizeof(buf), "%s src=%s v=%.3f w=%.2f ld=%.2f end=%.2f cap=%.3f dev=%.0f prof=%s%s%s%s",
                       mode_txt.c_str(), path_src_.c_str(), lim_.v, lim_.w, o.tg.ld, o.tg.end_dist,
+                      o.v_cap, o.dev * 180.0 / M_PI,
                       construction_ ? "con" : turning_ ? "cross" : "curve",
                       o.held ? " HOLD" : "", *why ? " stop:" : "", why);
         std_msgs::msg::String s;
