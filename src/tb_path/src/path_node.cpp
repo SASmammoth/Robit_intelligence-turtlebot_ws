@@ -113,6 +113,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_no_brick_mm", 2000, 10000); // 진입 후 벽돌을 한 번도 못 보고 이만큼 가면 끝 (0이면 끔)
     declare_int("path.con_override_frames", 1, 100);  // 공사 구간: 새 경로가 기억과 달라도 이만큼만 의심 (벽돌이 갑자기 보이면 경로가 크게 바뀌는 게 정상)
     declare_int("path.con_offscreen_side", 1, 1);     // 공사 구간: 화면 옆 끝까지 간 벽돌은 화면 밖 선에 붙은 것 (반대쪽 선 틈은 막지 않음)
+    declare_int("path.con_cross_override_frames", 15, 100); // 공사 구간: 새 경로가 기억과 차선 너머에 있으면 이만큼 연속으로 보여야 믿음 (0 끔)
     declare_int("path.con_straight_by_lane", 1, 1);   // 공사 구간: 직진 갈림길에서 차선 방향 기준으로 가장 곧은 가지 (화면 밖 선에 붙은 벽돌 앞으로 새지 않게)
 
     reload_params();
@@ -183,6 +184,7 @@ void PathNode::reload_params()
     con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
     con_no_brick_mm_ = int(get_parameter("path.con_no_brick_mm").as_int());
     con_override_frames_ = int(get_parameter("path.con_override_frames").as_int());
+    con_cross_override_frames_ = int(get_parameter("path.con_cross_override_frames").as_int());
     con_straight_by_lane_ = get_parameter("path.con_straight_by_lane").as_int() != 0;
     con_offscreen_side_ = get_parameter("path.con_offscreen_side").as_int() != 0;
 }
@@ -369,6 +371,7 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     const auto turn = static_cast<lane_path::Turn>(std::min<uint8_t>(turn_, 2));
     // 공사 구간 전용: 기억 의심 프레임, 직진 갈림길 기준
     tracker_.p.override_frames = con ? con_override_frames_ : override_frames_;
+    tracker_.p.cross_override_frames = con ? con_cross_override_frames_ : 0;
     tracker_.p.straight_by_lane = con && con_straight_by_lane_;
     lane_path::Output out = tracker_.update(skel, skel_p_.scale, white, yellow, valid, geo_, turn, pose_);
 

@@ -46,6 +46,10 @@ struct TrackerParams {
     // 벽돌이 화면 밖 선에 붙어 있으면 벽돌 앞 빈 곳 → 화면 옆으로 빠지는 가지가 생기는데,
     // 로봇이 비스듬히 들어오면 그 가지가 들어온 방향으로는 더 곧아 보여서 벽돌 쪽으로 감
     bool   straight_by_lane = false;
+    // 새 경로가 기억과 다를 때, 둘 사이에 차선(흰/노란)이 있으면 = 선 너머 다른 도로로 넘어간 것.
+    // 그때는 override_frames 대신 이만큼 연속으로 보여야 믿음 (0이면 따로 안 봄).
+    // 공사 구간은 override_frames=1이라 벽돌 지난 뒤 안쪽이 막히면 선 바깥 바닥 경로를 바로 따라감 (claude12)
+    int    cross_override_frames = 0;
 };
 
 struct Output {

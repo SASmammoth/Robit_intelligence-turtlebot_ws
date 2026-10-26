@@ -66,6 +66,7 @@ private:
     int con_keep_ = 1, con_keep_rear_mm_ = 100;
     int con_hold_mm_ = 40, con_clear_mm_ = 30, con_dead_end_mm_ = 250;
     int con_no_brick_mm_ = 2000; // 진입 후 벽돌을 한 번도 못 보고 이만큼 가면 끝 (잘못 들어온 것)
+    int con_cross_override_frames_ = 15; // 공사 구간: 차선 너머 새 경로는 이만큼 연속으로 보여야 믿음
     int override_frames_ = 10, con_override_frames_ = 1; // 일반 / 공사 구간 path.override_frames
     bool con_straight_by_lane_ = true;
     bool con_offscreen_side_ = true;     // path.con_offscreen_side

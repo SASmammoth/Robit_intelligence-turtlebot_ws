@@ -71,6 +71,31 @@ Pts clip_at_wall(const Pts &path, const cv::Mat &wall, const Geo &g)
     return out;
 }
 
+// 새 경로(가까운 쪽 절반)의 점과 기억에서 가장 가까운 점 사이에 차선이 있나 (선 너머로 넘어감)
+// 선 두께 2px 이상 지나야 넘은 것으로 봄 (기억이 선을 살짝 스치는 건 무시)
+bool crosses_line(const Pts &live, const Pts &mem, const cv::Mat &lines, const Geo &g)
+{
+    if (live.empty() || mem.size() < 2 || lines.empty()) return false;
+    const double mem_far = mem.back().x;
+    const size_t n = std::max<size_t>(1, live.size() / 2);
+    for (size_t i = 0; i < n; i += 3) {
+        const cv::Point2d &q = live[i];
+        if (q.x > mem_far) break;
+        size_t j = 0;
+        double bd = DBL_MAX;
+        for (size_t k = 0; k < mem.size(); ++k) {
+            const double d = cv::norm(mem[k] - q);
+            if (d < bd) { bd = d; j = k; }
+        }
+        const cv::Point2d a = robot_to_bev(q, g), b = robot_to_bev(mem[j], g);
+        cv::LineIterator it(lines, cv::Point(cvRound(a.x), cvRound(a.y)), cv::Point(cvRound(b.x), cvRound(b.y)), 8);
+        int hits = 0;
+        for (int t = 0; t < it.count; ++t, ++it)
+            if (**it && ++hits >= 2) return true;
+    }
+    return false;
+}
+
 // 일정 간격으로 다시 찍기
 Pts resample(const Pts &in, double step)
 {
@@ -392,7 +417,11 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
         for (const auto &q : live)
             if (q.x <= mem_far) { sum += poly_dist(q, mem_r); ++n; }
         if (n > 0 && sum / n > p.max_dev_m) {
-            if (++suspicious_ < p.override_frames) live_ok = false;
+            int need = p.override_frames;
+            if (p.cross_override_frames > 0 && need < p.cross_override_frames &&
+                crosses_line(live, mem_r, white | yellow, g))
+                need = p.cross_override_frames;
+            if (++suspicious_ < need) live_ok = false;
         } else {
             suspicious_ = 0;
         }
