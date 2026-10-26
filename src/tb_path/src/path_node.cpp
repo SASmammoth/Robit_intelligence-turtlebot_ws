@@ -111,12 +111,14 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_exit_mm", 600, 3000);
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
     declare_int("path.con_no_brick_mm", 2000, 10000); // 진입 후 벽돌을 한 번도 못 보고 이만큼 가면 끝 (0이면 끔)
+    declare_int("path.con_override_frames", 1, 100);  // 공사 구간: 새 경로가 기억과 달라도 이만큼만 의심 (벽돌이 갑자기 보이면 경로가 크게 바뀌는 게 정상)
+    declare_int("path.con_straight_by_lane", 1, 1);   // 공사 구간: 직진 갈림길에서 차선 방향 기준으로 가장 곧은 가지 (화면 밖 선에 붙은 벽돌 앞으로 새지 않게)
 
     reload_params();
     skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
     auto &tp = tracker_.p;
     tp.max_dev_m = get_parameter("path.max_dev_mm").as_int() / 1000.0;
-    tp.override_frames = get_parameter("path.override_frames").as_int();
+    tp.override_frames = override_frames_ = get_parameter("path.override_frames").as_int();
     tp.min_len_m = get_parameter("path.min_len_mm").as_int() / 1000.0;
     tp.lookahead_m = get_parameter("path.branch_look_mm").as_int() / 1000.0;
     tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
@@ -156,7 +158,7 @@ void PathNode::reload_params()
     skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
     auto &tp = tracker_.p;
     tp.max_dev_m = get_parameter("path.max_dev_mm").as_int() / 1000.0;
-    tp.override_frames = get_parameter("path.override_frames").as_int();
+    tp.override_frames = override_frames_ = get_parameter("path.override_frames").as_int();
     turn_drop_memory_ = get_parameter("path.turn_drop_memory").as_int() != 0;
     tp.min_len_m = get_parameter("path.min_len_mm").as_int() / 1000.0;
     tp.lookahead_m = get_parameter("path.branch_look_mm").as_int() / 1000.0;
@@ -179,6 +181,8 @@ void PathNode::reload_params()
     con_exit_mm_ = get_parameter("path.con_exit_mm").as_int();
     con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
     con_no_brick_mm_ = int(get_parameter("path.con_no_brick_mm").as_int());
+    con_override_frames_ = int(get_parameter("path.con_override_frames").as_int());
+    con_straight_by_lane_ = get_parameter("path.con_straight_by_lane").as_int() != 0;
 }
 
 // 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽
@@ -360,6 +364,9 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     last_seed_ = skel.ok ? skel.seed : cv::Point(-1, -1);
 
     const auto turn = static_cast<lane_path::Turn>(std::min<uint8_t>(turn_, 2));
+    // 공사 구간 전용: 기억 의심 프레임, 직진 갈림길 기준
+    tracker_.p.override_frames = con ? con_override_frames_ : override_frames_;
+    tracker_.p.straight_by_lane = con && con_straight_by_lane_;
     lane_path::Output out = tracker_.update(skel, skel_p_.scale, white, yellow, valid, geo_, turn, pose_);
 
     // 공사 구간: 스켈레톤 경로는 벽돌 앞에서 ㄱ자로 꺾이므로 모서리를 둥글게 (기억에는 원래 경로가 남음)

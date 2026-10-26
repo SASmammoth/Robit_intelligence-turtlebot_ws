@@ -66,6 +66,8 @@ private:
     int con_keep_ = 1, con_keep_rear_mm_ = 100;
     int con_hold_mm_ = 40, con_clear_mm_ = 30, con_dead_end_mm_ = 250;
     int con_no_brick_mm_ = 2000; // 진입 후 벽돌을 한 번도 못 보고 이만큼 가면 끝 (잘못 들어온 것)
+    int override_frames_ = 10, con_override_frames_ = 1; // 일반 / 공사 구간 path.override_frames
+    bool con_straight_by_lane_ = true;
     lane_path::Pose2D con_start_pose_; // 공사 모드 시작 위치
     std::string con_reason_ = "-";     // 마지막 시작·끝 이유 (표시용)
     void end_construction(const std::string &why);

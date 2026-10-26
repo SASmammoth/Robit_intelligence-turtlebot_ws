@@ -868,6 +868,8 @@ void MainWindow::setupParamTab()
            {"path.con_clear_mm", "지난 벽돌 옆 여유", " mm", 0, 200, 5},
            {"path.con_exit_mm", "벽돌 본 뒤 안 보이고 이만큼 가면 끝 (0=끔)", " mm", 0, 3000, 50},
            {"path.con_no_brick_mm", "벽돌 못 보고 이만큼 가면 끝 (0=끔)", " mm", 0, 10000, 100},
+           {"path.con_override_frames", "공사: 새 경로 믿기까지", " 프레임", 0, 100, 1},
+           {"path.con_straight_by_lane", "공사: 직진 가지를 차선 방향으로 (1=켬)", "", 0, 1, 1},
        }},
       {"미션 동작 (brain_node) — 공사 끝 모드 1·2를 쓰면 위 path_node의 '벽돌 본 뒤…끝', '벽돌 못 보고…끝'을 0으로",
        {

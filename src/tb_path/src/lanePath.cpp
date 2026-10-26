@@ -300,6 +300,19 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
         return bev_to_robot(cv::Point2d(q.x * K + K / 2.0, q.y * K + K / 2.0), g);
     };
 
+    // 차선 방향 (BEV 축소 좌표, 위쪽 = 앞). straight_by_lane일 때 직진 갈림길 기준
+    cv::Point2d lane_dir(0, 0);
+    if (p.straight_by_lane) {
+        std::vector<cv::Point> lp;
+        cv::findNonZero(white | yellow, lp);
+        if (lp.size() >= 30) {
+            cv::Vec4f L;
+            cv::fitLine(lp, L, cv::DIST_HUBER, 0, 0.01, 0.01);
+            lane_dir = cv::Point2d(L[0], L[1]);
+            if (lane_dir.y > 0) lane_dir = -lane_dir; // 앞쪽(영상 위)을 향하게
+        }
+    }
+
     // ── 1) 실시간 경로
     Pts live;
     if (sk.ok && !sk.skel.empty() && sk.seed.x >= 0) {
@@ -313,9 +326,11 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
             turn_used = true;
             int turn_pick = 0;
             double bv = -DBL_MAX;
+            // 직진: 보이는 차선 방향이 있으면 그 기준으로 가장 곧은 가지 (straight_by_lane)
+            const cv::Point2d ref = (t == Turn::Straight && (lane_dir.x != 0 || lane_dir.y != 0)) ? lane_dir : din;
             for (int i = 0; i < (int)ends.size(); ++i)
             {
-                const double a = turn_angle(din, cv::Point2d(ends[i] - cur));
+                const double a = turn_angle(ref, cv::Point2d(ends[i] - cur));
                 const double v = t == Turn::Left ? a : t == Turn::Right ? -a : -std::abs(a);
                 if (v > bv) { bv = v; turn_pick = i; }
             }
