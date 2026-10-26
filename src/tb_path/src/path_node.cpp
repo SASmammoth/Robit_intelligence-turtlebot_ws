@@ -112,6 +112,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
     declare_int("path.con_no_brick_mm", 2000, 10000); // 진입 후 벽돌을 한 번도 못 보고 이만큼 가면 끝 (0이면 끔)
     declare_int("path.con_override_frames", 1, 100);  // 공사 구간: 새 경로가 기억과 달라도 이만큼만 의심 (벽돌이 갑자기 보이면 경로가 크게 바뀌는 게 정상)
+    declare_int("path.con_offscreen_side", 1, 1);     // 공사 구간: 화면 옆 끝까지 간 벽돌은 화면 밖 선에 붙은 것 (반대쪽 선 틈은 막지 않음)
     declare_int("path.con_straight_by_lane", 1, 1);   // 공사 구간: 직진 갈림길에서 차선 방향 기준으로 가장 곧은 가지 (화면 밖 선에 붙은 벽돌 앞으로 새지 않게)
 
     reload_params();
@@ -183,6 +184,7 @@ void PathNode::reload_params()
     con_no_brick_mm_ = int(get_parameter("path.con_no_brick_mm").as_int());
     con_override_frames_ = int(get_parameter("path.con_override_frames").as_int());
     con_straight_by_lane_ = get_parameter("path.con_straight_by_lane").as_int() != 0;
+    con_offscreen_side_ = get_parameter("path.con_offscreen_side").as_int() != 0;
 }
 
 // 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽
@@ -319,7 +321,8 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                               con ? con_edge_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
                               con ? con_brick_w_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
                               con ? con_attach_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
-                              !con); // 공사 구간: BEV보다 먼 벽돌은 붙은 쪽을 몰라 잘못 피하므로 안 그림
+                              !con, // 공사 구간: BEV보다 먼 벽돌은 붙은 쪽을 몰라 잘못 피하므로 안 그림
+                              con && con_offscreen_side_); // 화면 옆 끝까지 간 벽돌은 그쪽(화면 밖) 선에 붙은 것
         if (con)
         {
             // 벽돌에 가려 끊긴 선을 벽돌 너머로 이음 (벽돌과 선 사이로 경로가 새지 않게)

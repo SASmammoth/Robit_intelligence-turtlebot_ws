@@ -17,7 +17,10 @@ namespace {
 //    화면 끝까지 막고, 그 아래 화면 끝도 막음 (화면 밖 선 대신)
 //  - attach > gap이면: 한쪽만 선에 닿았을 때 그쪽은 벽돌의 모든 줄을 attach 안의 선까지 막음
 //    (곡선에서 선이 벽돌 아래쪽 줄에서 멀어지며 생기는 주머니로 경로가 파고들지 않게)
-void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int edge, int width, int attach)
+//  - off_side: 박스 아랫변이 화면 밖으로 나감 (-1 왼쪽, +1 오른쪽, 0 아님) = 그쪽 화면 밖 선에 붙은 벽돌.
+//    반대쪽 선에 닿아 보여도(곡선에서 먼 줄만 닿음) 그쪽에 붙은 걸로 보지 않음 → 반대쪽 틈은 지나갈 길
+//    (녹화 run_1027 6.8s: 왼쪽 벽돌의 먼 줄이 휘어 들어온 흰 선에 닿아 오른쪽 틈까지 막고, 경로가 벽돌 앞으로 감)
+void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int edge, int width, int attach, int off_side)
 {
     struct Row { int y, xl, xr, cl, cr; }; // cl/cr: 왼쪽/오른쪽에 닿은 선 x (-1이면 없음)
     std::vector<Row> rows;
@@ -53,6 +56,9 @@ void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int ed
     if (rows.empty())
         return;
 
+    if (off_side != 0)
+        for (auto &r : rows)
+            (off_side < 0 ? r.cr : r.cl) = -1; // 화면 밖 선에 붙은 벽돌: 반대쪽 선과는 안 붙음
     int nl = 0, nr = 0;
     std::vector<int> cls, crs;
     for (const auto &r : rows)
@@ -140,7 +146,7 @@ void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int ed
 
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
                double depth_px, double margin_px, const cv::Mat *lines, double gap_px, double edge_px,
-               double width_px, double attach_px, bool keep_far)
+               double width_px, double attach_px, bool keep_far, bool off_screen)
 {
     const bool close = lines && !lines->empty() && (gap_px >= 1.0 || edge_px >= 1.0);
     cv::Mat q;
@@ -180,6 +186,18 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
         const cv::Point2f d = away * float(depth_px);
         const std::vector<cv::Point> quad = {
             cv::Point(a - m), cv::Point(c + m), cv::Point(c + m + d), cv::Point(a - m + d)};
+        // 아랫변이 화면 옆 끝(edge_px의 절반 안)까지 가거나 넘어간 쪽 (멀리 있어 위로 당긴 것은 판단 안 함)
+        //   오른쪽 선에 붙은 벽돌(20cm)이 화면 왼쪽 끝 7cm 안까지 오는 일은 거의 없음
+        int off_side = 0;
+        if (off_screen && !beyond_top)
+        {
+            const float o = float(edge_px) * 0.5f;
+            const bool l = std::min(a.x, c.x) < o, r = std::max(a.x, c.x) >= wall.cols - o;
+            if (l && !r)
+                off_side = -1;
+            else if (r && !l)
+                off_side = 1;
+        }
         if (close)
         {
             q.create(wall.size(), CV_8U);
@@ -187,7 +205,7 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
             cv::fillConvexPoly(q, quad, cv::Scalar(255));
             // 화면 위로 당겨 그린 먼 벽돌은 선이 안 보여 붙은 쪽을 모르므로 화면 끝 막기는 안 함
             draw_brick(wall, q, *lines, int(std::lround(gap_px)), beyond_top ? 0 : int(std::lround(edge_px)),
-                       width_px >= 1.0 ? int(std::lround(width_px + margin_px)) : 0, int(std::lround(attach_px)));
+                       width_px >= 1.0 ? int(std::lround(width_px + margin_px)) : 0, int(std::lround(attach_px)), off_side);
         }
         else
             cv::fillConvexPoly(wall, quad, cv::Scalar(255));

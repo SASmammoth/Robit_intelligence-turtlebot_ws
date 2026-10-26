@@ -24,11 +24,13 @@ struct Box { int x, y, w, h; };
 // keep_far: false면 BEV 위로 벗어난 먼 벽돌은 그리지 않음 (공사 구간: 선이 안 보여 붙은 쪽을 잘못 판단함)
 // attach_px: 한쪽 선에 닿은 벽돌은 그쪽을 벽돌의 모든 줄에서 이 거리 안의 선까지 막음
 //   (곡선에서 수평 박스 아래쪽 줄과 선 사이가 gap보다 벌어져 생기는 주머니 막기)
+// off_screen: 박스 아랫변이 화면 한쪽 옆으로 나가면 그쪽 (화면 밖) 선에 붙은 벽돌로 봄.
+//   반대쪽 선에 닿아 보여도(곡선에서 먼 줄만 닿음) 그쪽 틈은 막지 않음 (공사 구간)
 // 반환: 실제로 그린 개수 (BEV 밖이면 안 그림)
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
                double depth_px, double margin_px,
                const cv::Mat *lines = nullptr, double gap_px = 0.0, double edge_px = 0.0,
-               double width_px = 0.0, double attach_px = 0.0, bool keep_far = true);
+               double width_px = 0.0, double attach_px = 0.0, bool keep_far = true, bool off_screen = false);
 
 // 벽돌에 가려 끊긴 선을 끝 방향 그대로 이어 그림 (공사 구간)
 // lines: 차선 마스크, bricks: 벽돌 벽만 그린 마스크, out: 이은 부분을 그릴 곳
