@@ -8,8 +8,8 @@
 namespace tb_drive {
 namespace {
 double norm(const Pt &p) { return std::hypot(p.x, p.y); }
-// 경로를 따라 s번째 점에서 arc 만큼 간 점
-Pt point_along(const std::vector<Pt> &path, size_t s, double arc)
+// 경로를 따라 s번째 점에서 arc 만큼 간 점 (지금은 안 씀: find_target이 첫 점을 목표로 함)
+[[maybe_unused]] Pt point_along(const std::vector<Pt> &path, size_t s, double arc)
 {
     for (size_t i = s + 1; i < path.size(); ++i)
     {
@@ -45,7 +45,10 @@ Target find_target(const std::vector<Pt> &path, double ld)
 
     if (norm(path[s]) >= ld)
     {
-        t.p = point_along(path, s, ld); // 사각지대 때문에 경로가 ld 밖에서 시작
+        // 사각지대 때문에 경로가 ld 밖에서 시작 → 첫 점을 목표로 (헤더 주석대로)
+        // 예전: 첫 점에서 경로를 따라 ld만큼 더 간 점 → 실제 lookahead가 bev_bottom + ld(약 35cm)로 길어져
+        //       커브 안쪽을 깎음 (test/turn_sim, R 26cm 커브·사각지대 채움 실패: 안쪽 4.9cm → 1.5cm)
+        t.p = path[s];
     }
     else
     {
