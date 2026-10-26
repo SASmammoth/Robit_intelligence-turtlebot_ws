@@ -4,15 +4,18 @@ ROS 2 Jazzy용 터미널 입출력 테스트용 패키지이다. publisher, subs
 
 | 노드 | 파일 | 역할 |
 |------|------|------|
-| `pub_node` | `test_node/pub_node.py` | 터미널에 입력한 텍스트를 `tx_topic`으로 그대로 publish |
-| `sub_node` | `test_node/sub_node.py` | `rx_topic`을 subscribe하여 받은 값을 터미널에 출력 |
+| `pub_node` | `test_node/pub_node.py` | 터미널에 입력한 값을 `topic`으로 publish |
+| `sub_node` | `test_node/sub_node.py` | `topic`을 subscribe하여 받은 값을 터미널에 출력 |
 
-기본 토픽 설정은 다음과 같음. 메시지 타입은 `std_msgs/String`
+토픽과 메시지 타입은 실행 시 파라미터로 지정 (다시 빌드할 필요 없음)
 
-| 변수 | 기본값 | 위치 |
-|------|--------|------|
-| `tx_topic` | `TB_Uart_RX` | `pub_node.py` 상단 |
-| `rx_topic` | `TB_Uart_TX` | `sub_node.py` 상단 |
+| 파라미터 | pub_node 기본값 | sub_node 기본값 |
+|----------|-----------------|-----------------|
+| `topic` | `TB_Uart_RX` | `TB_Uart_TX` |
+| `type` | `std_msgs/msg/String` | `std_msgs/msg/String` |
+
+- `type`이 String이면 입력한 텍스트가 그대로 `data`가 됨
+- 그 외 타입은 한 줄 YAML로 입력. 예) `{data: true}`, `{detections: [{class_id: 7}]}`
 
 ## 요구 사항
 
@@ -24,19 +27,14 @@ ROS 2 Jazzy용 터미널 입출력 테스트용 패키지이다. publisher, subs
 
 [main/README.md](https://github.com/mck737338/Robit_intelligence_turtle-bot/blob/main/REAMDE.md) 의 3-1 참고
 
-## 2. 토픽 이름 수정
+## 2. 토픽 지정
 
-사용할 토픽에 맞게 아래 변수를 수정하여 사용
-
-```python
-# test_node/pub_node.py
-tx_topic = 'TB_Uart_RX'   # 터미널 입력을 publish할 토픽
-
-# test_node/sub_node.py
-rx_topic = 'TB_Uart_TX'   # subscribe하여 터미널에 출력할 토픽
+```bash
+ros2 run test_node pub_node --ros-args -p topic:=/brain/run
+ros2 run test_node sub_node --ros-args -p topic:=/mission/pause -p type:=std_msgs/msg/Bool
 ```
 
-> 수정 후에는 반드시 다시 빌드해야 적용
+같은 노드를 여러 개 띄울 때는 `-r __node:=이름`으로 노드 이름을 다르게 지정
 
 ## 3. 빌드
 
