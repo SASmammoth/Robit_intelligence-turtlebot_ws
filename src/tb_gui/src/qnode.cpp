@@ -203,13 +203,16 @@ bool QNode::isDriveParam(const QString &n)
 
 bool QNode::isBrainParam(const QString &n)
 {
-  return n.startsWith("sign.");
+  return n.startsWith("sign.") || n.startsWith("mission.");
 }
 
 // tb_brain 표지판 필터 (brain_node.cpp의 FILTER_LABELS와 같은 순서)
 std::vector<std::string> QNode::brainParamNames()
 {
-  std::vector<std::string> names = {"sign.confirm_frames", "sign.min_score_pct"};
+  std::vector<std::string> names = {"mission.turn_ms", "mission.rearm_ms", "mission.parking_pause",
+                                    "mission.barrier_release_ms", "mission.con_end_mode", "mission.con_hold_ms",
+                                    "mission.con_once",
+                                    "sign.confirm_frames", "sign.min_score_pct"};
   for (const char *l : {"barrier_closed", "barrier_open", "construction", "left", "right", "parking", "tl_green"})
   {
     names.push_back(std::string("sign.") + l + ".min_h_px");

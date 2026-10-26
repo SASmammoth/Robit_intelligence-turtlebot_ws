@@ -227,6 +227,8 @@ flowchart LR
 - `/signs/detections`의 `brick` 박스를 homography로 BEV에 옮겨 **벽으로 그림** → 스켈레톤이 자연스럽게 피해 감
 - 공사 구간 진입: **tb_brain**이 `construction` 표지판을 확인하면(`sign.construction.*` 크기·`sign.confirm_frames` 필터) `/mission/construction` true, 또는 GUI C키. path_node는 표지판을 직접 보지 않음
 - 공사 구간 끝: `/mission/construction` false(brain은 parking 표지판에서 보냄), GUI X키(`/mission/construction_exit`), 또는 path_node 자동 종료 — 벽돌을 본 뒤 `path.con_exit_mm` 동안 안 보이거나, 벽돌을 한 번도 못 보고 `path.con_no_brick_mm`을 가면
+- brain의 `mission.con_end_mode`: 0 = 위 path_node 자동 종료, 1 = 진입 후 `mission.con_hold_ms`, 2 = 주차 표지판까지. 1·2를 쓸 때는 `path.con_exit_mm`, `path.con_no_brick_mm`을 0으로
+- `mission.con_once`(기본 1): 한 번 들어간 뒤 주차 표지판을 볼 때까지 공사 표지판 무시 (출구 쪽 표지판으로 재진입 방지)
 - 상태는 `/lane/construction`으로 알림 → `drive_node`가 공사 구간 프로필(저속, 긴 lookahead, 피봇 안 함)로 전환
 
 ### 미션 (갈림길 · 주차)

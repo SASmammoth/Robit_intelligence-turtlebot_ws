@@ -838,6 +838,17 @@ void MainWindow::setupParamTab()
            {"path.con_exit_mm", "벽돌 본 뒤 안 보이고 이만큼 가면 끝 (0=끔)", " mm", 0, 3000, 50},
            {"path.con_no_brick_mm", "벽돌 못 보고 이만큼 가면 끝 (0=끔)", " mm", 0, 10000, 100},
        }},
+      {"미션 동작 (brain_node) — 공사 끝 모드 1·2를 쓰면 위 path_node의 '벽돌 본 뒤…끝', '벽돌 못 보고…끝'을 0으로",
+       {
+           {"mission.turn_ms", "좌/우 표지판 → turn 유지", " ms", 0, 30000, 500},
+           {"mission.rearm_ms", "같은 표지판 다시 받기까지", " ms", 0, 30000, 250},
+           {"mission.con_end_mode", "공사 끝: 0 벽돌(path) 1 시간 2 주차표지판", "", 0, 2, 1},
+           {"mission.con_hold_ms", "공사 유지 시간 (모드 1)", " ms", 0, 120000, 500},
+           {"mission.con_once", "공사 한 번만 (주차 표지판까지 재진입 막기)", "", 0, 1, 1},
+           {"mission.parking_pause", "주차 표지판에서 정지 (1=정지)", "", 0, 1, 1},
+           {"mission.barrier_release_ms", "차단바 안 보이면 정지 풀기 (0=끔)", " ms", 0, 30000, 250},
+       },
+       2},
       {"표지판 검출 필터 (brain_node) — 원본 640x480 기준 px, 0 = 끔",
        {
            {"sign.confirm_frames", "연속 프레임 (한 프레임 오검출 거르기)", "", 1, 30, 1},

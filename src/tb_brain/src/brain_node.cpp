@@ -2,13 +2,13 @@
 //
 //   class_id            동작
 //   ------------------  ------------------------------------------------------
-//   0 barrier_closed    pause = 1
+//   0 barrier_closed    pause = 1  (mission.barrier_release_ms 동안 안 보이면 pause = 0)
 //   1 barrier_open      pause = 0
 //   2 brick             (구현 안 함)
-//   3 construction      /mission/construction = 1
-//   5 parking           /mission/construction = 0, 이어서 pause = 1
-//   4 left              /mission/turn = 1 을 turn_duration_sec 동안 발행 후 0
-//   6 right             /mission/turn = 2 를 turn_duration_sec 동안 발행 후 0
+//   3 construction      /mission/construction = 1  (끝나는 방법은 mission.con_end_mode)
+//   5 parking           /mission/construction = 0  (mission.parking_pause = 1이면 pause = 1도)
+//   4 left              /mission/turn = 1 을 mission.turn_ms 동안 발행 후 0
+//   6 right             /mission/turn = 2 를 mission.turn_ms 동안 발행 후 0
 //   7 tl_green          /drive/cmd = FOLLOW 를 계속 발행 (stop 받을 때까지)
 //   8 tl_off
 //   9 tl_red
@@ -18,14 +18,23 @@
 // run_state 0 동안에는 검출을 무시하고 어떤 토픽도 발행하지 않는다.
 //
 // 같은 표지판이 연속 프레임에서 계속 검출되므로 "처음 보였을 때" 한 번만 동작한다.
-// (rearm_sec 이상 안 보이다가 다시 보이면 새 표지판으로 취급)
+// (mission.rearm_ms 이상 안 보이다가 다시 보이면 새 표지판으로 취급)
 //
 // 검출 필터 (GUI Params 탭에서 조정, 0이면 끔):
 //   sign.<label>.min_h_px / min_w_px  이보다 작은 박스(멀리 있는 표지판)는 무시
 //   sign.min_score_pct               이보다 낮은 점수는 무시
 //   sign.confirm_frames              필터를 통과한 검출이 이만큼 연속 프레임이어야 동작 (한 프레임 오검출 거르기)
 //
-// 공사 구간 진입 판단은 여기 한 곳에서만 함 (path_node는 /mission/construction만 받음)
+// 공사 구간 (판단은 여기 한 곳에서만, path_node는 /mission/construction만 받음)
+//   mission.con_end_mode  0: path_node가 벽돌 기준으로 끝냄 (path.con_exit_mm, con_no_brick_mm)
+//                         1: 진입 후 mission.con_hold_ms 지나면 끝
+//                         2: 주차 표지판을 볼 때까지 유지
+//     1, 2를 쓸 때는 path.con_exit_mm, path.con_no_brick_mm를 0으로 (path_node가 먼저 끄지 않게)
+//   mission.con_once = 1  한 번 들어간 뒤에는 주차 표지판을 볼 때까지 공사 표지판을 무시
+//                         (공사 구간 출구 쪽에 보이는 표지판으로 다시 들어가지 않게)
+//   주차 표지판은 모드와 상관없이 공사 구간을 끝냄
+//
+// 파라미터는 모두 정수 (GUI 스핀박스, Save 파일의 /brain_node 항목)
 #include <algorithm>
 #include <chrono>
 #include <map>
@@ -78,11 +87,16 @@ class BrainNode : public rclcpp::Node
 public:
     BrainNode() : Node("brain_node")
     {
-        // 기본값은 코드에 있음. 바꾸려면 -p turn_duration_sec:=15.0 또는 ros2 param set
-        turn_duration_sec_ = declare_parameter<double>("turn_duration_sec", 10.0);
-        rearm_sec_ = declare_parameter<double>("rearm_sec", 2.0);
+        // 미션 동작 (정수: GUI 스핀박스로 바꿈. ros2 param set /brain_node mission.turn_ms 4000 도 가능)
+        declare_int("mission.turn_ms", 4000, 0, 30000);         // 좌/우 표지판 → turn 유지 시간
+        declare_int("mission.rearm_ms", 2000, 0, 30000);        // 같은 표지판을 이만큼 안 보다가 다시 보면 새 표지판
+        declare_int("mission.parking_pause", 0, 0, 1);          // 1: 주차 표지판에서 pause도 (0: 공사 구간만 끔)
+        declare_int("mission.barrier_release_ms", 0, 0, 30000); // 차단바(닫힘)가 이만큼 안 보이면 pause 해제 (0: barrier_open만)
+        declare_int("mission.con_end_mode", 0, 0, 2);           // 0 path_node 벽돌 기준, 1 시간, 2 주차 표지판까지
+        declare_int("mission.con_hold_ms", 10000, 0, 120000);   // con_end_mode 1: 진입 후 이만큼 지나면 끝
+        declare_int("mission.con_once", 1, 0, 1);               // 1: 진입 후 주차 표지판 전까지 공사 표지판 무시
 
-        // 검출 필터 (정수: GUI 스핀박스로 바꿈)
+        // 검출 필터
         declare_int("sign.confirm_frames", 2, 1, 30);
         declare_int("sign.min_score_pct", 0, 0, 100);
         for (const char *l : FILTER_LABELS)
@@ -110,8 +124,8 @@ public:
         // turn 유지/종료, drive cmd 유지 (10Hz)
         timer_ = create_wall_timer(std::chrono::milliseconds(100), [this] { on_timer(); });
 
-        RCLCPP_INFO(get_logger(), "brain_node started (turn %.1fs, run_state 0: '%s' on %s to run)",
-                    turn_duration_sec_, RUN_START, TOPIC_RUN);
+        RCLCPP_INFO(get_logger(), "brain_node started (turn %dms, run_state 0: '%s' on %s to run)",
+                    turn_ms_, RUN_START, TOPIC_RUN);
     }
 
 private:
@@ -134,6 +148,9 @@ private:
             follow_ = false;
             streak_.clear();
             last_seen_.clear(); // 다시 켰을 때 앞에 보이는 표지판을 새로 봄
+            con_on_ = false;
+            con_latched_ = false;
+            barrier_pause_ = false;
             RCLCPP_INFO(get_logger(), "run: stop → run_state 0");
         }
         else
@@ -159,6 +176,15 @@ private:
 
     void reload_filter()
     {
+        auto ms = [this](const char *n) { return int(get_parameter(n).as_int()); };
+        turn_ms_ = ms("mission.turn_ms");
+        rearm_ms_ = ms("mission.rearm_ms");
+        parking_pause_ = ms("mission.parking_pause") != 0;
+        barrier_release_ms_ = ms("mission.barrier_release_ms");
+        con_end_mode_ = ms("mission.con_end_mode");
+        con_hold_ms_ = ms("mission.con_hold_ms");
+        con_once_ = ms("mission.con_once") != 0;
+
         confirm_frames_ = std::max(1, int(get_parameter("sign.confirm_frames").as_int()));
         min_score_ = get_parameter("sign.min_score_pct").as_int() / 100.0;
         for (const char *l : FILTER_LABELS)
@@ -181,7 +207,6 @@ private:
         if (run_state_ != 1)
             return;
         const rclcpp::Time now = this->now();
-        rearm_sec_ = get_parameter("rearm_sec").as_double();
 
         // 이번 프레임에 필터를 통과한 class_id → 연속 프레임 수 갱신 (안 보이면 0부터 다시)
         std::set<int> passed;
@@ -195,10 +220,13 @@ private:
         {
             if (++streak_[id] < confirm_frames_)
                 continue; // 아직 확인 중
+            if (id == ID_BARRIER_CLOSED)
+                barrier_last_ = now; // 보이는 동안 계속 갱신 (barrier_release_ms 기준)
             auto it = last_seen_.find(id);
-            const bool fresh = (it == last_seen_.end()) || (now - it->second).seconds() > rearm_sec_;
+            const bool fresh = (it == last_seen_.end()) || (now - it->second).seconds() * 1000.0 > rearm_ms_;
             last_seen_[id] = now;
-            if (fresh)
+            // 차단바 닫힘은 pause가 풀려 있으면 rearm과 상관없이 다시 걸음 (잠깐 놓쳐서 풀린 뒤 다시 보인 경우)
+            if (fresh || (id == ID_BARRIER_CLOSED && !barrier_pause_))
                 handle(id, now);
         }
     }
@@ -209,22 +237,37 @@ private:
         {
         case ID_BARRIER_CLOSED:
             RCLCPP_INFO(get_logger(), "barrier_closed → pause 1");
+            barrier_pause_ = true;
             publish_bool(pause_pub_, true);
             break;
         case ID_BARRIER_OPEN:
             RCLCPP_INFO(get_logger(), "barrier_open → pause 0");
+            barrier_pause_ = false;
             publish_bool(pause_pub_, false);
             break;
         case ID_BRICK:
             break; // 구현 안 함
         case ID_CONSTRUCTION:
-            RCLCPP_INFO(get_logger(), "construction → construction 1");
+            // con_on_은 1·2 모드에서만 의미 있음 (0은 path_node가 벽돌로 끄는 것을 brain이 모름)
+            if ((con_on_ && con_end_mode_ != 0) || (con_once_ && con_latched_))
+            {
+                RCLCPP_INFO(get_logger(), "construction → 무시 (%s)",
+                            (con_on_ && con_end_mode_ != 0) ? "이미 공사 구간" : "주차 표지판 전까지 한 번만");
+                break;
+            }
+            RCLCPP_INFO(get_logger(), "construction → construction 1 (end_mode %d)", con_end_mode_);
+            con_on_ = true;
+            con_latched_ = true;
+            con_end_ = now + rclcpp::Duration::from_seconds(con_hold_ms_ / 1000.0);
             publish_bool(construction_pub_, true);
             break;
         case ID_PARKING:
-            RCLCPP_INFO(get_logger(), "parking → construction 0, pause 1");
+            RCLCPP_INFO(get_logger(), "parking → construction 0%s", parking_pause_ ? ", pause 1" : "");
+            con_on_ = false;
+            con_latched_ = false; // 다음 바퀴 공사 표지판은 다시 받음
             publish_bool(construction_pub_, false);
-            publish_bool(pause_pub_, true);
+            if (parking_pause_)
+                publish_bool(pause_pub_, true);
             break;
         case ID_LEFT:
             start_turn(TURN_LEFT, now, "left");
@@ -248,10 +291,9 @@ private:
     {
         if (turn_value_ != TURN_NONE) // 이미 회전 신호 중이면 무시
             return;
-        turn_duration_sec_ = get_parameter("turn_duration_sec").as_double();
         turn_value_ = value;
-        turn_end_ = now + rclcpp::Duration::from_seconds(turn_duration_sec_);
-        RCLCPP_INFO(get_logger(), "%s → turn %u for %.1fs", name, value, turn_duration_sec_);
+        turn_end_ = now + rclcpp::Duration::from_seconds(turn_ms_ / 1000.0);
+        RCLCPP_INFO(get_logger(), "%s → turn %u for %dms", name, value, turn_ms_);
         publish_turn(value);
     }
 
@@ -263,9 +305,25 @@ private:
         if (follow_)
             publish_follow();
 
+        const rclcpp::Time t = now();
+        // 공사 구간: 시간으로 끝내기 (con_end_mode 1)
+        if (con_on_ && con_end_mode_ == 1 && t >= con_end_)
+        {
+            RCLCPP_INFO(get_logger(), "construction %dms 지남 → construction 0", con_hold_ms_);
+            con_on_ = false;
+            publish_bool(construction_pub_, false);
+        }
+        // 차단바: 닫힘이 barrier_release_ms 동안 안 보이면 pause 해제 (올라가서 화면 밖으로 나간 경우)
+        if (barrier_pause_ && barrier_release_ms_ > 0 && (t - barrier_last_).seconds() * 1000.0 > barrier_release_ms_)
+        {
+            RCLCPP_INFO(get_logger(), "barrier_closed %dms 동안 안 보임 → pause 0", barrier_release_ms_);
+            barrier_pause_ = false;
+            publish_bool(pause_pub_, false);
+        }
+
         if (turn_value_ == TURN_NONE)
             return;
-        if (now() >= turn_end_)
+        if (t >= turn_end_)
         {
             RCLCPP_INFO(get_logger(), "turn end → 0");
             turn_value_ = TURN_NONE;
@@ -306,8 +364,18 @@ private:
         pub->publish(m);
     }
 
-    double turn_duration_sec_ = 10.0; // left/right 발행 시간 [s]
-    double rearm_sec_ = 2.0;
+    int turn_ms_ = 4000; // left/right 발행 시간
+    int rearm_ms_ = 2000;
+    bool parking_pause_ = false;
+    int barrier_release_ms_ = 0;
+    int con_end_mode_ = 0, con_hold_ms_ = 10000;
+    bool con_once_ = true;
+
+    bool con_on_ = false;      // brain이 공사 구간을 켜 둔 상태 (path_node가 벽돌로 먼저 끈 것은 모름)
+    bool con_latched_ = false; // 이번 바퀴에 이미 공사 구간에 들어갔음 (주차 표지판에서 풂)
+    rclcpp::Time con_end_{0, 0, RCL_ROS_TIME};
+    bool barrier_pause_ = false; // 차단바 때문에 pause 중
+    rclcpp::Time barrier_last_{0, 0, RCL_ROS_TIME};
 
     int confirm_frames_ = 2;
     double min_score_ = 0.0;

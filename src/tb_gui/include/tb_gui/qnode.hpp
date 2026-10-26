@@ -68,7 +68,7 @@ protected:
 private:
   static bool isPathParam(const QString &name);
   static bool isDriveParam(const QString &name);
-  static bool isBrainParam(const QString &name); // sign.* → /brain_node (표지판 검출 필터)
+  static bool isBrainParam(const QString &name); // sign.*, mission.* → /brain_node (표지판 필터, 미션 동작)
   static std::vector<std::string> brainParamNames();
   static std::vector<std::string> lineParamNames();
   static std::vector<std::string> pathParamNames();
