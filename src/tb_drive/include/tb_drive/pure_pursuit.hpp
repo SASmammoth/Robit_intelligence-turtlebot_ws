@@ -23,7 +23,12 @@ struct Params
     double ld_min = 0.15;   // lookahead 최소 [m]
     double ld_max = 0.35;   // lookahead 최대 [m]
     double ld_time = 1.0;   // lookahead = 속도 × ld_time [s]
-    double curv_slow = 0.1; // v = limit / (1 + curv_slow·|곡률|) [m]
+    double curv_slow = 0.1; // v = 상한 / (1 + curv_slow·|곡률|) [m]. 상한은 코너면 v_curve 쪽으로 내려감
+    // 코너 속도: 앞 경로(ld + 제동거리)가 로봇 방향에서 curve_start~curve_full만큼 틀어지면
+    // 속도 상한을 limit → v_curve로 비례해서 낮춤 (직선은 v_max 그대로, 코너는 v_max와 상관없이 v_curve)
+    double v_curve = 0.0;      // 코너 속도 상한 [m/s]. 0이면 끔
+    double curve_start = 0.35; // 이보다 덜 틀어지면 limit 그대로 [rad]
+    double curve_full = 1.05;  // 이만큼 틀어지면 v_curve [rad]
     double turn_gain = 1.0; // pure pursuit 곡률 배율. 1보다 크면 같은 lookahead에서 더 작게 돎 (공사 구간)
     double stop_dist = 0.04; // 경로 끝까지 이만큼 남으면 정지 [m]
     double corner_min_x = 0.20; // 이보다 가까운 경로에서는 코너를 찾지 않음 [m] (= BEV 아랫줄 거리)
@@ -36,6 +41,7 @@ struct Params
     // 곡선을 일찍·급하게 꺾음(안쪽을 밟음) → 차이(실측 - 설정)만큼 넣으면 조향 계산만 실제 거리로
     double x_offset = 0.0;
     double sharp_hold = 1.0;    // 급한 곳을 본 뒤 이 시간 동안은 ld_sharp 유지 (피봇·코너 빠져나올 때까지) [s]
+    double sharp_hold_dist = 0.0; // >0이면 시간 대신 이 거리를 가는 동안 유지 [m] (속도가 바뀌어도 같은 구간)
 };
 
 struct Target
@@ -108,6 +114,8 @@ public:
         bool has_corner = false;  // 경로에 큰 꺾임이 있음
         Pt corner;                // 꺾이는 지점 (base_link)
         double corner_turn = 0.0; // 꺾인 각도 [rad], 왼쪽 +
+        double dev = 0.0;         // 앞 경로가 로봇 방향에서 가장 많이 틀어진 각도 [rad]
+        double v_cap = 0.0;       // 코너 속도까지 반영한 이번 주기 속도 상한 [m/s]
     };
 
     void reset();
@@ -121,6 +129,9 @@ private:
     std::vector<Pt> cur_, good_;
     double cur_stamp_ = -1.0, good_stamp_ = -1.0;
     mutable double sharp_t_ = -1e9; // 마지막으로 급한 곳을 본 시각 (ld_sharp 유지용)
+    mutable double odo_ = 0.0;      // 누적 이동 거리 [m] (거리 기준 유지용)
+    mutable double odo_t_ = -1.0;   // odo_를 마지막으로 갱신한 시각
+    mutable double sharp_odo_ = -1e9; // 마지막으로 급한 곳을 본 위치 (odo_)
 };
 
 // 날카로운 꺾임(교차로, 벽돌 회피)에서만 쓰는 제자리 회전.

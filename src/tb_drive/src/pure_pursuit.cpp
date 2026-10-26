@@ -8,8 +8,8 @@
 namespace tb_drive {
 namespace {
 double norm(const Pt &p) { return std::hypot(p.x, p.y); }
-// 경로를 따라 s번째 점에서 arc 만큼 간 점
-Pt point_along(const std::vector<Pt> &path, size_t s, double arc)
+// 경로를 따라 s번째 점에서 arc 만큼 간 점 (지금은 안 씀: find_target이 첫 점을 목표로 함)
+[[maybe_unused]] Pt point_along(const std::vector<Pt> &path, size_t s, double arc)
 {
     for (size_t i = s + 1; i < path.size(); ++i)
     {
@@ -45,7 +45,10 @@ Target find_target(const std::vector<Pt> &path, double ld)
 
     if (norm(path[s]) >= ld)
     {
-        t.p = point_along(path, s, ld); // 사각지대 때문에 경로가 ld 밖에서 시작
+        // 사각지대 때문에 경로가 ld 밖에서 시작 → 첫 점을 목표로 (헤더 주석대로)
+        // 예전: 첫 점에서 경로를 따라 ld만큼 더 간 점 → 실제 lookahead가 bev_bottom + ld(약 35cm)로 길어져
+        //       커브 안쪽을 깎음 (test/turn_sim, R 26cm 커브·사각지대 채움 실패: 안쪽 4.9cm → 1.5cm)
+        t.p = path[s];
     }
     else
     {
@@ -207,6 +210,9 @@ void Follower::reset()
     cur_.clear();
     good_.clear();
     sharp_t_ = -1e9;
+    sharp_odo_ = -1e9;
+    odo_ = 0.0;
+    odo_t_ = -1.0;
     cur_stamp_ = good_stamp_ = -1.0;
 }
 
@@ -263,23 +269,51 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
     o.has_corner = find_corner(pts, 0.6, o.corner, o.corner_turn, p.corner_min_x); // 8cm 안에서 35° 넘게 꺾이면 코너
 
 
+    // 이동 거리 누적 (sharp_hold_dist용). v_now는 지난 주기에 실제로 낸 속도
+    if (odo_t_ >= 0.0 && t > odo_t_)
+        odo_ += std::abs(v_now) * std::min(t - odo_t_, 0.2);
+    odo_t_ = t;
+
     double ld = std::clamp(p.ld_time * std::abs(v_now), p.ld_min, p.ld_max);
+
+    // 앞쪽 경로가 로봇 방향에서 가장 많이 틀어진 각도 (6cm 현으로 재서 흔들림에 둔감하게)
+    //   dev_sharp: 앞 sharp_look 안 (lookahead 줄이기용, 예전과 같은 범위)
+    //   o.dev    : 앞 ld + 제동거리 안 (코너 속도용. 지금 속도에서 v_curve까지 줄일 거리만큼 미리 봄)
+    const bool use_curve = p.v_curve > 0.0 && p.v_curve < limit;
+    const double brake = use_curve
+        ? std::max(0.0, (v_now * v_now - p.v_curve * p.v_curve) / (2.0 * std::max(1e-3, p.decel)))
+        : 0.0;
+    const double look = std::max(p.sharp_look, use_curve ? ld + brake : 0.0);
+    double dev_sharp = 0.0, run = 0.0;
+    for (size_t i = 0; i + 3 < pts.size() && run < look; ++i)
+    {
+        if (pts[i].x <= 0.0)
+            continue;
+        const double d = std::abs(std::atan2(pts[i + 3].y - pts[i].y, pts[i + 3].x - pts[i].x));
+        o.dev = std::max(o.dev, d);
+        if (run < p.sharp_look)
+            dev_sharp = std::max(dev_sharp, d);
+        run += std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+    }
+
+    // 코너 속도: 직선은 limit, 코너는 v_curve (그 사이는 비례). curv_slow는 이 상한에 대한 배율로 걸림
+    o.v_cap = limit;
+    if (use_curve)
+    {
+        const double r = std::clamp((o.dev - p.curve_start) / std::max(1e-3, p.curve_full - p.curve_start), 0.0, 1.0);
+        o.v_cap = limit - (limit - p.v_curve) * r;
+    }
+
     if (p.ld_sharp > 0.0 && p.ld_sharp < ld)
     {
-        // 앞쪽 경로가 로봇 방향에서 가장 많이 틀어진 각도 (6cm 현으로 재서 흔들림에 둔감하게)
-        double dev = 0.0, run = 0.0;
-        for (size_t i = 0; i + 3 < pts.size() && run < p.sharp_look; ++i)
-        {
-            if (pts[i].x <= 0.0)
-                continue;
-            dev = std::max(dev, std::abs(std::atan2(pts[i + 3].y - pts[i].y, pts[i + 3].x - pts[i].x)));
-            run += std::hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
-        }
         // sharp_start 아래는 줄이지 않고, sharp_turn에서 ld_sharp를 다 씀 (그 사이는 비례)
-        double r = std::clamp((dev - p.sharp_start) / std::max(1e-3, p.sharp_turn - p.sharp_start), 0.0, 1.0);
+        double r = std::clamp((dev_sharp - p.sharp_start) / std::max(1e-3, p.sharp_turn - p.sharp_start), 0.0, 1.0);
         if (r >= 1.0)
-            sharp_t_ = t;            // 급한 곳: 이 시각부터 sharp_hold 동안 짧게 유지
-        else if (t - sharp_t_ < p.sharp_hold)
+        {
+            sharp_t_ = t; // 급한 곳: 여기부터 sharp_hold(시간) 또는 sharp_hold_dist(거리) 동안 짧게 유지
+            sharp_odo_ = odo_;
+        }
+        else if (p.sharp_hold_dist > 0.0 ? odo_ - sharp_odo_ < p.sharp_hold_dist : t - sharp_t_ < p.sharp_hold)
             r = 1.0;
         ld -= (ld - p.ld_sharp) * r;
     }
@@ -289,7 +323,7 @@ Follower::Out Follower::follow(double t, double v_now, double limit) const
         o.why = "path_behind";
         return o;
     }
-    command(o.tg, p, limit, o.v, o.w);
+    command(o.tg, p, o.v_cap, o.v, o.w);
     if (o.v == 0.0)
         o.why = "path_end";
     return o;

@@ -225,9 +225,10 @@ std::vector<std::string> QNode::driveParamNames(bool with_enable)
   std::vector<std::string> names = {
       "drive.require_cmd", "drive.latency_comp", "drive.psd.enable", // bool
       "drive.control_hz",
-      "drive.v_max_mm_s", "drive.v_min_mm_s", "drive.w_max_deg_s",
+      "drive.v_max_mm_s", "drive.v_curve_mm_s", "drive.curve_start_deg", "drive.curve_full_deg",
+      "drive.v_min_mm_s", "drive.w_max_deg_s",
       "drive.accel_mm_s2", "drive.decel_mm_s2", "drive.w_accel_deg_s2",
-      "drive.ld_min_mm", "drive.ld_max_mm", "drive.ld_time_ms", "drive.ld_sharp_mm", "drive.sharp_turn_deg", "drive.sharp_hold_ms", "drive.curv_slow_mm", "drive.stop_dist_mm",
+      "drive.ld_min_mm", "drive.ld_max_mm", "drive.ld_time_ms", "drive.ld_sharp_mm", "drive.sharp_turn_deg", "drive.sharp_hold_ms", "drive.sharp_hold_mm", "drive.curv_slow_mm", "drive.stop_dist_mm",
       "drive.sharp_curve_start_deg", "drive.sharp_curve_full_deg", "drive.curve_x_offset_mm",
       "drive.path_timeout_ms", "drive.hold_ms", "drive.cmd_timeout_ms", "drive.weak_src_pct", "drive.con_v_mm_s",
       "drive.con_ld_min_mm", "drive.con_ld_sharp_mm", "drive.con_turn_gain_pct", "drive.con_pivot_enter_deg", "drive.con_pivot_keep_deg",

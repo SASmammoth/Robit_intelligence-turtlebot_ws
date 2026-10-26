@@ -831,6 +831,9 @@ void MainWindow::setupDriveTab()
   // 파라미터 스핀박스: 이름, 표시 이름, 단위, 범위 (tb_drive의 declare_int 범위와 같게)
   static const ParamSpinDef defs[] = {
       {"drive.v_max_mm_s", "최고 속도", " mm/s", 0, 1000, 10},
+      {"drive.v_curve_mm_s", "코너 속도 (0=끔)", " mm/s", 0, 1000, 10},
+      {"drive.curve_start_deg", "코너 감속 시작 각도", " °", 0, 180, 5},
+      {"drive.curve_full_deg", "코너 속도 도달 각도", " °", 1, 180, 5},
       {"drive.v_min_mm_s", "최저 속도", " mm/s", 0, 500, 5},
       {"drive.w_max_deg_s", "최대 회전", " °/s", 0, 720, 5},
       {"drive.accel_mm_s2", "가속", " mm/s²", 10, 5000, 50},
@@ -842,6 +845,7 @@ void MainWindow::setupDriveTab()
       {"drive.ld_sharp_mm", "급한 곳 lookahead", " mm", 0, 1000, 10},
       {"drive.sharp_turn_deg", "교차로: 급한 곳 판단 각도", " °", 1, 180, 5},
       {"drive.sharp_hold_ms", "급한 곳 유지 시간", " ms", 0, 5000, 100},
+      {"drive.sharp_hold_mm", "급한 곳 유지 거리 (0=시간)", " mm", 0, 2000, 10},
       {"drive.sharp_curve_start_deg", "일반 곡선: 급한 곳 시작 각도", " °", 0, 180, 5},
       {"drive.sharp_curve_full_deg", "일반 곡선: 급한 곳 최대 각도", " °", 1, 180, 5},
       {"drive.curve_x_offset_mm", "일반 곡선 거리 보정", " mm", -200, 200, 5},
