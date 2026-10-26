@@ -150,6 +150,8 @@ flowchart LR
 | 발행/구독 | `/mission/turn`, `/mission/parking` | 버튼 → 발행. 같은 토픽을 구독해 버튼 상태를 맞춤 |
 | 발행 | `/mission/construction` | 공사 구간 수동 on/off |
 | 발행 | `/drive/cmd` | STOP 버튼 |
+| 발행 | `/brain/run` | brain 켜기/끄기 버튼·Enter (`"start"`/`"stop"`). 켜져 있는 동안 1초마다 `"start"` 다시 보냄. Esc도 끔 |
+| 발행 | `/mission/pause` | brain을 끌 때 `false` 한 번 (brain이 걸어둔 정지 풀기) |
 | 발행 | `TB_Uart_RX` | WASD 수동 조종, UART 명령 직접 입력 |
 
 ---

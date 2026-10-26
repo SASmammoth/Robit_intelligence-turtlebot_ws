@@ -94,6 +94,11 @@ private:
   void refreshViewStatus();            // 모드 배지·미션 표시 갱신
   void setTurnMomentary(int key, bool press); // 자동 주행 중 A/D: 누르는 동안만 Left/Right
   void setBarrier(bool on);            // 차단바 정지: /drive/cmd STOP을 10Hz로 계속 보냄
+  void setBrainRun(bool on);           // tb_brain 켜기/끄기 (/brain/run). 버튼, Enter
+  void showBrainRun();                 // 버튼 글자·색 (GUI가 보낸 상태 기준)
+  bool brain_run_ = false;
+  QPushButton *btn_brain_ = nullptr;
+  QTimer brain_timer_;                 // 켜져 있는 동안 1초마다 "start" 다시 보냄 (brain이 나중에 떠도 받게)
   bool handleViewKey(QKeyEvent *ke, bool press);
   QWidget *view_tab_ = nullptr;
   QLabel *label_mode_ = nullptr, *label_keys_ = nullptr, *label_drive_brief_ = nullptr;

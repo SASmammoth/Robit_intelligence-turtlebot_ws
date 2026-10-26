@@ -465,6 +465,17 @@ void MainWindow::setupViewTab()
   label_drive_brief_->setWordWrap(true); // 긴 /drive/state 한 줄 때문에 상태 상자가 넓어지지 않게
   box->insertWidget(2, label_drive_brief_);
 
+  // tb_brain 켜기/끄기 (/brain/run "start"/"stop"). 모드 버튼 바로 아래
+  btn_brain_ = new QPushButton(ui->groupStatus);
+  btn_brain_->setFocusPolicy(Qt::NoFocus);
+  btn_brain_->setToolTip("/brain/run: \"start\"면 brain이 표지판을 보고 미션을 냄, \"stop\"이면 아무것도 안 냄.\n"
+                         "끌 때 /mission/turn 0, /mission/pause false도 같이 보냄 (brain이 걸어둔 회전·정지 풀기)");
+  box->insertWidget(2, btn_brain_);
+  connect(btn_brain_, &QPushButton::clicked, this, [this] { setBrainRun(!brain_run_); });
+  brain_timer_.setInterval(1000);
+  connect(&brain_timer_, &QTimer::timeout, this, [this] { qnode->publishBrainRun(true); });
+  showBrainRun(); // 시작할 때는 아무것도 안 보냄 (CLI로 켠 brain을 GUI가 켜지면서 끄지 않게)
+
   // 기존 주차 체크박스 옆에 공사 구간, 차단바
   check_construction_ = new QCheckBox("공사 구간 (C)", ui->groupStatus);
   check_barrier_ = new QCheckBox("차단바 정지 (B)", ui->groupStatus);
@@ -597,8 +608,8 @@ void MainWindow::refreshViewStatus()
   label_mode_->setStyleSheet(QString("font-size: 18px; font-weight: bold; border-radius: 4px; color: white; "
                                      "padding: 4px; background: %1;").arg(color[i]));
   label_keys_->setText(driveMode() == DriveMode::Auto
-                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Esc 정지"
-                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Esc 정지");
+                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter brain   Esc 정지"
+                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter brain   Esc 정지");
 }
 
 void MainWindow::setTurnMomentary(int key, bool press)
@@ -609,6 +620,34 @@ void MainWindow::setTurnMomentary(int key, bool press)
   const int k = turn_keys_.isEmpty() ? 0 : turn_keys_.last();
   QRadioButton *b = k == Qt::Key_A ? ui->radioTurnLeft : k == Qt::Key_D ? ui->radioTurnRight : ui->radioTurnStraight;
   b->setChecked(true); // 라디오 버튼의 toggled에서 /mission/turn 발행
+}
+
+void MainWindow::setBrainRun(bool on)
+{
+  const bool changed = on != brain_run_;
+  brain_run_ = on;
+  qnode->publishBrainRun(on);
+  if (on)
+    brain_timer_.start();
+  else
+  {
+    brain_timer_.stop();
+    if (changed)
+    {
+      // brain이 멈추면 마지막으로 보낸 값이 그대로 남으므로 풀어 줌
+      ui->radioTurnStraight->setChecked(true); // toggled에서 /mission/turn 0
+      qnode->publishTurn(0);
+      qnode->publishPause(false);
+    }
+  }
+  showBrainRun();
+}
+
+void MainWindow::showBrainRun()
+{
+  btn_brain_->setText(brain_run_ ? "Brain 동작 중 — 끄기 (Enter)" : "Brain 꺼짐 — 켜기 (Enter)");
+  btn_brain_->setStyleSheet(QString("font-weight: bold; color: white; padding: 4px; border-radius: 4px; background: %1;")
+                                .arg(brain_run_ ? "#8e44ad" : "#555555"));
 }
 
 void MainWindow::setBarrier(bool on)
@@ -646,7 +685,13 @@ bool MainWindow::handleViewKey(QKeyEvent *ke, bool press)
     {
       setDriveMode(DriveMode::Off);
       setBarrier(false);
+      setBrainRun(false);
     }
+    return true;
+  case Qt::Key_Return:
+  case Qt::Key_Enter: // 키패드 Enter
+    if (press && !repeat)
+      setBrainRun(!brain_run_);
     return true;
   case Qt::Key_P:
     if (press && !repeat)

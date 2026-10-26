@@ -112,6 +112,8 @@ QNode::QNode()
       "/lane/construction_info", 10, [this](const std_msgs::msg::String::ConstSharedPtr m)
       { Q_EMIT constructionInfoReceived(QString::fromStdString(m->data)); });
   drive_cmd_pub_ = node->create_publisher<tb_interfaces::msg::DriveCmd>("/drive/cmd", 10);
+  brain_run_pub_ = node->create_publisher<std_msgs::msg::String>("/brain/run", 10);
+  pause_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/pause", 10);
 
   // ====== 주행 상태 (tb_drive, 10Hz 문자열)
   drive_state_sub_ = node->create_subscription<std_msgs::msg::String>(
@@ -566,6 +568,20 @@ void QNode::publishConstructionExit()
   std_msgs::msg::Bool m;
   m.data = true;
   construction_exit_pub_->publish(m);
+}
+
+void QNode::publishBrainRun(bool start)
+{
+  std_msgs::msg::String m;
+  m.data = start ? "start" : "stop";
+  brain_run_pub_->publish(m);
+}
+
+void QNode::publishPause(bool on)
+{
+  std_msgs::msg::Bool m;
+  m.data = on;
+  pause_pub_->publish(m);
 }
 
 void QNode::publishDriveStop()

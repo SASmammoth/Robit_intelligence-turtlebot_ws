@@ -49,6 +49,8 @@ public:
   void publishConstruction(bool on); // /mission/construction (공사 구간 모드 수동 켜기/끄기)
   void publishConstructionExit();    // /mission/construction_exit (지금 공사 모드 끝내기: 표지판 자동 진입도)
   void publishDriveStop();           // /drive/cmd STOP 한 번 (차단바 흉내: 10Hz 이상으로 계속 불러야 유지됨)
+  void publishBrainRun(bool start);  // /brain/run "start" / "stop" (tb_brain 켜기/끄기)
+  void publishPause(bool on);        // /mission/pause (tb_brain이 거는 일시정지. brain 끌 때 풀어 줌)
 
   // ====== UART (tb_uart_node: TB_Uart_RX로 명령 문자열 전송)
   void sendUart(const QString &cmd);  // "start", "quit" 등
@@ -92,6 +94,8 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_exit_pub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr construction_info_sub_; // /lane/construction_info
   rclcpp::Publisher<tb_interfaces::msg::DriveCmd>::SharedPtr drive_cmd_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr brain_run_pub_; // /brain/run
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pause_pub_;       // /mission/pause
 
   // UART
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr uart_pub_;
