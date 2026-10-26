@@ -152,6 +152,7 @@ flowchart LR
 | 발행 | `/drive/cmd` | STOP 버튼 |
 | 발행 | `/brain/run` | **Brain 모드**(버튼·Enter)에서 `"start"`(1초마다 다시), 다른 모드로 바꾸면 `"stop"` |
 | 발행 | `/mission/pause` | Brain 모드를 끌 때 `false` 한 번 (brain이 걸어둔 정지 풀기) |
+| 발행 | `/brain/inject` | "가짜 표지판" 버튼: 표지판 이름(`tl_green`, `left` …). brain이 필터 없이 바로 그 동작 |
 | 발행 | `TB_Uart_RX` | WASD 수동 조종, UART 명령 직접 입력 |
 
 ---

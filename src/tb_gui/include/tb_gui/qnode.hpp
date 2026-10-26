@@ -54,6 +54,7 @@ public:
   void publishDriveStop();           // /drive/cmd STOP 한 번 (차단바 흉내: 10Hz 이상으로 계속 불러야 유지됨)
   void publishBrainRun(bool start);  // /brain/run "start" / "stop" (tb_brain 켜기/끄기)
   void publishPause(bool on);        // /mission/pause (tb_brain이 거는 일시정지. brain 끌 때 풀어 줌)
+  void publishBrainInject(const QString &label); // /brain/inject: 가짜 표지판 (brain이 바로 그 표지판 동작)
 
   // ====== UART (tb_uart_node: TB_Uart_RX로 명령 문자열 전송)
   void sendUart(const QString &cmd);  // "start", "quit" 등
@@ -101,6 +102,7 @@ private:
   rclcpp::Publisher<tb_interfaces::msg::DriveCmd>::SharedPtr drive_cmd_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr brain_run_pub_; // /brain/run
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pause_pub_;       // /mission/pause
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr inject_pub_;    // /brain/inject
 
   // UART
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr uart_pub_;

@@ -115,6 +115,7 @@ QNode::QNode()
   drive_cmd_pub_ = node->create_publisher<tb_interfaces::msg::DriveCmd>("/drive/cmd", 10);
   brain_run_pub_ = node->create_publisher<std_msgs::msg::String>("/brain/run", 10);
   pause_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/pause", 10);
+  inject_pub_ = node->create_publisher<std_msgs::msg::String>("/brain/inject", 10);
 
   // ====== 주행 상태 (tb_drive, 10Hz 문자열)
   drive_state_sub_ = node->create_subscription<std_msgs::msg::String>(
@@ -211,7 +212,7 @@ std::vector<std::string> QNode::brainParamNames()
 {
   std::vector<std::string> names = {"mission.turn_ms", "mission.rearm_ms", "mission.parking_pause",
                                     "mission.barrier_release_ms", "mission.con_end_mode", "mission.con_hold_ms",
-                                    "mission.con_once",
+                                    "mission.con_once", "mission.start_follow",
                                     "sign.confirm_frames", "sign.min_score_pct"};
   for (const char *l : {"barrier_closed", "barrier_open", "construction", "left", "right", "parking", "tl_green"})
   {
@@ -618,6 +619,13 @@ void QNode::publishBrainRun(bool start)
   std_msgs::msg::String m;
   m.data = start ? "start" : "stop";
   brain_run_pub_->publish(m);
+}
+
+void QNode::publishBrainInject(const QString &label)
+{
+  std_msgs::msg::String m;
+  m.data = label.toStdString();
+  inject_pub_->publish(m);
 }
 
 void QNode::publishPause(bool on)

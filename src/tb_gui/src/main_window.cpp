@@ -9,6 +9,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGroupBox>
+#include <QGridLayout>
 #include <QScrollArea>
 #include <QStatusBar>
 #include <QVariant>
@@ -494,6 +495,35 @@ void MainWindow::setupViewTab()
   btn_con_exit->setToolTip("/mission/construction_exit: 수동·표지판 진입 모두 끔. 표지판이 3초 넘게 안 보여야 다시 자동 진입");
   box->insertWidget(park_idx + 3, label_con_);
   box->insertWidget(park_idx + 4, btn_con_exit);
+
+  // 가짜 표지판 → tb_brain (/brain/inject). 필터 없이 바로 그 표지판 동작 (Brain 모드에서만 의미 있음)
+  //   중간에서 시작할 때 초록불로 출발, 표지판을 놓쳤을 때 대신 보내기 등
+  auto *inject_box = new QGroupBox("가짜 표지판 → brain", ui->groupStatus);
+  auto *inject_grid = new QGridLayout(inject_box);
+  inject_grid->setContentsMargins(4, 4, 4, 4);
+  inject_grid->setSpacing(3);
+  static const std::pair<const char *, const char *> fake_signs[] = {
+      {"tl_green", "초록불 (출발)"}, {"left", "좌회전"}, {"right", "우회전"},
+      {"construction", "공사"}, {"parking", "주차"}, {"barrier_closed", "차단바 닫힘"},
+      {"barrier_open", "차단바 열림"}};
+  int fi = 0;
+  for (const auto &[label, text] : fake_signs)
+  {
+    auto *b = new QPushButton(text, inject_box);
+    b->setFocusPolicy(Qt::NoFocus);
+    b->setToolTip(QString("/brain/inject \"%1\"").arg(label));
+    const QString l = label;
+    connect(b, &QPushButton::clicked, this, [this, l]
+            {
+      qnode->publishBrainInject(l);
+      statusBar()->showMessage(driveMode() == DriveMode::Brain
+                                   ? "가짜 표지판 보냄: " + l
+                                   : "가짜 표지판 보냄: " + l + " (Brain 모드가 아니면 brain이 무시함, Enter로 Brain 켜기)",
+                               4000); });
+    inject_grid->addWidget(b, fi / 3, fi % 3);
+    ++fi;
+  }
+  box->insertWidget(park_idx + 5, inject_box);
   connect(btn_con_exit, &QPushButton::clicked, this, [this] { exitConstruction(); });
   connect(qnode, &QNode::constructionInfoReceived, this, &MainWindow::showConstructionInfo);
   showConstructionInfo("");
@@ -848,6 +878,7 @@ void MainWindow::setupParamTab()
            {"mission.con_once", "공사 한 번만 (주차 표지판까지 재진입 막기)", "", 0, 1, 1},
            {"mission.parking_pause", "주차 표지판에서 정지 (1=정지)", "", 0, 1, 1},
            {"mission.barrier_release_ms", "차단바 안 보이면 정지 풀기 (0=끔)", " ms", 0, 30000, 250},
+           {"mission.start_follow", "시작하자마자 출발 (1=초록불 안 기다림)", "", 0, 1, 1},
        },
        2},
       {"표지판 검출 필터 (brain_node) — 원본 640x480 기준, 0 = 끔. 높이·너비·면적을 모두 넘어야 동작",

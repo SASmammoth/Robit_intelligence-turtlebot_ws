@@ -35,6 +35,11 @@
 //                         (공사 구간 출구 쪽에 보이는 표지판으로 다시 들어가지 않게)
 //   주차 표지판은 모드와 상관없이 공사 구간을 끝냄
 //
+// 가짜 표지판 (/brain/inject, String: 표지판 이름): 필터·연속 프레임·rearm 없이 바로 그 표지판 동작
+//   GUI "가짜 표지판" 버튼. 중간에서 brain을 시작할 때 tl_green으로 출발, 놓친 표지판 대신 등
+//   run_state 1일 때만 받음
+// mission.start_follow = 1: /brain/run start를 받자마자 FOLLOW (신호등 구간을 건너뛰고 중간에서 시작)
+//
 // 파라미터는 모두 정수 (GUI 스핀박스, Save 파일의 /brain_node 항목)
 #include <algorithm>
 #include <chrono>
@@ -61,6 +66,7 @@ static constexpr const char *TOPIC_CONSTRUCTION = "/mission/construction"; // �
 static constexpr const char *TOPIC_PAUSE = "/mission/pause";             // 발행 (Bool)
 static constexpr const char *TOPIC_DRIVE_CMD = "/drive/cmd";             // 발행 (DriveCmd)
 static constexpr const char *TOPIC_RUN = "/brain/run";                   // 구독 (String: "start" / "stop")
+static constexpr const char *TOPIC_INJECT = "/brain/inject";             // 구독 (String: 표지판 이름, 가짜 표지판)
 
 // ====== /brain/run 명령
 static constexpr const char *RUN_START = "start";
@@ -97,6 +103,7 @@ public:
         declare_int("mission.con_end_mode", 0, 0, 2);           // 0 path_node 벽돌 기준, 1 시간, 2 주차 표지판까지
         declare_int("mission.con_hold_ms", 10000, 0, 120000);   // con_end_mode 1: 진입 후 이만큼 지나면 끝
         declare_int("mission.con_once", 1, 0, 1);               // 1: 진입 후 주차 표지판 전까지 공사 표지판 무시
+        declare_int("mission.start_follow", 0, 0, 1);           // 1: start 받자마자 FOLLOW (초록불 안 기다림)
 
         // 검출 필터
         declare_int("sign.confirm_frames", 2, 1, 30);
@@ -119,6 +126,9 @@ public:
         run_sub_ = create_subscription<std_msgs::msg::String>(
             TOPIC_RUN, 10,
             [this](const std_msgs::msg::String::ConstSharedPtr m) { on_run(m->data); });
+        inject_sub_ = create_subscription<std_msgs::msg::String>(
+            TOPIC_INJECT, 10,
+            [this](const std_msgs::msg::String::ConstSharedPtr m) { on_inject(m->data); });
 
         det_sub_ = create_subscription<DetectionArray>(
             TOPIC_DETECTIONS, 10,
@@ -139,7 +149,12 @@ private:
             if (run_state_ == 1)
                 return;
             run_state_ = 1;
-            RCLCPP_INFO(get_logger(), "run: start → run_state 1");
+            RCLCPP_INFO(get_logger(), "run: start → run_state 1%s", start_follow_ ? " (start_follow: 바로 FOLLOW)" : "");
+            if (start_follow_)
+            {
+                follow_ = true;
+                publish_follow();
+            }
         }
         else if (cmd == RUN_STOP)
         {
@@ -160,6 +175,33 @@ private:
         {
             RCLCPP_WARN(get_logger(), "run: unknown command '%s' (use '%s' / '%s')", cmd.c_str(), RUN_START, RUN_STOP);
         }
+    }
+
+    // 가짜 표지판: 이름 → class_id, 필터·rearm 없이 바로 동작
+    void on_inject(const std::string &label)
+    {
+        static const std::map<std::string, int> ids = {
+            {"barrier_closed", ID_BARRIER_CLOSED}, {"barrier_open", ID_BARRIER_OPEN}, {"construction", ID_CONSTRUCTION},
+            {"left", ID_LEFT}, {"parking", ID_PARKING}, {"right", ID_RIGHT}, {"tl_green", ID_TL_GREEN}};
+        if (run_state_ != 1)
+        {
+            RCLCPP_WARN(get_logger(), "inject '%s' 무시: brain 꺼져 있음 (/brain/run start 먼저)", label.c_str());
+            return;
+        }
+        auto it = ids.find(label);
+        if (it == ids.end())
+        {
+            RCLCPP_WARN(get_logger(), "inject: 모르는 표지판 '%s'", label.c_str());
+            return;
+        }
+        const rclcpp::Time t = now();
+        RCLCPP_INFO(get_logger(), "inject: %s", label.c_str());
+        if (it->second == ID_BARRIER_CLOSED)
+            barrier_last_ = t; // barrier_release_ms 동안은 유지
+        if (it->second == ID_LEFT || it->second == ID_RIGHT)
+            turn_value_ = TURN_NONE; // 회전 중이어도 새 방향으로
+        last_seen_[it->second] = t; // 진짜 표지판이 바로 보여도 rearm 동안 중복 동작 안 함
+        handle(it->second, t);
     }
 
     // 동작에 쓰는 표지판만 필터 파라미터를 둠 (brick, tl_off/red/yellow는 동작 없음)
@@ -187,6 +229,7 @@ private:
         con_end_mode_ = ms("mission.con_end_mode");
         con_hold_ms_ = ms("mission.con_hold_ms");
         con_once_ = ms("mission.con_once") != 0;
+        start_follow_ = ms("mission.start_follow") != 0;
 
         confirm_frames_ = std::max(1, int(get_parameter("sign.confirm_frames").as_int()));
         min_score_ = get_parameter("sign.min_score_pct").as_int() / 100.0;
@@ -393,6 +436,7 @@ private:
 
     int run_state_ = 0;   // 0: 정지(발행 안 함), 1: 동작. /brain/run 으로 변경
     bool follow_ = false; // tl_green 본 뒤 FOLLOW 발행 중
+    bool start_follow_ = false;
 
     uint8_t turn_value_ = TURN_NONE;
     rclcpp::Time turn_end_{0, 0, RCL_ROS_TIME};
@@ -402,7 +446,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_, pause_pub_;
     rclcpp::Publisher<DriveCmd>::SharedPtr drive_cmd_pub_;
     rclcpp::Subscription<DetectionArray>::SharedPtr det_sub_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr run_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr run_sub_, inject_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 
