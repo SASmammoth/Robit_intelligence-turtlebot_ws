@@ -22,6 +22,7 @@
 //
 // 검출 필터 (GUI Params 탭에서 조정, 0이면 끔):
 //   sign.<label>.min_h_px / min_w_px  이보다 작은 박스(멀리 있는 표지판)는 무시
+//   sign.<label>.min_area_px          박스 면적(w×h)이 이보다 작으면 무시 (차단바처럼 가로로 긴 것)
 //   sign.min_score_pct               이보다 낮은 점수는 무시
 //   sign.confirm_frames              필터를 통과한 검출이 이만큼 연속 프레임이어야 동작 (한 프레임 오검출 거르기)
 //
@@ -37,6 +38,7 @@
 // 파라미터는 모두 정수 (GUI 스핀박스, Save 파일의 /brain_node 항목)
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <string>
@@ -103,6 +105,7 @@ public:
         {
             declare_int(std::string("sign.") + l + ".min_h_px", 0, 0, 480);
             declare_int(std::string("sign.") + l + ".min_w_px", 0, 0, 640);
+            declare_int(std::string("sign.") + l + ".min_area_px", 0, 0, 640 * 480);
         }
         reload_filter();
         post_cb_handle_ = add_post_set_parameters_callback(
@@ -188,8 +191,11 @@ private:
         confirm_frames_ = std::max(1, int(get_parameter("sign.confirm_frames").as_int()));
         min_score_ = get_parameter("sign.min_score_pct").as_int() / 100.0;
         for (const char *l : FILTER_LABELS)
-            min_size_[l] = {int(get_parameter(std::string("sign.") + l + ".min_h_px").as_int()),
-                            int(get_parameter(std::string("sign.") + l + ".min_w_px").as_int())};
+        {
+            const std::string p = std::string("sign.") + l;
+            min_size_[l] = {int(get_parameter(p + ".min_h_px").as_int()), int(get_parameter(p + ".min_w_px").as_int()),
+                            int(get_parameter(p + ".min_area_px").as_int())};
+        }
     }
 
     bool pass_filter(const tb_interfaces::msg::Detection &d) const
@@ -199,7 +205,8 @@ private:
         auto it = min_size_.find(d.label);
         if (it == min_size_.end())
             return true;
-        return d.h >= it->second.first && d.w >= it->second.second;
+        const MinSize &m = it->second;
+        return d.h >= m.h && d.w >= m.w && int64_t(d.w) * d.h >= m.area;
     }
 
     void on_detections(const DetectionArray &msg)
@@ -379,7 +386,8 @@ private:
 
     int confirm_frames_ = 2;
     double min_score_ = 0.0;
-    std::map<std::string, std::pair<int, int>> min_size_; // label → (min_h, min_w) [px]
+    struct MinSize { int h = 0, w = 0, area = 0; };   // [px], area = w×h [px²]
+    std::map<std::string, MinSize> min_size_;          // label → 최소 박스 크기
     std::map<int, int> streak_;                           // class_id → 필터 통과 연속 프레임 수
     rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr post_cb_handle_;
 

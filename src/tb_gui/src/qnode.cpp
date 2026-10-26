@@ -217,6 +217,7 @@ std::vector<std::string> QNode::brainParamNames()
   {
     names.push_back(std::string("sign.") + l + ".min_h_px");
     names.push_back(std::string("sign.") + l + ".min_w_px");
+    names.push_back(std::string("sign.") + l + ".min_area_px");
   }
   return names;
 }
