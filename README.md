@@ -107,15 +107,15 @@ flowchart LR
 | 방향 | 토픽 | 타입 | 쓰임 |
 |---|---|---|---|
 | 구독 | `/lane/mask` | `LaneMask` | 차선 = 벽. 이 콜백 한 번에 경로 하나를 계산 |
-| 구독 | `/signs/detections` | `DetectionArray` | `brick` → 벽으로 그림, `construction` → 공사 구간 자동 진입 |
+| 구독 | `/signs/detections` | `DetectionArray` | `brick` → 벽으로 그림 (표지판 판단은 안 함: tb_brain 담당) |
 | 구독 | `/mission/turn` | `std_msgs/UInt8` | 0 직진, 1 좌, 2 우 (갈림길 선택) |
 | 구독 | `/mission/parking` | `std_msgs/Bool` | 주차 모드: 노란 점선을 벽에서 뺌 |
-| 구독 | `/mission/construction` | `std_msgs/Bool` | 공사 구간 수동 on/off |
+| 구독 | `/mission/construction` | `std_msgs/Bool` | true = 공사 구간 진입, false = 끝 (tb_brain 또는 GUI C키) |
 | 구독 | `/cmd_vel` | `geometry_msgs/Twist` | `/odom`이 없을 때 적분해서 위치 추정 |
 | 구독 | `/odom` | `nav_msgs/Odometry` | **현재 발행하는 노드 없음** (있으면 우선 사용) |
 | 발행 | `/lane/path` | `nav_msgs/Path` | `base_link` 기준 (x 앞, y 왼쪽, m) |
 | 발행 | `/lane/path_source` | `std_msgs/String` | `live` / `memory` / `color_rule` / `lost` |
-| 발행 | `/lane/construction` | `std_msgs/Bool` | 현재 공사 구간 여부 (수동 또는 자동) |
+| 발행 | `/lane/construction` | `std_msgs/Bool` | 현재 공사 구간 여부 |
 | 발행 | `/lane/debug/skel/compressed` | `CompressedImage` | 구독자가 있을 때만 |
 
 ### drive_node
@@ -148,7 +148,7 @@ flowchart LR
 | 구독 | `/lane/path_source`, `/lane/construction`, `/drive/state` | 상태 표시 |
 | 구독 | `TB_Uart_TX` | STM32 응답 표시 |
 | 발행/구독 | `/mission/turn`, `/mission/parking` | 버튼 → 발행. 같은 토픽을 구독해 버튼 상태를 맞춤 |
-| 발행 | `/mission/construction` | 공사 구간 수동 on/off |
+| 발행 | `/mission/construction` | C키·체크박스로 진입/끝. 체크 상태는 `/lane/construction`(실제 상태)을 따라감 |
 | 발행 | `/drive/cmd` | STOP 버튼 |
 | 발행 | `/brain/run` | **Brain 모드**(버튼·Enter)에서 `"start"`(1초마다 다시), 다른 모드로 바꾸면 `"stop"` |
 | 발행 | `/mission/pause` | Brain 모드를 끌 때 `false` 한 번 (brain이 걸어둔 정지 풀기) |
@@ -171,7 +171,7 @@ flowchart LR
 | `/signs/debug/compressed` | `CompressedImage` | signs_node | tb_gui |
 | `/mission/turn` | `UInt8` | tb_gui | path_node, tb_gui |
 | `/mission/parking` | `Bool` | tb_gui | path_node, tb_gui |
-| `/mission/construction` | `Bool` | tb_gui | path_node |
+| `/mission/construction` | `Bool` | tb_brain, tb_gui | path_node |
 | `/lane/path` | `Path` | path_node | drive_node |
 | `/lane/path_source` | `String` | path_node | drive_node, tb_gui |
 | `/lane/construction` | `Bool` | path_node | drive_node, tb_gui |
@@ -225,8 +225,8 @@ flowchart LR
 
 ### 벽돌 · 공사 구간
 - `/signs/detections`의 `brick` 박스를 homography로 BEV에 옮겨 **벽으로 그림** → 스켈레톤이 자연스럽게 피해 감
-- 공사 구간 진입: `construction` 표지판이 `path.con_sign_frames`(3) 프레임 연속, 또는 GUI의 `/mission/construction`
-- 공사 구간 이탈(자동 진입일 때만): 벽돌이 `path.con_exit_mm`(600mm) 동안 안 보이면
+- 공사 구간 진입: **tb_brain**이 `construction` 표지판을 확인하면(`sign.construction.*` 크기·`sign.confirm_frames` 필터) `/mission/construction` true, 또는 GUI C키. path_node는 표지판을 직접 보지 않음
+- 공사 구간 끝: `/mission/construction` false(brain은 parking 표지판에서 보냄), GUI X키(`/mission/construction_exit`), 또는 path_node 자동 종료 — 벽돌을 본 뒤 `path.con_exit_mm` 동안 안 보이거나, 벽돌을 한 번도 못 보고 `path.con_no_brick_mm`을 가면
 - 상태는 `/lane/construction`으로 알림 → `drive_node`가 공사 구간 프로필(저속, 긴 lookahead, 피봇 안 함)로 전환
 
 ### 미션 (갈림길 · 주차)
@@ -248,4 +248,4 @@ flowchart LR
 - **`TB_Uart_RX` 발행자가 둘**: drive_node(자율주행)와 tb_gui(WASD). `drive.enable=false`로 끄면 drive_node가 0을 한 번 보내고 조용해지지만, 켠 상태에서 WASD를 누르면 명령이 섞입니다.
 - **GUI 주행 모드 4개**: 정지(`drive.enable` 끔) / WASD / 자동(`enable` + `require_cmd` 끔 → 명령 없어도 FOLLOW) / Brain(`enable` + `require_cmd` 켬 + `/brain/run start` → brain이 `/drive/cmd`를 줘야 움직임). 정지로 두면 drive_node가 꺼져 있어서 brain 명령도 무시됩니다.
 - **`drive.enable` 기본값은 false**: launch만 해서는 안 움직이고, GUI에서 켜야 합니다. GUI 파라미터 저장/불러오기에서도 이 값은 빠집니다.
-- **`/drive/cmd`를 내는 판단 노드가 아직 없음**: `DriveCmd.msg` 주석의 `tb_brain`은 미구현입니다. 나중에 표지판 결과로 미션을 정하는 노드를 만들면, 지금 GUI가 맡은 `/mission/*`와 `/drive/cmd` 발행을 그 노드가 맡게 됩니다.
+- **표지판 판단은 `tb_brain` 한 곳**: `/signs/detections` → `/mission/turn`, `/mission/construction`, `/mission/pause`, `/drive/cmd`. 박스 크기·점수·연속 프레임 필터(`sign.*`)는 GUI Params 탭 "표지판 검출 필터"에서 조정하고 Save 파일에 `/brain_node` 항목으로 저장됩니다.

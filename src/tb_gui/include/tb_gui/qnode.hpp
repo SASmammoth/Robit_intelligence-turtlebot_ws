@@ -27,6 +27,9 @@
 #include <QString>
 #include <atomic>
 #include <mutex>
+#include <map>
+#include <chrono>
+#include <string>
 
 class QNode : public QThread
 {
@@ -65,6 +68,8 @@ protected:
 private:
   static bool isPathParam(const QString &name);
   static bool isDriveParam(const QString &name);
+  static bool isBrainParam(const QString &name); // sign.* → /brain_node (표지판 검출 필터)
+  static std::vector<std::string> brainParamNames();
   static std::vector<std::string> lineParamNames();
   static std::vector<std::string> pathParamNames();
   static std::vector<std::string> driveParamNames(bool with_enable); // 정수 + bool
@@ -110,7 +115,12 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr uart_cmd_sub_; // TB_Uart_RX (모터로 실제 보낸 명령)
 
   // 파라미터
-  rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_, drive_client_;
+  rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_, drive_client_, brain_client_;
+  // setBoolParam으로 보낸 시각. 그 직후 주기 읽기(refreshParams)가 보내기 전 값을 돌려주면
+  // 화면이 되돌아감(자동→정지 표시인데 로봇은 주행) → 잠깐 동안은 읽은 bool 값을 무시
+  std::map<std::string, std::chrono::steady_clock::time_point> bool_set_time_;
+  std::mutex bool_set_mtx_;
+  bool recentlySet(const std::string &name);
   bool line_requested_ = false, path_requested_ = false, drive_requested_ = false;
   std::shared_ptr<rclcpp::ParameterEventHandler> param_event_handler_;
   rclcpp::ParameterEventCallbackHandle::SharedPtr param_event_cb_handle_;

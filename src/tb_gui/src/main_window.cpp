@@ -410,8 +410,7 @@ void MainWindow::showConstructionInfo(const QString &info)
 
 void MainWindow::exitConstruction()
 {
-  // 수동 체크를 끄되 /mission/construction false는 보내지 않음
-  // (false는 path_node에서 '다시 진입 허용'으로 처리돼, 보이는 표지판으로 바로 재진입할 수 있음)
+  // /mission/construction_exit (= false와 같음). 체크는 /lane/construction이 오면 맞춰짐
   if (check_construction_ && check_construction_->isChecked())
   {
     QSignalBlocker block(check_construction_);
@@ -499,15 +498,23 @@ void MainWindow::setupViewTab()
   connect(qnode, &QNode::constructionInfoReceived, this, &MainWindow::showConstructionInfo);
   showConstructionInfo("");
 
-  check_construction_->setToolTip("체크 = 수동으로 공사 모드 켜기 (/mission/construction). 표지판 자동 진입과 별개");
+  check_construction_->setToolTip("체크 = 공사 모드 진입, 해제 = 끝 (/mission/construction).\n"
+                                  "tb_brain이 표지판으로 켠 것, 벽돌로 자동 종료된 것도 여기 그대로 보임 (/lane/construction)");
   connect(check_construction_, &QCheckBox::toggled, this, [this](bool on)
           {
     construction_ = on;
     qnode->publishConstruction(on);
     showMission(); });
+  // 체크 상태 = path_node의 실제 공사 모드 (brain 진입, 벽돌로 자동 종료 모두 반영)
   connect(qnode, &QNode::constructionStateReceived, this, [this](bool on)
           {
     construction_state_ = on;
+    construction_ = on;
+    if (check_construction_->isChecked() != on)
+    {
+      QSignalBlocker block(check_construction_);
+      check_construction_->setChecked(on);
+    }
     showMission(); });
   connect(check_barrier_, &QCheckBox::toggled, this, [this](bool on) { setBarrier(on); });
   barrier_timer_.setInterval(100); // drive.cmd_timeout_ms(500)보다 충분히 짧게
@@ -580,8 +587,7 @@ void MainWindow::setDriveMode(DriveMode m)
   switch (m)
   {
   case DriveMode::Off:
-    if (ui->checkAutoEnable->isChecked())
-      setAutoDrive(false);
+    setAutoDrive(false); // 체크가 꺼져 보여도 항상 보냄 (화면과 노드가 어긋나 있어도 확실히 멈추게)
     ui->checkDriveEnable->setChecked(false); // stopDrive 호출됨
     stopDrive(true);
     break;
@@ -782,6 +788,7 @@ void MainWindow::setupParamTab()
   {
     const char *title;
     std::vector<ParamSpinDef> defs;
+    int cols = 3; // (이름, 스핀박스) 묶음 몇 개씩 한 줄
   };
   const std::vector<Group> groups = {
       {"실측 거리 (lineDetect_node) ★ 자로 잰 값",
@@ -828,13 +835,30 @@ void MainWindow::setupParamTab()
            {"path.con_keep_rear_mm", "지난 벽돌 축 뒤 길이", " mm", 0, 300, 10},
            {"path.con_hold_mm", "지난 벽돌 더 피하기", " mm", 0, 500, 10},
            {"path.con_clear_mm", "지난 벽돌 옆 여유", " mm", 0, 200, 5},
-           {"path.con_exit_mm", "벽돌 없이 이만큼 가면 끝", " mm", 0, 3000, 50},
-           {"path.con_sign_frames", "표지판 연속 프레임", "", 1, 30, 1},
-           {"path.con_sign_min_h_px", "표지판 최소 높이 (0=거리 무관)", " px", 0, 480, 5},
+           {"path.con_exit_mm", "벽돌 본 뒤 안 보이고 이만큼 가면 끝 (0=끔)", " mm", 0, 3000, 50},
            {"path.con_no_brick_mm", "벽돌 못 보고 이만큼 가면 끝 (0=끔)", " mm", 0, 10000, 100},
        }},
+      {"표지판 검출 필터 (brain_node) — 원본 640x480 기준 px, 0 = 끔",
+       {
+           {"sign.confirm_frames", "연속 프레임 (한 프레임 오검출 거르기)", "", 1, 30, 1},
+           {"sign.min_score_pct", "최소 점수", " %", 0, 100, 5},
+           {"sign.barrier_closed.min_h_px", "차단바 닫힘 최소 높이", " px", 0, 480, 5},
+           {"sign.barrier_closed.min_w_px", "차단바 닫힘 최소 너비", " px", 0, 640, 5},
+           {"sign.barrier_open.min_h_px", "차단바 열림 최소 높이", " px", 0, 480, 5},
+           {"sign.barrier_open.min_w_px", "차단바 열림 최소 너비", " px", 0, 640, 5},
+           {"sign.construction.min_h_px", "공사 최소 높이", " px", 0, 480, 5},
+           {"sign.construction.min_w_px", "공사 최소 너비", " px", 0, 640, 5},
+           {"sign.left.min_h_px", "좌회전 최소 높이", " px", 0, 480, 5},
+           {"sign.left.min_w_px", "좌회전 최소 너비", " px", 0, 640, 5},
+           {"sign.right.min_h_px", "우회전 최소 높이", " px", 0, 480, 5},
+           {"sign.right.min_w_px", "우회전 최소 너비", " px", 0, 640, 5},
+           {"sign.parking.min_h_px", "주차 최소 높이", " px", 0, 480, 5},
+           {"sign.parking.min_w_px", "주차 최소 너비", " px", 0, 640, 5},
+           {"sign.tl_green.min_h_px", "초록불 최소 높이", " px", 0, 480, 5},
+           {"sign.tl_green.min_w_px", "초록불 최소 너비", " px", 0, 640, 5},
+       },
+       2},
   };
-  constexpr int COLS = 3;
 
   auto *page = new QWidget;
   auto *vbox = new QVBoxLayout(page);
@@ -844,8 +868,8 @@ void MainWindow::setupParamTab()
     auto *grid = new QGridLayout(box);
     int i = 0;
     for (const auto &d : g.defs)
-      addParamSpin(grid, box, i++, COLS, d);
-    grid->setColumnStretch(COLS * 2, 1);
+      addParamSpin(grid, box, i++, g.cols, d);
+    grid->setColumnStretch(g.cols * 2, 1);
     vbox->addWidget(box);
   }
   auto *hint = new QLabel("이름에 마우스를 올리면 ROS 파라미터 이름이 보입니다. "
@@ -1361,9 +1385,9 @@ void MainWindow::showPathSource(const QString &src)
 void MainWindow::showMission()
 {
   static const char *names[] = {"straight", "left", "right"};
-  QString cons = construction_ ? "ON" : "off";
+  QString cons = construction_state_ ? "ON" : "off";
   if (construction_state_ != construction_)
-    cons += construction_state_ ? " (자동 진입)" : " (path_node 꺼짐)";
+    cons += construction_ ? " (진입 요청 보냄)" : " (끝 요청 보냄)";
   ui->labelMission->setText(QString("turn: %1 | parking: %2 | 공사: %3%4")
                                 .arg(names[std::clamp(turn_, 0, 2)])
                                 .arg(parking_ ? "ON" : "off")

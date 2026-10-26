@@ -45,9 +45,12 @@ private:
     // 공사 구간: 따로 경로를 만들지 않고 일반 주행(스켈레톤) 그대로, 파라미터만 바꿈
     //   - 차선 폭 56cm, 벽돌 벽을 크게(깊이·좌우 여유), 화면 끝에 붙은 벽돌은 화면 끝까지 막음
     //   - tb_drive는 /lane/construction을 보고 속도·lookahead·피봇 파라미터를 바꿈
-    // /mission/construction 수동 또는 표지판으로 진입, 벽돌이 con_exit_mm 동안 안 보이면 끝
+    // 진입은 /mission/construction true로만 (표지판 판단은 tb_brain, 수동은 GUI C키)
+    // 끝: /mission/construction false, /mission/construction_exit, 또는 벽돌 기준 자동 종료
     void update_construction(const tb_interfaces::msg::LaneMask &msg, bool brick_seen);
-    bool con_manual_ = false, con_auto_ = false, con_done_ = false, con_active_ = false;
+    bool con_active_ = false;
+    enum class ConCmd { None, Start, Stop, Exit };
+    ConCmd con_cmd_ = ConCmd::None;      // 토픽으로 받은 명령 (다음 마스크 프레임에서 처리)
     bool con_brick_seen_ = false;       // 공사 구간에서 벽돌을 한 번이라도 봤는지
     lane_path::Pose2D con_brick_pose_;  // 마지막으로 벽돌을 본 위치
     int con_depth_mm_ = 200, con_margin_mm_ = 90, con_edge_mm_ = 60, con_exit_mm_ = 600, con_brick_w_mm_ = 200;
@@ -62,18 +65,13 @@ private:
     std::vector<obstacles::Quad> con_near_; // 이번 프레임에 경로를 떼어 놓은 벽돌 (로봇 좌표, 디버그)
     int con_keep_ = 1, con_keep_rear_mm_ = 100;
     int con_hold_mm_ = 40, con_clear_mm_ = 30, con_dead_end_mm_ = 250;
-    int con_sign_seen_ = 0;             // 표지판이 연속으로 보인 프레임 수
-    rclcpp::Time con_sign_time_{0, 0, RCL_ROS_TIME};
-    int con_sign_frames_ = 3;
-    int con_sign_min_h_ = 0;   // 이보다 작은 표지판 박스는 무시 [px]
-    int con_no_brick_mm_ = 2000; // 표지판 진입 후 벽돌을 못 보고 이만큼 가면 끝
-    bool con_exit_requested_ = false;
+    int con_no_brick_mm_ = 2000; // 진입 후 벽돌을 한 번도 못 보고 이만큼 가면 끝 (잘못 들어온 것)
     lane_path::Pose2D con_start_pose_; // 공사 모드 시작 위치
     std::string con_reason_ = "-";     // 마지막 시작·끝 이유 (표시용)
     void end_construction(const std::string &why);
     std::string construction_info() const;
     int turn_radius_mm_ = 150, turn_min_deg_ = 45; // 급한 모서리를 원호로 (lanePath fillet_corners)
-    bool con_on() const { return (con_manual_ || con_auto_) && !con_done_; }
+    bool con_on() const { return con_active_; }
 
     // 미션 (판단 노드 또는 ros2 topic pub 으로 받음)
     uint8_t turn_ = 0;                  // 0 직진, 1 좌, 2 우

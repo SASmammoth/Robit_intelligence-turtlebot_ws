@@ -31,6 +31,7 @@ static int64_t now_ns()
 static const char *LINE_NODE = "/lineDetect_node";
 static const char *PATH_NODE = "/path_node";
 static const char *DRIVE_NODE = "/drive_node";
+static const char *BRAIN_NODE = "/brain_node";
 
 // 파일 저장/불러오기에서 빼는 파라미터 (불러오자마자 로봇이 움직이면 안 됨)
 static bool isUnsavedParam(const std::string &name)
@@ -148,13 +149,14 @@ QNode::QNode()
   line_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, LINE_NODE);
   path_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, PATH_NODE);
   drive_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, DRIVE_NODE);
+  brain_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, BRAIN_NODE);
 
   // 세 노드의 파라미터 변경을 실시간으로 받음
   param_event_handler_ = std::make_shared<rclcpp::ParameterEventHandler>(node);
   param_event_cb_handle_ = param_event_handler_->add_parameter_event_callback(
       [this](const rcl_interfaces::msg::ParameterEvent &event)
       {
-        if (event.node != LINE_NODE && event.node != PATH_NODE && event.node != DRIVE_NODE)
+        if (event.node != LINE_NODE && event.node != PATH_NODE && event.node != DRIVE_NODE && event.node != BRAIN_NODE)
           return;
         for (const auto *list : {&event.new_parameters, &event.changed_parameters})
           for (const auto &p : *list)
@@ -199,6 +201,23 @@ bool QNode::isDriveParam(const QString &n)
   return n.startsWith("drive.");
 }
 
+bool QNode::isBrainParam(const QString &n)
+{
+  return n.startsWith("sign.");
+}
+
+// tb_brain 표지판 필터 (brain_node.cpp의 FILTER_LABELS와 같은 순서)
+std::vector<std::string> QNode::brainParamNames()
+{
+  std::vector<std::string> names = {"sign.confirm_frames", "sign.min_score_pct"};
+  for (const char *l : {"barrier_closed", "barrier_open", "construction", "left", "right", "parking", "tl_green"})
+  {
+    names.push_back(std::string("sign.") + l + ".min_h_px");
+    names.push_back(std::string("sign.") + l + ".min_w_px");
+  }
+  return names;
+}
+
 std::vector<std::string> QNode::lineParamNames()
 {
   std::vector<std::string> names;
@@ -219,7 +238,7 @@ std::vector<std::string> QNode::pathParamNames()
           "path.max_dev_mm", "path.override_frames", "path.min_len_mm",
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm", "path.turn_radius_mm", "path.turn_min_deg",
           "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_attach_mm", "path.con_extend_mm", "path.con_edge_mm", "path.con_dead_end_mm", "path.con_keep", "path.con_keep_rear_mm", "path.con_hold_mm", "path.con_clear_mm",
-          "path.con_exit_mm", "path.con_sign_frames", "path.con_sign_min_h_px", "path.con_no_brick_mm"};
+          "path.con_exit_mm", "path.con_no_brick_mm"};
 }
 
 std::vector<std::string> QNode::driveParamNames(bool with_enable)
@@ -249,17 +268,19 @@ std::vector<std::string> QNode::driveDoubleNames()
 
 void QNode::setParams(const QMap<QString, int> &params)
 {
-  std::vector<rclcpp::Parameter> line, path, drive;
+  std::vector<rclcpp::Parameter> line, path, drive, brain;
   for (auto it = params.begin(); it != params.end(); ++it)
   {
     auto &dst = isDriveParam(it.key()) ? drive : isPathParam(it.key()) ? path
-                                                                       : line;
+                                               : isBrainParam(it.key()) ? brain
+                                                                        : line;
     dst.emplace_back(it.key().toStdString(), it.value());
   }
 
   sendParams(line_client_, LINE_NODE, line);
   sendParams(path_client_, PATH_NODE, path);
   sendParams(drive_client_, DRIVE_NODE, drive);
+  sendParams(brain_client_, BRAIN_NODE, brain);
 }
 
 // 보내고 결과 확인: 노드가 거절하면(범위 밖, 없는 이름 등) 알리고 노드 값을 다시 읽어 화면을 되돌림
@@ -306,7 +327,10 @@ void QNode::requestFrom(rclcpp::AsyncParametersClient::SharedPtr client, const s
         if (p.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER)
           Q_EMIT paramLoaded(name, static_cast<int>(p.as_int()));
         else if (p.get_type() == rclcpp::ParameterType::PARAMETER_BOOL)
-          Q_EMIT boolParamLoaded(name, p.as_bool());
+        {
+          if (!recentlySet(p.get_name())) // 방금 보낸 값보다 오래된 응답일 수 있음 (변경은 parameter event로 옴)
+            Q_EMIT boolParamLoaded(name, p.as_bool());
+        }
         else if (p.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
           Q_EMIT doubleParamLoaded(name, p.as_double());
       }
@@ -330,6 +354,14 @@ void QNode::refreshParams()
   each(path_client_, pathParamNames());
   each(drive_client_, driveParamNames(true));
   each(drive_client_, driveDoubleNames());
+  each(brain_client_, brainParamNames()); // brain은 늦게 뜨거나 안 띄울 수도 있어 여기서만 읽음
+}
+
+bool QNode::recentlySet(const std::string &name)
+{
+  std::lock_guard<std::mutex> lk(bool_set_mtx_);
+  auto it = bool_set_time_.find(name);
+  return it != bool_set_time_.end() && std::chrono::steady_clock::now() - it->second < std::chrono::milliseconds(1500);
 }
 
 bool QNode::setBoolParam(const QString &name, bool on)
@@ -340,6 +372,10 @@ bool QNode::setBoolParam(const QString &name, bool on)
   {
     RCLCPP_WARN(node->get_logger(), "%s 설정 실패: /drive_node 연결 안 됨", name.toStdString().c_str());
     return false;
+  }
+  {
+    std::lock_guard<std::mutex> lk(bool_set_mtx_);
+    bool_set_time_[name.toStdString()] = std::chrono::steady_clock::now();
   }
   drive_client_->set_parameters({rclcpp::Parameter(name.toStdString(), on)});
   return true;
@@ -400,7 +436,8 @@ void QNode::saveParams(const QString &path)
   std::vector<Target> targets;
   for (const auto &t : {Target{LINE_NODE, line_client_, lineParamNames()},
                         Target{PATH_NODE, path_client_, pathParamNames()},
-                        Target{DRIVE_NODE, drive_client_, driveParamNames(false)}})
+                        Target{DRIVE_NODE, drive_client_, driveParamNames(false)},
+                        Target{BRAIN_NODE, brain_client_, brainParamNames()}})
     if (t.client->service_is_ready())
       targets.push_back(t);
 
@@ -491,7 +528,7 @@ void QNode::loadParams(const QString &path)
   }
 
   // "/노드:" 줄로 대상 노드를 정하고, "이름: 값" 줄을 모음 (값은 정수 또는 true/false)
-  std::vector<rclcpp::Parameter> line, pth, drv;
+  std::vector<rclcpp::Parameter> line, pth, drv, brn;
   std::vector<rclcpp::Parameter> *cur = nullptr;
   std::string s;
   while (std::getline(f, s))
@@ -505,6 +542,7 @@ void QNode::loadParams(const QString &path)
       cur = (t.rfind(LINE_NODE, 0) == 0)    ? &line
             : (t.rfind(PATH_NODE, 0) == 0)  ? &pth
             : (t.rfind(DRIVE_NODE, 0) == 0) ? &drv
+            : (t.rfind(BRAIN_NODE, 0) == 0) ? &brn
                                             : nullptr;
       continue;
     }
@@ -544,6 +582,7 @@ void QNode::loadParams(const QString &path)
   send(line_client_, line);
   send(path_client_, pth);
   send(drive_client_, drv);
+  send(brain_client_, brn);
   Q_EMIT paramFileStatus(QString("불러옴: %1 (%2개 적용)").arg(path).arg(sent));
 }
 

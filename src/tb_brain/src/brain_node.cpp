@@ -19,8 +19,17 @@
 //
 // 같은 표지판이 연속 프레임에서 계속 검출되므로 "처음 보였을 때" 한 번만 동작한다.
 // (rearm_sec 이상 안 보이다가 다시 보이면 새 표지판으로 취급)
+//
+// 검출 필터 (GUI Params 탭에서 조정, 0이면 끔):
+//   sign.<label>.min_h_px / min_w_px  이보다 작은 박스(멀리 있는 표지판)는 무시
+//   sign.min_score_pct               이보다 낮은 점수는 무시
+//   sign.confirm_frames              필터를 통과한 검출이 이만큼 연속 프레임이어야 동작 (한 프레임 오검출 거르기)
+//
+// 공사 구간 진입 판단은 여기 한 곳에서만 함 (path_node는 /mission/construction만 받음)
+#include <algorithm>
 #include <chrono>
 #include <map>
+#include <set>
 #include <string>
 
 #include <rclcpp/rclcpp.hpp>
@@ -73,6 +82,18 @@ public:
         turn_duration_sec_ = declare_parameter<double>("turn_duration_sec", 10.0);
         rearm_sec_ = declare_parameter<double>("rearm_sec", 2.0);
 
+        // 검출 필터 (정수: GUI 스핀박스로 바꿈)
+        declare_int("sign.confirm_frames", 2, 1, 30);
+        declare_int("sign.min_score_pct", 0, 0, 100);
+        for (const char *l : FILTER_LABELS)
+        {
+            declare_int(std::string("sign.") + l + ".min_h_px", 0, 0, 480);
+            declare_int(std::string("sign.") + l + ".min_w_px", 0, 0, 640);
+        }
+        reload_filter();
+        post_cb_handle_ = add_post_set_parameters_callback(
+            [this](const std::vector<rclcpp::Parameter> &) { reload_filter(); });
+
         turn_pub_ = create_publisher<std_msgs::msg::UInt8>(TOPIC_TURN, 10);
         construction_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_CONSTRUCTION, 10);
         pause_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_PAUSE, 10);
@@ -111,12 +132,48 @@ private:
             // 다시 start 했을 때 이전 상태가 이어지지 않게
             turn_value_ = TURN_NONE;
             follow_ = false;
+            streak_.clear();
+            last_seen_.clear(); // 다시 켰을 때 앞에 보이는 표지판을 새로 봄
             RCLCPP_INFO(get_logger(), "run: stop → run_state 0");
         }
         else
         {
             RCLCPP_WARN(get_logger(), "run: unknown command '%s' (use '%s' / '%s')", cmd.c_str(), RUN_START, RUN_STOP);
         }
+    }
+
+    // 동작에 쓰는 표지판만 필터 파라미터를 둠 (brick, tl_off/red/yellow는 동작 없음)
+    static constexpr const char *FILTER_LABELS[] = {"barrier_closed", "barrier_open", "construction",
+                                                    "left", "right", "parking", "tl_green"};
+
+    void declare_int(const std::string &name, int def, int min, int max)
+    {
+        rcl_interfaces::msg::ParameterDescriptor d;
+        rcl_interfaces::msg::IntegerRange r;
+        r.from_value = min;
+        r.to_value = max;
+        r.step = 1;
+        d.integer_range.push_back(r);
+        declare_parameter(name, def, d);
+    }
+
+    void reload_filter()
+    {
+        confirm_frames_ = std::max(1, int(get_parameter("sign.confirm_frames").as_int()));
+        min_score_ = get_parameter("sign.min_score_pct").as_int() / 100.0;
+        for (const char *l : FILTER_LABELS)
+            min_size_[l] = {int(get_parameter(std::string("sign.") + l + ".min_h_px").as_int()),
+                            int(get_parameter(std::string("sign.") + l + ".min_w_px").as_int())};
+    }
+
+    bool pass_filter(const tb_interfaces::msg::Detection &d) const
+    {
+        if (d.score < min_score_)
+            return false;
+        auto it = min_size_.find(d.label);
+        if (it == min_size_.end())
+            return true;
+        return d.h >= it->second.first && d.w >= it->second.second;
     }
 
     void on_detections(const DetectionArray &msg)
@@ -126,13 +183,23 @@ private:
         const rclcpp::Time now = this->now();
         rearm_sec_ = get_parameter("rearm_sec").as_double();
 
+        // 이번 프레임에 필터를 통과한 class_id → 연속 프레임 수 갱신 (안 보이면 0부터 다시)
+        std::set<int> passed;
         for (const auto &d : msg.detections)
+            if (pass_filter(d))
+                passed.insert(d.class_id);
+        for (auto it = streak_.begin(); it != streak_.end();)
+            it = passed.count(it->first) ? std::next(it) : streak_.erase(it);
+
+        for (int id : passed)
         {
-            auto it = last_seen_.find(d.class_id);
+            if (++streak_[id] < confirm_frames_)
+                continue; // 아직 확인 중
+            auto it = last_seen_.find(id);
             const bool fresh = (it == last_seen_.end()) || (now - it->second).seconds() > rearm_sec_;
-            last_seen_[d.class_id] = now;
+            last_seen_[id] = now;
             if (fresh)
-                handle(d.class_id, now);
+                handle(id, now);
         }
     }
 
@@ -241,6 +308,12 @@ private:
 
     double turn_duration_sec_ = 10.0; // left/right 발행 시간 [s]
     double rearm_sec_ = 2.0;
+
+    int confirm_frames_ = 2;
+    double min_score_ = 0.0;
+    std::map<std::string, std::pair<int, int>> min_size_; // label → (min_h, min_w) [px]
+    std::map<int, int> streak_;                           // class_id → 필터 통과 연속 프레임 수
+    rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr post_cb_handle_;
 
     int run_state_ = 0;   // 0: 정지(발행 안 함), 1: 동작. /brain/run 으로 변경
     bool follow_ = false; // tl_green 본 뒤 FOLLOW 발행 중

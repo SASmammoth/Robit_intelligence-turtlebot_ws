@@ -52,23 +52,21 @@ PathNode::PathNode() : Node("path_node")
             last_cmd_ = *m;
             last_cmd_time_ = now(); });
 
+    // 공사 구간 진입/끝 명령. true = 진입 (tb_brain이 표지판을 보고, 또는 GUI C키), false = 끝
+    // 표지판은 path_node가 직접 보지 않음 (판단은 tb_brain 한 곳에서)
     con_sub_ = create_subscription<std_msgs::msg::Bool>(
         "/mission/construction", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
         {
-            if (m->data != con_manual_)
-                RCLCPP_INFO(get_logger(), "construction (manual): %d", m->data);
-            con_manual_ = m->data;
-            if (!m->data)
-                con_done_ = false; });
+            RCLCPP_INFO(get_logger(), "construction 명령: %s", m->data ? "진입" : "끝");
+            con_cmd_ = m->data ? ConCmd::Start : ConCmd::Stop; });
 
-    // 지금 공사 모드를 바로 끝냄 (표지판 자동 진입도). true 한 번이면 됨.
-    // 끝낸 뒤 표지판이 3초 넘게 안 보여야 다시 자동 진입 (/mission/construction 수동 켜기는 그대로 가능)
+    // 지금 공사 모드를 바로 끝냄 (GUI X키). true 한 번이면 됨. /mission/construction false와 같음
     con_exit_sub_ = create_subscription<std_msgs::msg::Bool>(
         "/mission/construction_exit", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
         {
             if (!m->data)
                 return;
-            con_exit_requested_ = true;
+            con_cmd_ = ConCmd::Exit;
             RCLCPP_INFO(get_logger(), "construction: 끝내기 요청"); });
 
     // ====== 출력
@@ -111,9 +109,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_clear_mm", 30, 200);         // 기억한 벽돌과 로봇 옆면 사이 여유          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
     declare_int("path.con_exit_mm", 600, 3000);
     declare_int("path.con_smooth_mm", 80, 300);        // 공사 구간 경로를 이 폭으로 평균내 모서리를 둥글게 (0이면 끔)        // 벽돌이 이만큼 가는 동안 안 보이면 공사 구간 끝
-    declare_int("path.con_sign_frames", 3, 30);     // 공사 표지판이 이만큼 연속으로 보이면 자동 진입
-    declare_int("path.con_no_brick_mm", 2000, 10000); // 표지판으로 들어가서 벽돌을 한 번도 못 보고 이만큼 가면 끝 (0이면 끔)
-    declare_int("path.con_sign_min_h_px", 0, 480);  // 표지판 박스 높이가 이보다 작으면(멀면) 무시. 0이면 거리 상관없이
+    declare_int("path.con_no_brick_mm", 2000, 10000); // 진입 후 벽돌을 한 번도 못 보고 이만큼 가면 끝 (0이면 끔)
 
     reload_params();
     skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
@@ -180,8 +176,6 @@ void PathNode::reload_params()
     con_brick_w_mm_ = get_parameter("path.con_brick_w_mm").as_int();
     con_exit_mm_ = get_parameter("path.con_exit_mm").as_int();
     con_smooth_mm_ = get_parameter("path.con_smooth_mm").as_int();
-    con_sign_frames_ = std::max(1, int(get_parameter("path.con_sign_frames").as_int()));
-    con_sign_min_h_ = int(get_parameter("path.con_sign_min_h_px").as_int());
     con_no_brick_mm_ = int(get_parameter("path.con_no_brick_mm").as_int());
 }
 
@@ -542,74 +536,43 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     }
 }
 
-// 공사 구간 진입/이탈 (표지판 또는 /mission/construction). brick_seen: 이번 프레임에 벽돌 탐지가 있는지
-void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool brick_seen)
+// 공사 구간 진입/이탈. 진입은 /mission/construction true로만 (표지판 판단은 tb_brain)
+// brick_seen: 이번 프레임에 벽돌 탐지가 있는지
+void PathNode::update_construction(const tb_interfaces::msg::LaneMask &, bool brick_seen)
 {
-    const rclcpp::Time stamp(msg.header.stamp);
-    const bool det_fresh = last_det_ &&
-        std::abs((stamp - rclcpp::Time(last_det_->header.stamp)).seconds()) * 1000.0 <= det_max_age_ms_;
-
-    // 표지판으로 자동 진입 (연속 con_sign_frames 프레임)
-    // 멀리 있는 표지판(작은 박스)은 무시: T자 출구에서 다음 구간 표지판이 보여 일찍 들어가는 것 방지
-    bool sign = false;
-    int sign_h = 0;
-    if (det_fresh)
-        for (const auto &d : last_det_->detections)
-            if (d.label == "construction")
-            {
-                sign_h = std::max(sign_h, int(d.h));
-                if (d.h >= con_sign_min_h_)
-                    sign = true;
-            }
-    con_sign_seen_ = sign ? con_sign_seen_ + 1 : 0;
-    if (sign)
-        con_sign_time_ = stamp;
-    if (con_done_ && !con_manual_ && (stamp - con_sign_time_).seconds() > 3.0)
-        con_done_ = false; // 끝난 뒤 표지판이 3초 넘게 안 보이면 다음 진입 허용
-    if (!con_auto_ && !con_done_ && con_sign_seen_ >= con_sign_frames_)
+    // 토픽으로 받은 명령 처리
+    const ConCmd cmd = con_cmd_;
+    con_cmd_ = ConCmd::None;
+    if (cmd == ConCmd::Start && !con_active_)
     {
-        con_auto_ = true;
-        RCLCPP_INFO(get_logger(), "construction: 표지판으로 진입 (박스 높이 %dpx)", sign_h);
-    }
-
-    // 끝내기 요청 (GUI 버튼, brain): 수동·자동 모두 끔
-    if (con_exit_requested_)
-    {
-        con_exit_requested_ = false;
-        if (con_on())
-        {
-            end_construction("끝내기 요청");
-            con_manual_ = false;
-            con_sign_time_ = stamp; // 지금 보이는 표지판으로 바로 다시 들어가지 않게
-        }
-    }
-
-    if (con_on() != con_active_)
-    {
-        con_active_ = con_on();
+        con_active_ = true;
         con_brick_seen_ = false;
         con_start_pose_ = pose_;
-        con_reason_ = con_active_ ? (con_manual_ ? "수동" : "표지판") : con_reason_;
-        RCLCPP_INFO(get_logger(), "construction: %s", con_active_ ? "시작" : "끝");
+        con_reason_ = "명령";
+        RCLCPP_INFO(get_logger(), "construction: 시작");
+    }
+    else if ((cmd == ConCmd::Stop || cmd == ConCmd::Exit) && con_active_)
+    {
+        end_construction(cmd == ConCmd::Stop ? "명령" : "끝내기 요청");
     }
     if (!con_active_)
         return;
 
-    // 표지판으로 들어갔는데 벽돌을 한 번도 못 보고 con_no_brick_mm 넘게 가면 잘못 들어간 것으로 보고 끝
-    if (!con_brick_seen_ && !brick_seen && con_auto_ && !con_manual_ && con_no_brick_mm_ > 0 &&
+    // 벽돌을 한 번도 못 보고 con_no_brick_mm 넘게 가면 잘못 들어온 것으로 보고 끝 (표지판 오검출 등)
+    if (!con_brick_seen_ && !brick_seen && con_no_brick_mm_ > 0 &&
         std::hypot(pose_.x - con_start_pose_.x, pose_.y - con_start_pose_.y) * 1000.0 > con_no_brick_mm_)
     {
         end_construction("벽돌 없이 " + std::to_string(con_no_brick_mm_) + "mm");
         return;
     }
 
-    // 벽돌을 본 뒤 con_exit_mm 가는 동안 벽돌이 안 보이면 끝 (자동 진입일 때만. 수동은 끌 때까지)
+    // 벽돌을 본 뒤 con_exit_mm 가는 동안 벽돌이 안 보이면 끝 (0이면 명령으로 끌 때까지 유지)
     if (brick_seen)
     {
         con_brick_seen_ = true;
         con_brick_pose_ = pose_;
     }
-    else if (con_brick_seen_ && con_auto_ && !con_manual_ && con_exit_mm_ > 0 &&
+    else if (con_brick_seen_ && con_exit_mm_ > 0 &&
              std::hypot(pose_.x - con_brick_pose_.x, pose_.y - con_brick_pose_.y) * 1000.0 > con_exit_mm_)
     {
         end_construction("벽돌이 " + std::to_string(con_exit_mm_) + "mm 동안 안 보임");
@@ -618,24 +581,20 @@ void PathNode::update_construction(const tb_interfaces::msg::LaneMask &msg, bool
 
 void PathNode::end_construction(const std::string &why)
 {
-    con_auto_ = false;
-    con_done_ = true;
     con_active_ = false;
     con_reason_ = "끝: " + why;
     RCLCPP_INFO(get_logger(), "construction: %s, 일반 주행으로", why.c_str());
 }
 
-// GUI 표시용 한 줄: "ON 표지판 brick=1 dist=0.42" / "off 끝: 끝내기 요청"
+// GUI 표시용 한 줄: "ON 명령 brick=1 dist=0.42" / "off 끝: 끝내기 요청"
 std::string PathNode::construction_info() const
 {
     char buf[160];
     if (con_on())
-        std::snprintf(buf, sizeof(buf), "ON %s brick=%d dist=%.2f sign_h>=%d",
-                      con_manual_ ? "수동" : "표지판", con_brick_seen_ ? 1 : 0,
-                      std::hypot(pose_.x - con_start_pose_.x, pose_.y - con_start_pose_.y), con_sign_min_h_);
+        std::snprintf(buf, sizeof(buf), "ON %s brick=%d dist=%.2f", con_reason_.c_str(), con_brick_seen_ ? 1 : 0,
+                      std::hypot(pose_.x - con_start_pose_.x, pose_.y - con_start_pose_.y));
     else
-        std::snprintf(buf, sizeof(buf), "off %s%s sign_h>=%d", con_reason_.c_str(),
-                      con_done_ ? " (표지판 안 보일 때까지 대기)" : "", con_sign_min_h_);
+        std::snprintf(buf, sizeof(buf), "off %s", con_reason_.c_str());
     return buf;
 }
 
