@@ -85,7 +85,8 @@ private:
   bool construction_state_ = false; // path_node가 실제로 공사 구간 모드인지 (/lane/construction)
 
   // ====== View 탭: 카메라를 크게 + 키보드 조작 (setupViewTab 참고)
-  enum class DriveMode { Off, Wasd, Auto };
+  // Brain: drive.enable + drive.require_cmd + /brain/run start → brain이 /drive/cmd를 줘야 움직임
+  enum class DriveMode { Off, Wasd, Auto, Brain };
   void setupViewTab();
   bool viewTabActive() const;
   void applyViewTabSize();             // View 탭이면 아래 탭 영역을 줄여 카메라를 크게
@@ -94,10 +95,9 @@ private:
   void refreshViewStatus();            // 모드 배지·미션 표시 갱신
   void setTurnMomentary(int key, bool press); // 자동 주행 중 A/D: 누르는 동안만 Left/Right
   void setBarrier(bool on);            // 차단바 정지: /drive/cmd STOP을 10Hz로 계속 보냄
-  void setBrainRun(bool on);           // tb_brain 켜기/끄기 (/brain/run). 버튼, Enter
-  void showBrainRun();                 // 버튼 글자·색 (GUI가 보낸 상태 기준)
+  void setBrainRun(bool on);           // tb_brain 켜기/끄기 (/brain/run). Brain 모드에서만 켜짐
+  void setRequireCmd(bool on);         // drive.require_cmd (Brain 모드: true, 자동: false)
   bool brain_run_ = false;
-  QPushButton *btn_brain_ = nullptr;
   QTimer brain_timer_;                 // 켜져 있는 동안 1초마다 "start" 다시 보냄 (brain이 나중에 떠도 받게)
   bool handleViewKey(QKeyEvent *ke, bool press);
   QWidget *view_tab_ = nullptr;

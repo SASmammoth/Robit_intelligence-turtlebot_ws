@@ -451,7 +451,11 @@ void MainWindow::setupViewTab()
   auto *btn_off = new QPushButton("정지 (Esc)", ui->groupStatus);
   auto *btn_wasd = new QPushButton("WASD", ui->groupStatus);
   auto *btn_auto = new QPushButton("자동", ui->groupStatus);
-  for (QPushButton *b : {btn_off, btn_wasd, btn_auto})
+  auto *btn_brain = new QPushButton("Brain (Enter)", ui->groupStatus);
+  btn_auto->setToolTip("drive.enable + require_cmd 끔: 명령 없이도 바로 경로 추종 (FOLLOW)");
+  btn_brain->setToolTip("drive.enable + require_cmd 켬 + /brain/run start:\n"
+                        "brain이 /drive/cmd(FOLLOW)를 줄 때만 움직임 (예: 초록불 보기 전까지 정지 stop:no_cmd)");
+  for (QPushButton *b : {btn_off, btn_wasd, btn_auto, btn_brain})
   {
     b->setFocusPolicy(Qt::NoFocus); // 버튼이 Space를 먹지 않게
     row->addWidget(b);
@@ -460,21 +464,16 @@ void MainWindow::setupViewTab()
   connect(btn_off, &QPushButton::clicked, this, [this] { setDriveMode(DriveMode::Off); });
   connect(btn_wasd, &QPushButton::clicked, this, [this] { setDriveMode(DriveMode::Wasd); });
   connect(btn_auto, &QPushButton::clicked, this, [this] { setDriveMode(DriveMode::Auto); });
+  connect(btn_brain, &QPushButton::clicked, this, [this] { setDriveMode(DriveMode::Brain); });
 
   label_drive_brief_ = new QLabel("drive: -", ui->groupStatus);
   label_drive_brief_->setWordWrap(true); // 긴 /drive/state 한 줄 때문에 상태 상자가 넓어지지 않게
   box->insertWidget(2, label_drive_brief_);
 
-  // tb_brain 켜기/끄기 (/brain/run "start"/"stop"). 모드 버튼 바로 아래
-  btn_brain_ = new QPushButton(ui->groupStatus);
-  btn_brain_->setFocusPolicy(Qt::NoFocus);
-  btn_brain_->setToolTip("/brain/run: \"start\"면 brain이 표지판을 보고 미션을 냄, \"stop\"이면 아무것도 안 냄.\n"
-                         "끌 때 /mission/turn 0, /mission/pause false도 같이 보냄 (brain이 걸어둔 회전·정지 풀기)");
-  box->insertWidget(2, btn_brain_);
-  connect(btn_brain_, &QPushButton::clicked, this, [this] { setBrainRun(!brain_run_); });
+  // Brain 모드 동안 1초마다 /brain/run "start" 다시 보냄 (brain이 GUI보다 늦게 떠도 받게)
+  // GUI가 켜질 때는 아무것도 안 보냄 (CLI로 켠 brain을 GUI가 켜지면서 끄지 않게)
   brain_timer_.setInterval(1000);
   connect(&brain_timer_, &QTimer::timeout, this, [this] { qnode->publishBrainRun(true); });
-  showBrainRun(); // 시작할 때는 아무것도 안 보냄 (CLI로 켠 brain을 GUI가 켜지면서 끄지 않게)
 
   // 기존 주차 체크박스 옆에 공사 구간, 차단바
   check_construction_ = new QCheckBox("공사 구간 (C)", ui->groupStatus);
@@ -562,7 +561,7 @@ void MainWindow::applyViewTabSize()
 MainWindow::DriveMode MainWindow::driveMode() const
 {
   if (ui->checkAutoEnable->isChecked())
-    return DriveMode::Auto;
+    return brain_run_ ? DriveMode::Brain : DriveMode::Auto;
   if (ui->checkDriveEnable->isChecked())
     return DriveMode::Wasd;
   return DriveMode::Off;
@@ -576,6 +575,8 @@ void MainWindow::setDriveMode(DriveMode m)
     turn_keys_.clear();
     ui->radioTurnStraight->setChecked(true);
   }
+  if (m != DriveMode::Brain && brain_run_)
+    setBrainRun(false); // brain 먼저 끔 (/mission/turn 0, /mission/pause false도 보냄)
   switch (m)
   {
   case DriveMode::Off:
@@ -591,7 +592,16 @@ void MainWindow::setDriveMode(DriveMode m)
     break;
   case DriveMode::Auto:
     ui->checkDriveEnable->setChecked(false);
+    setRequireCmd(false); // 명령 없어도 FOLLOW (enable보다 먼저)
     setAutoDrive(true);
+    break;
+  case DriveMode::Brain:
+    ui->checkDriveEnable->setChecked(false);
+    setRequireCmd(true); // brain 명령이 없으면 정지 (enable보다 먼저 → 켜지는 순간 FOLLOW로 튀지 않게)
+    setBrainRun(true);
+    setAutoDrive(true);
+    if (!ui->checkAutoEnable->isChecked()) // drive_node 연결 안 됨
+      setBrainRun(false);
     break;
   }
   refreshViewStatus();
@@ -601,15 +611,18 @@ void MainWindow::refreshViewStatus()
 {
   if (!label_mode_)
     return;
-  static const char *text[] = {"정지", "WASD 수동", "자동 주행"};
-  static const char *color[] = {"#555555", "#2980b9", "#2e9d4a"};
+  static const char *text[] = {"정지", "WASD 수동", "자동 주행", "Brain (대회)"};
+  static const char *color[] = {"#555555", "#2980b9", "#2e9d4a", "#8e44ad"};
   const int i = static_cast<int>(driveMode());
   label_mode_->setText(QString("%1%2").arg(text[i], viewTabActive() ? "" : "   (키 조작은 View 탭에서)"));
   label_mode_->setStyleSheet(QString("font-size: 18px; font-weight: bold; border-radius: 4px; color: white; "
                                      "padding: 4px; background: %1;").arg(color[i]));
-  label_keys_->setText(driveMode() == DriveMode::Auto
-                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter brain   Esc 정지"
-                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter brain   Esc 정지");
+  const DriveMode dm = driveMode();
+  label_keys_->setText(dm == DriveMode::Auto
+                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter: Brain   Esc 정지"
+                       : dm == DriveMode::Brain
+                           ? "Brain이 /drive/cmd·/mission/* 를 냄 (수동 조작 자제)   Space: WASD로   B 차단바   Enter·Esc: 정지"
+                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter: Brain   Esc 정지");
 }
 
 void MainWindow::setTurnMomentary(int key, bool press)
@@ -640,14 +653,15 @@ void MainWindow::setBrainRun(bool on)
       qnode->publishPause(false);
     }
   }
-  showBrainRun();
+  refreshViewStatus();
 }
 
-void MainWindow::showBrainRun()
+void MainWindow::setRequireCmd(bool on)
 {
-  btn_brain_->setText(brain_run_ ? "Brain 동작 중 — 끄기 (Enter)" : "Brain 꺼짐 — 켜기 (Enter)");
-  btn_brain_->setStyleSheet(QString("font-weight: bold; color: white; padding: 4px; border-radius: 4px; background: %1;")
-                                .arg(brain_run_ ? "#8e44ad" : "#555555"));
+  if (ui->checkRequireCmd->isChecked() != on)
+    ui->checkRequireCmd->setChecked(on); // toggled에서 drive.require_cmd 설정
+  else
+    qnode->setBoolParam("drive.require_cmd", on); // 화면과 노드가 어긋나 있을 수도 있으니 한 번 더
 }
 
 void MainWindow::setBarrier(bool on)
@@ -683,15 +697,14 @@ bool MainWindow::handleViewKey(QKeyEvent *ke, bool press)
   case Qt::Key_Escape:
     if (press && !repeat)
     {
-      setDriveMode(DriveMode::Off);
+      setDriveMode(DriveMode::Off); // brain도 끔
       setBarrier(false);
-      setBrainRun(false);
     }
     return true;
   case Qt::Key_Return:
-  case Qt::Key_Enter: // 키패드 Enter
+  case Qt::Key_Enter: // 키패드 Enter: Brain ↔ 정지
     if (press && !repeat)
-      setBrainRun(!brain_run_);
+      setDriveMode(m == DriveMode::Brain ? DriveMode::Off : DriveMode::Brain);
     return true;
   case Qt::Key_P:
     if (press && !repeat)
@@ -969,6 +982,8 @@ void MainWindow::setupDriveTab()
 
 void MainWindow::setAutoDrive(bool on)
 {
+  if (!on && brain_run_)
+    setBrainRun(false); // 주행을 끄면 brain도 (Drive 탭 체크박스, 정지 버튼 등 어느 경로든)
   if (on && ui->checkDriveEnable->isChecked())
     ui->checkDriveEnable->setChecked(false); // WASD 끄기 (stopDrive 호출됨)
 

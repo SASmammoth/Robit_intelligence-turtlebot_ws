@@ -150,8 +150,8 @@ flowchart LR
 | 발행/구독 | `/mission/turn`, `/mission/parking` | 버튼 → 발행. 같은 토픽을 구독해 버튼 상태를 맞춤 |
 | 발행 | `/mission/construction` | 공사 구간 수동 on/off |
 | 발행 | `/drive/cmd` | STOP 버튼 |
-| 발행 | `/brain/run` | brain 켜기/끄기 버튼·Enter (`"start"`/`"stop"`). 켜져 있는 동안 1초마다 `"start"` 다시 보냄. Esc도 끔 |
-| 발행 | `/mission/pause` | brain을 끌 때 `false` 한 번 (brain이 걸어둔 정지 풀기) |
+| 발행 | `/brain/run` | **Brain 모드**(버튼·Enter)에서 `"start"`(1초마다 다시), 다른 모드로 바꾸면 `"stop"` |
+| 발행 | `/mission/pause` | Brain 모드를 끌 때 `false` 한 번 (brain이 걸어둔 정지 풀기) |
 | 발행 | `TB_Uart_RX` | WASD 수동 조종, UART 명령 직접 입력 |
 
 ---
@@ -246,5 +246,6 @@ flowchart LR
 ## 8. 주의할 점
 
 - **`TB_Uart_RX` 발행자가 둘**: drive_node(자율주행)와 tb_gui(WASD). `drive.enable=false`로 끄면 drive_node가 0을 한 번 보내고 조용해지지만, 켠 상태에서 WASD를 누르면 명령이 섞입니다.
+- **GUI 주행 모드 4개**: 정지(`drive.enable` 끔) / WASD / 자동(`enable` + `require_cmd` 끔 → 명령 없어도 FOLLOW) / Brain(`enable` + `require_cmd` 켬 + `/brain/run start` → brain이 `/drive/cmd`를 줘야 움직임). 정지로 두면 drive_node가 꺼져 있어서 brain 명령도 무시됩니다.
 - **`drive.enable` 기본값은 false**: launch만 해서는 안 움직이고, GUI에서 켜야 합니다. GUI 파라미터 저장/불러오기에서도 이 값은 빠집니다.
 - **`/drive/cmd`를 내는 판단 노드가 아직 없음**: `DriveCmd.msg` 주석의 `tb_brain`은 미구현입니다. 나중에 표지판 결과로 미션을 정하는 노드를 만들면, 지금 GUI가 맡은 `/mission/*`와 `/drive/cmd` 발행을 그 노드가 맡게 됩니다.
