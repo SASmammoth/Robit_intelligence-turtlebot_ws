@@ -14,6 +14,7 @@ path_node:
       mem_travel_mm: 600    # 기억만으로 갈 수 있는 최대 거리
       max_dev_mm: 50        # 새 경로가 기억과 이만큼 넘게 다르면 의심
       override_frames: 10   # 의심이 이만큼 연속되면 새 경로를 믿음
+      turn_drop_memory: 1   # 1: 좌/우 명령이 새로 들어오면 직진 때 기억한 경로를 버림
       min_len_mm: 100       # 이보다 짧은 경로는 무효
       branch_look_mm: 40    # 분기에서 각 가지를 미리 보는 길이
       blind_max_mm: 250     # 사각지대를 연속으로 지날 수 있는 최대 길이

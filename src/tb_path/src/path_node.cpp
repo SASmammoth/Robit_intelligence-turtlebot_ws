@@ -88,6 +88,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("skel.max_lane_thick", 20, 200);
     declare_int("path.max_dev_mm", 50, 500);
     declare_int("path.override_frames", 10, 100);
+    declare_int("path.turn_drop_memory", 1, 1);       // 1: 좌/우 명령이 새로 들어오면 직진 때 기억한 경로를 버림
     declare_int("path.min_len_mm", 100, 1000);
     declare_int("path.branch_look_mm", 40, 300);
     declare_int("path.blind_max_mm", 250, 1000);
@@ -156,6 +157,7 @@ void PathNode::reload_params()
     auto &tp = tracker_.p;
     tp.max_dev_m = get_parameter("path.max_dev_mm").as_int() / 1000.0;
     tp.override_frames = get_parameter("path.override_frames").as_int();
+    turn_drop_memory_ = get_parameter("path.turn_drop_memory").as_int() != 0;
     tp.min_len_m = get_parameter("path.min_len_mm").as_int() / 1000.0;
     tp.lookahead_m = get_parameter("path.branch_look_mm").as_int() / 1000.0;
     tp.blind_max_m = get_parameter("path.blind_max_mm").as_int() / 1000.0;
@@ -327,6 +329,20 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             }
             wall |= brick_m;
         }
+    }
+
+    // ====== 좌/우 명령이 새로 들어오면 직진 때 기억한 경로를 버림
+    // (표지판이 교차로 바로 앞에서 보이면, 직진으로 기억한 다른 가지를 따라가거나
+    //  turn으로 고른 새 가지를 "기억과 다르다"고 10프레임 동안 거부해서 T자에서 엉뚱하게 감)
+    if (turn_ != last_turn_)
+    {
+        if (turn_ != 0 && turn_drop_memory_)
+        {
+            tracker_.drop_memory();
+            last_seed_ = {-1, -1};
+            RCLCPP_INFO(get_logger(), "turn %u: 기억 경로 버림", turn_);
+        }
+        last_turn_ = turn_;
     }
 
     // ====== 스켈레톤 → 경로

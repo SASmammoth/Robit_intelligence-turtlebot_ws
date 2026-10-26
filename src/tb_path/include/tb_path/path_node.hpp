@@ -75,6 +75,8 @@ private:
 
     // 미션 (판단 노드 또는 ros2 topic pub 으로 받음)
     uint8_t turn_ = 0;                  // 0 직진, 1 좌, 2 우
+    uint8_t last_turn_ = 0;             // 마지막으로 처리한 turn (바뀌었는지 확인용)
+    bool turn_drop_memory_ = true;      // path.turn_drop_memory
     bool parking_ = false;
 
     // 장애물 (YOLO brick)

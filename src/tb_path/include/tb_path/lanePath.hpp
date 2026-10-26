@@ -60,6 +60,9 @@ public:
                   const Geo &g, Turn turn, const Pose2D &pose);
 
     void reset() { mem_.clear(); trail_.clear(); suspicious_ = 0; }
+    // 기억 경로만 버림 (사각지대 채움용 trail_은 유지). 좌/우 명령이 새로 들어왔을 때:
+    // 직진 명령으로 기억한 가지와 다른 가지로 가야 하므로 예전 기억으로 버티거나 의심하지 않게
+    void drop_memory() { mem_.clear(); suspicious_ = 0; }
 
     // 기억한 경로를 지금 자세로 옮겨서, BEV 아래쪽에 처음 들어오는 점 (스켈레톤 시드 힌트).
     // 커브에서는 BEV 하단 중앙이 차선 바깥에 놓여서, 그 근처에서 시드를 찾으면

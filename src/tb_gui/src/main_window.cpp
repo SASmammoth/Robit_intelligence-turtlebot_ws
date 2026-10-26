@@ -813,6 +813,7 @@ void MainWindow::setupParamTab()
            {"path.mem_travel_mm", "기억 최대 이동", " mm", 0, 3000, 50},
            {"path.max_dev_mm", "기억과 차이 허용", " mm", 0, 500, 5},
            {"path.override_frames", "새 경로 믿기까지", " 프레임", 0, 100, 1},
+           {"path.turn_drop_memory", "좌/우 명령 들어오면 기억 버림 (1=켬)", "", 0, 1, 1},
            {"path.min_len_mm", "최소 경로 길이", " mm", 0, 1000, 10},
            {"path.branch_look_mm", "분기 미리보기", " mm", 0, 300, 5},
            {"path.blind_max_mm", "사각지대 통과 최대", " mm", 0, 1000, 10},
