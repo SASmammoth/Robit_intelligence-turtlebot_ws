@@ -355,6 +355,22 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     // 공사 구간: 스켈레톤 경로는 벽돌 앞에서 ㄱ자로 꺾이므로 모서리를 둥글게 (기억에는 원래 경로가 남음)
     if (con && con_smooth_mm_ > 0)
         smooth_path(out.path, con_smooth_mm_ / 1000.0);
+
+    // 교차로 명령 중: 사각지대 때문에 경로가 모서리(BEV 아랫줄)에서 시작하면
+    // 로봇 → 첫 점 직선을 붙여 fillet이 모서리를 원호로 깎을 수 있게 함
+    if (!con && turn != lane_path::Turn::Straight && !out.path.empty())
+    {
+        const cv::Point2d p0 = out.path.front();
+        const double d = std::hypot(p0.x, p0.y);
+        if (p0.x > 0.03)
+        {
+            const int n = int(std::ceil(d / 0.02)); // 2cm 간격
+            std::vector<cv::Point2d> lead;
+            for (int i = 0; i < n; ++i)
+                lead.push_back(p0 * (double(i) / n));
+            out.path.insert(out.path.begin(), lead.begin(), lead.end());
+        }
+    }
     // 일반 주행: 급한 모서리(교차로 ㄱ자)를 원호로 → 피봇 없이 전진하며 돎 (코너까지 거리를 재지 않아 지나치지 않음)
     if (!con && turn_radius_mm_ > 0)
         lane_path::fillet_corners(out.path, turn_radius_mm_ / 1000.0, turn_min_deg_ * M_PI / 180.0);
