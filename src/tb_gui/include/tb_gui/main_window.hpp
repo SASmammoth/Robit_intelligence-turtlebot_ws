@@ -109,6 +109,7 @@ private:
   QLabel *label_con_ = nullptr;        // 공사 모드 상태 배지 (/lane/construction_info)
   void showConstructionInfo(const QString &info);
   void exitConstruction();             // 공사 모드 끝내기 (버튼, X키)
+  void resetAll();                     // 전체 초기화 (버튼, R키): /mission/reset + GUI 미션 표시
   QList<int> turn_keys_;               // 누르고 있는 A/D (나중에 누른 것이 우선)
   QTimer barrier_timer_;
   QTimer status_timeout_; // 경로 출처가 1초 넘게 안 오면 회색

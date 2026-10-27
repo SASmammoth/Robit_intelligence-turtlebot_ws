@@ -114,6 +114,7 @@ QNode::QNode()
       { Q_EMIT constructionInfoReceived(QString::fromStdString(m->data)); });
   drive_cmd_pub_ = node->create_publisher<tb_interfaces::msg::DriveCmd>("/drive/cmd", 10);
   brain_run_pub_ = node->create_publisher<std_msgs::msg::String>("/brain/run", 10);
+  reset_pub_ = node->create_publisher<std_msgs::msg::Empty>("/mission/reset", 10);
   pause_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/pause", 10);
   inject_pub_ = node->create_publisher<std_msgs::msg::String>("/brain/inject", 10);
 
@@ -214,7 +215,7 @@ std::vector<std::string> QNode::brainParamNames()
                                     "mission.barrier_release_ms", "mission.con_end_mode", "mission.con_hold_ms",
                                     "mission.con_once", "mission.start_follow", "mission.stop_line",
                                     "sign.confirm_frames", "sign.min_score_pct"};
-  for (const char *l : {"barrier_closed", "barrier_open", "construction", "left", "right", "parking", "tl_green", "tl_red", "tl_yellow"})
+  for (const char *l : {"barrier_closed", "barrier_open", "construction", "left", "right", "parking", "tl_green"})
   {
     names.push_back(std::string("sign.") + l + ".min_h_px");
     names.push_back(std::string("sign.") + l + ".min_w_px");
@@ -614,6 +615,11 @@ void QNode::publishConstructionExit()
   std_msgs::msg::Bool m;
   m.data = true;
   construction_exit_pub_->publish(m);
+}
+
+void QNode::publishReset()
+{
+  reset_pub_->publish(std_msgs::msg::Empty());
 }
 
 void QNode::publishBrainRun(bool start)

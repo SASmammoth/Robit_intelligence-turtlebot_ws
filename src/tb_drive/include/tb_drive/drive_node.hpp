@@ -11,6 +11,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/range.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8.hpp>
 
@@ -45,6 +46,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr turn_sub_; // /mission/turn (0이 아니면 교차로)
 
     rclcpp::Subscription<DriveCmd>::SharedPtr cmd_sub_;
+    rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr reset_sub_; // /mission/reset
     std::vector<rclcpp::Subscription<sensor_msgs::msg::Range>::SharedPtr> psd_subs_;
 
     // ====== 출력

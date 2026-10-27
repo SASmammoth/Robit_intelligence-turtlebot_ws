@@ -9,6 +9,7 @@
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/opencv.hpp>
 
@@ -28,6 +29,7 @@ private:
     void reload_params();
     void declare_int(const std::string &name, int def, int max);
     void update_pose(const rclcpp::Time &now);
+    void reset_all(); // /mission/reset
     void publish_debug(const cv::Mat &img, const std_msgs::msg::Header &header);
 
     // 스켈레톤
@@ -111,6 +113,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr turn_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr parking_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stop_line_sub_; // /mission/stop_line
+    rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr reset_sub_;    // /mission/reset
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_exit_sub_;  // /mission/construction_exit
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr con_pub_;

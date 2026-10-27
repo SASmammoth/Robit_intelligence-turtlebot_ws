@@ -81,6 +81,10 @@ PathNode::PathNode() : Node("path_node")
             con_cmd_ = ConCmd::Exit;
             RCLCPP_INFO(get_logger(), "construction: 끝내기 요청"); });
 
+    // 전체 초기화 (GUI 초기화 버튼, tb_brain·tb_drive도 같은 토픽을 받음)
+    reset_sub_ = create_subscription<std_msgs::msg::Empty>(
+        "/mission/reset", 10, [this](const std_msgs::msg::Empty::ConstSharedPtr) { reset_all(); });
+
     // ====== 출력
     path_pub_ = create_publisher<nav_msgs::msg::Path>("/lane/path", 10);
     src_pub_ = create_publisher<std_msgs::msg::String>("/lane/path_source", 10);
@@ -147,6 +151,29 @@ PathNode::PathNode() : Node("path_node")
         [this](const std::vector<rclcpp::Parameter> &) { reload_params(); });
 
     RCLCPP_INFO(get_logger(), "path_node started");
+}
+
+// 탐색 상태를 처음처럼: 기억 경로·시드, 위치, 미션 입력(turn·parking·stop_line), 공사 모드
+// (파라미터는 그대로. 미션 값은 brain·GUI가 다시 보내면 그 값으로)
+void PathNode::reset_all()
+{
+    tracker_.reset();
+    last_seed_ = {-1, -1};
+    pose_ = lane_path::Pose2D{};
+    turn_ = last_turn_ = 0;
+    parking_ = false;
+    stop_line_ = false;
+    sl_have_ = false;
+    last_det_.reset();
+    con_cmd_ = ConCmd::None;
+    if (con_active_)
+        end_construction("초기화");
+    con_brick_seen_ = false;
+    con_hold_[0].on = con_hold_[1].on = false;
+    con_near_.clear();
+    con_have_pose_ = false;
+    con_reason_ = "초기화";
+    RCLCPP_INFO(get_logger(), "reset: 경로 기억·미션 상태 초기화");
 }
 
 void PathNode::declare_int(const std::string &name, int def, int max)

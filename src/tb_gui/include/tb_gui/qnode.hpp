@@ -13,6 +13,7 @@
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <opencv2/opencv.hpp>
 #include "tb_interfaces/msg/detection_array.hpp"
 #include "tb_interfaces/msg/drive_cmd.hpp"
@@ -53,6 +54,7 @@ public:
   void publishConstructionExit();    // /mission/construction_exit (지금 공사 모드 끝내기: 표지판 자동 진입도)
   void publishDriveStop();           // /drive/cmd STOP 한 번 (차단바 흉내: 10Hz 이상으로 계속 불러야 유지됨)
   void publishBrainRun(bool start);  // /brain/run "start" / "stop" (tb_brain 켜기/끄기)
+  void publishReset();               // /mission/reset (path·drive·brain 상태 초기화)
   void publishPause(bool on);        // /mission/pause (tb_brain이 거는 일시정지. brain 끌 때 풀어 줌)
   void publishBrainInject(const QString &label); // /brain/inject: 가짜 표지판 (brain이 바로 그 표지판 동작)
 
@@ -101,6 +103,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr construction_info_sub_; // /lane/construction_info
   rclcpp::Publisher<tb_interfaces::msg::DriveCmd>::SharedPtr drive_cmd_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr brain_run_pub_; // /brain/run
+  rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr reset_pub_;      // /mission/reset
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pause_pub_;       // /mission/pause
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr inject_pub_;    // /brain/inject
 

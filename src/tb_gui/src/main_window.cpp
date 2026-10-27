@@ -411,6 +411,26 @@ void MainWindow::showConstructionInfo(const QString &info)
                                 .arg(info.isEmpty() ? "#555555" : on ? "#d35400" : "#7f8c8d"));
 }
 
+void MainWindow::resetAll()
+{
+  setBarrier(false);
+  if (ui->radioTurnStraight->isChecked())
+    qnode->publishTurn(0);
+  else
+    ui->radioTurnStraight->setChecked(true); // toggled에서 /mission/turn 0
+  if (ui->checkParking->isChecked())
+    ui->checkParking->setChecked(false); // toggled에서 /mission/parking false
+  if (check_construction_->isChecked())
+  {
+    QSignalBlocker block(check_construction_);
+    check_construction_->setChecked(false);
+    construction_ = false;
+  }
+  qnode->publishReset(); // GUI가 보낸 turn·parking 뒤에 → 노드들이 초기화
+  statusBar()->showMessage("초기화 보냄: path·drive·brain 상태를 처음처럼 (모드·파라미터는 그대로)", 4000);
+  showMission();
+}
+
 void MainWindow::exitConstruction()
 {
   // /mission/construction_exit (= false와 같음). 체크는 /lane/construction이 오면 맞춰짐
@@ -498,6 +518,14 @@ void MainWindow::setupViewTab()
   box->insertWidget(park_idx + 3, label_con_);
   box->insertWidget(park_idx + 4, btn_con_exit);
 
+  // 전체 초기화: path(기억 경로·공사·정지선), drive(추종·피봇 상태), brain(미션 상태) + GUI 미션 표시
+  auto *btn_reset = new QPushButton("초기화 (R)", ui->groupStatus);
+  btn_reset->setFocusPolicy(Qt::NoFocus);
+  btn_reset->setToolTip("/mission/reset: path_node 경로 기억·공사·정지선, drive_node 추종 상태, brain 미션 상태를 처음처럼.\n"
+                        "주행 모드·파라미터는 그대로 (로봇을 출발점에 다시 놓고 누르기)");
+  box->insertWidget(park_idx + 5, btn_reset);
+  connect(btn_reset, &QPushButton::clicked, this, [this] { resetAll(); });
+
   // 가짜 표지판 → tb_brain (/brain/inject). 필터 없이 바로 그 표지판 동작 (Brain 모드에서만 의미 있음)
   //   중간에서 시작할 때 초록불로 출발, 표지판을 놓쳤을 때 대신 보내기 등
   auto *inject_box = new QGroupBox("가짜 표지판 → brain", ui->groupStatus);
@@ -507,7 +535,7 @@ void MainWindow::setupViewTab()
   static const std::pair<const char *, const char *> fake_signs[] = {
       {"tl_green", "초록불 (출발)"}, {"left", "좌회전"}, {"right", "우회전"},
       {"construction", "공사"}, {"parking", "주차"}, {"barrier_closed", "차단바 닫힘"},
-      {"barrier_open", "차단바 열림"}, {"tl_red", "빨간불 (정지선)"}};
+      {"barrier_open", "차단바 열림"}, {"stop_line", "정지선 켜기"}};
   int fi = 0;
   for (const auto &[label, text] : fake_signs)
   {
@@ -525,7 +553,7 @@ void MainWindow::setupViewTab()
     inject_grid->addWidget(b, fi / 3, fi % 3);
     ++fi;
   }
-  box->insertWidget(park_idx + 5, inject_box);
+  box->insertWidget(park_idx + 6, inject_box);
   connect(btn_con_exit, &QPushButton::clicked, this, [this] { exitConstruction(); });
   connect(qnode, &QNode::constructionInfoReceived, this, &MainWindow::showConstructionInfo);
   showConstructionInfo("");
@@ -657,10 +685,10 @@ void MainWindow::refreshViewStatus()
                                      "padding: 4px; background: %1;").arg(color[i]));
   const DriveMode dm = driveMode();
   label_keys_->setText(dm == DriveMode::Auto
-                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter: Brain   Esc 정지"
+                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바  R 초기화   Enter: Brain   Esc 정지"
                        : dm == DriveMode::Brain
-                           ? "Brain이 /drive/cmd·/mission/* 를 냄 (수동 조작 자제)   Space: WASD로   B 차단바   Enter·Esc: 정지"
-                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter: Brain   Esc 정지");
+                           ? "Brain이 /drive/cmd·/mission/* 를 냄 (수동 조작 자제)   Space: WASD로   B 차단바  R 초기화   Enter·Esc: 정지"
+                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바  R 초기화   Enter: Brain   Esc 정지");
 }
 
 void MainWindow::setTurnMomentary(int key, bool press)
@@ -760,6 +788,10 @@ bool MainWindow::handleViewKey(QKeyEvent *ke, bool press)
     if (press && !repeat)
       setBarrier(!check_barrier_->isChecked());
     return true;
+  case Qt::Key_R:
+    if (press && !repeat)
+      resetAll();
+    return true;
   case Qt::Key_A:
   case Qt::Key_D:
     if (m == DriveMode::Auto)
@@ -854,7 +886,7 @@ void MainWindow::setupParamTab()
            {"path.turn_radius_mm", "교차로 회전 반지름 (0=끔)", " mm", 0, 500, 10},
            {"path.turn_min_deg", "둥글게 할 꺾임", " °", 0, 180, 5},
        }},
-      {"정지선 (path_node) — /mission/stop_line 켜져 있을 때만 (brain: 빨간·노란불 켬, 초록불 끔)",
+      {"정지선 (path_node) — /mission/stop_line 켜져 있을 때만 (brain: 차단바 끝나면 켬, 초기화·brain 정지로 끔)",
        {
            {"path.sl_margin_mm", "경로 끝 = 빨간선 - (바퀴 축 기준)", " mm", 0, 500, 5},
            {"path.sl_min_w_px", "한 줄 빨강 최소 폭 (BEV)", " px", 0, 320, 5},
@@ -890,7 +922,7 @@ void MainWindow::setupParamTab()
            {"mission.parking_pause", "주차 표지판에서 정지 (1=정지)", "", 0, 1, 1},
            {"mission.barrier_release_ms", "차단바 안 보이면 정지 풀기 (0=끔)", " ms", 0, 30000, 250},
            {"mission.start_follow", "시작하자마자 출발 (1=초록불 안 기다림)", "", 0, 1, 1},
-           {"mission.stop_line", "빨간·노란불 → 정지선 앞 정지 (1=켬)", "", 0, 1, 1},
+           {"mission.stop_line", "차단바 끝나면 정지선 앞 정지 (1=켬)", "", 0, 1, 1},
        },
        2},
       {"표지판 검출 필터 (brain_node) — 원본 640x480 기준, 0 = 끔. 높이·너비·면적을 모두 넘어야 동작",
@@ -916,12 +948,6 @@ void MainWindow::setupParamTab()
            {"sign.tl_green.min_h_px", "초록불 최소 높이", " px", 0, 480, 5},
            {"sign.tl_green.min_w_px", "초록불 최소 너비", " px", 0, 640, 5},
            {"sign.tl_green.min_area_px", "초록불 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.tl_red.min_h_px", "빨간불 최소 높이", " px", 0, 480, 5},
-           {"sign.tl_red.min_w_px", "빨간불 최소 너비", " px", 0, 640, 5},
-           {"sign.tl_red.min_area_px", "빨간불 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.tl_yellow.min_h_px", "노란불 최소 높이", " px", 0, 480, 5},
-           {"sign.tl_yellow.min_w_px", "노란불 최소 너비", " px", 0, 640, 5},
-           {"sign.tl_yellow.min_area_px", "노란불 최소 면적 (w×h)", " px²", 0, 307200, 500},
            {"sign.confirm_frames", "연속 프레임 (한 프레임 오검출 거르기)", "", 1, 30, 1},
            {"sign.min_score_pct", "최소 점수", " %", 0, 100, 5},
        },

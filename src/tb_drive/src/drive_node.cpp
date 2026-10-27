@@ -135,6 +135,20 @@ DriveNode::DriveNode() : Node("drive_node")
             cmd_ = m;
             cmd_time_ = now(); });
 
+    // 전체 초기화 (GUI 초기화 버튼): 추종·피봇·가감속 상태, 받은 명령·미션 값을 버림 (enable·파라미터는 그대로)
+    reset_sub_ = create_subscription<std_msgs::msg::Empty>(
+        "/mission/reset", 10, [this](const std_msgs::msg::Empty::ConstSharedPtr)
+        {
+            lim_.reset();
+            follower_.reset();
+            pivot_.reset();
+            cmd_.reset();
+            paused_ = false;
+            turning_ = false;
+            construction_ = false;
+            apply_profile();
+            RCLCPP_INFO(get_logger(), "reset: 추종 상태·명령·미션 값 초기화"); });
+
     // as_string_array()는 임시 Parameter 안을 참조로 돌려주므로 먼저 복사해야 함 (안 하면 dangling)
     const std::vector<std::string> psd_topics = get_parameter("drive.psd.topics").as_string_array();
     for (const auto &topic : psd_topics)
