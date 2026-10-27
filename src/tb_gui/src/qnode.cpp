@@ -28,6 +28,60 @@ static int64_t now_ns()
       .count();
 }
 
+static int64_t wall_ns() // unix 시간 (헤더 stamp와 비교)
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+void QNode::markRx(const std::string &key, const builtin_interfaces::msg::Time *stamp)
+{
+  const int64_t t = now_ns();
+  std::lock_guard<std::mutex> lk(rx_mtx_);
+  Rx &r = rx_[key];
+  r.last_ns = t;
+  if (stamp && (stamp->sec != 0 || stamp->nanosec != 0))
+  {
+    r.lat_ns = wall_ns() - (int64_t(stamp->sec) * 1000000000LL + stamp->nanosec);
+    r.has_stamp = true;
+  }
+  if (r.win_ns == 0)
+    r.win_ns = t;
+  ++r.count;
+}
+
+QMap<QString, QNode::RxInfo> QNode::rxSnapshot()
+{
+  const int64_t t = now_ns();
+  QMap<QString, RxInfo> out;
+  std::lock_guard<std::mutex> lk(rx_mtx_);
+  for (auto &[key, r] : rx_)
+  {
+    const double win = (t - r.win_ns) / 1e9;
+    if (win >= 1.0) // 1초 창마다 초당 개수 갱신
+    {
+      r.hz = r.count / win;
+      r.count = 0;
+      r.win_ns = t;
+    }
+    RxInfo i;
+    i.age_s = (t - r.last_ns) / 1e9;
+    if (i.age_s > 1.0)
+      r.hz = 0.0; // 끊겼으면 0으로
+    i.lat_ms = r.lat_ns / 1e6;
+    i.has_stamp = r.has_stamp;
+    i.hz = r.hz;
+    out[QString::fromStdString(key)] = i;
+  }
+  return out;
+}
+
+double QNode::rosNowSec()
+{
+  return node->now().seconds();
+}
+
 static const char *LINE_NODE = "/lineDetect_node";
 static const char *PATH_NODE = "/path_node";
 static const char *DRIVE_NODE = "/drive_node";
@@ -51,8 +105,9 @@ QNode::QNode()
   {
     return node->create_subscription<sensor_msgs::msg::CompressedImage>(
         topic, rclcpp::SensorDataQoS(),
-        [this, sig](const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg)
+        [this, sig, topic](const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg)
         {
+          markRx(topic, &msg->header.stamp);
           QImage img = toQImage(*msg);
           if (!img.isNull())
             Q_EMIT(this->*sig)(img);
@@ -65,6 +120,7 @@ QNode::QNode()
       [this](const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg)
       {
         last_sign_ns_ = now_ns();
+        markRx("/signs/debug/compressed", &msg->header.stamp);
         QImage img = toQImage(*msg);
         if (!img.isNull())
           Q_EMIT usbImageReceived(img);
@@ -73,6 +129,7 @@ QNode::QNode()
       "/camera/image_raw/compressed", rclcpp::SensorDataQoS(),
       [this](const sensor_msgs::msg::CompressedImage::ConstSharedPtr msg)
       {
+        markRx("/camera/image_raw/compressed", &msg->header.stamp);
         if (now_ns() - last_sign_ns_ < 500'000'000)
           return;
         QImage img = toQImage(*msg);
@@ -92,7 +149,9 @@ QNode::QNode()
 
   det_sub_ = node->create_subscription<tb_interfaces::msg::DetectionArray>(
       "/signs/detections", 10, [this](const tb_interfaces::msg::DetectionArray::ConstSharedPtr m)
-      { onDetections(*m); });
+      {
+        markRx("/signs/detections", &m->header.stamp);
+        onDetections(*m); });
 
   // 다른 노드(나중의 판단 노드)가 미션을 바꿔도 화면에 반영
   turn_sub_ = node->create_subscription<std_msgs::msg::UInt8>(
@@ -121,13 +180,27 @@ QNode::QNode()
   // ====== 주행 상태 (tb_drive, 10Hz 문자열)
   drive_state_sub_ = node->create_subscription<std_msgs::msg::String>(
       "/drive/state", 10, [this](const std_msgs::msg::String::ConstSharedPtr m)
-      { Q_EMIT driveStateReceived(QString::fromStdString(m->data)); });
+      {
+        markRx("/drive/state");
+        Q_EMIT driveStateReceived(QString::fromStdString(m->data)); });
+
+  // ====== 노드 로그 (/rosout): brain·path·drive 로그를 GUI에서 봄 (노드 코드 수정 없이)
+  rosout_sub_ = node->create_subscription<rcl_interfaces::msg::Log>(
+      "/rosout", rclcpp::RosoutQoS(), [this](const rcl_interfaces::msg::Log::ConstSharedPtr m)
+      {
+        if (m->name != "brain_node" && m->name != "path_node" && m->name != "drive_node")
+          return;
+        markRx("/rosout " + m->name);
+        const qint64 stamp = qint64(m->stamp.sec) * 1000000000LL + m->stamp.nanosec;
+        Q_EMIT nodeLogReceived(QString::fromStdString(m->name), int(m->level), stamp,
+                               QString::fromStdString(m->msg)); });
 
   // ====== 경로 보기: path_node가 낸 경로, drive가 고른 목표점
   //  (/drive/target은 구독자가 있을 때만 발행되므로 여기서 구독하면 켜짐)
   path_sub_ = node->create_subscription<nav_msgs::msg::Path>(
       "/lane/path", 10, [this](const nav_msgs::msg::Path::ConstSharedPtr m)
       {
+        markRx("/lane/path", &m->header.stamp);
         QPolygonF pts;
         pts.reserve(static_cast<int>(m->poses.size()));
         for (const auto &ps : m->poses)

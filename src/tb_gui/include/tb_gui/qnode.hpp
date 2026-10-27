@@ -19,6 +19,7 @@
 #include "tb_interfaces/msg/drive_cmd.hpp"
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <rcl_interfaces/msg/log.hpp>
 #endif
 #include <QThread>
 #include <QImage>
@@ -64,6 +65,17 @@ public:
 
   // ====== 객체 감지 리셋버튼 콜백
   void detectionsReset();
+
+  // ====== 수신 통계 (디버그 시간 표시): 토픽마다 마지막 수신 시각, 헤더 stamp 지연, 초당 개수
+  struct RxInfo
+  {
+    double age_s = -1.0;  // 마지막 수신 후 지난 시간 (-1: 한 번도 안 옴)
+    double lat_ms = 0.0;  // 수신 시각(이 PC 벽시계) - 헤더 stamp (로봇·PC 시계 차이 포함, stamp 없으면 0)
+    bool has_stamp = false;
+    double hz = 0.0;
+  };
+  QMap<QString, RxInfo> rxSnapshot();   // GUI 스레드에서 주기적으로 호출
+  double rosNowSec();                   // 이 노드의 ROS 시간 [s]
 
 protected:
   void run();
@@ -130,6 +142,21 @@ private:
   std::shared_ptr<rclcpp::ParameterEventHandler> param_event_handler_;
   rclcpp::ParameterEventCallbackHandle::SharedPtr param_event_cb_handle_;
 
+  // 수신 통계
+  struct Rx
+  {
+    int64_t last_ns = 0;   // steady clock
+    int64_t lat_ns = 0;
+    bool has_stamp = false;
+    int count = 0;         // 이번 창에서 받은 개수
+    int64_t win_ns = 0;    // 창 시작
+    double hz = 0.0;
+  };
+  std::mutex rx_mtx_;
+  std::map<std::string, Rx> rx_;
+  void markRx(const std::string &key, const builtin_interfaces::msg::Time *stamp = nullptr);
+  rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr rosout_sub_;
+
   // signs 감지 콜백
   void onDetections(const tb_interfaces::msg::DetectionArray &msg);
   QMap<QString, rclcpp::Time> last_seen_;
@@ -148,6 +175,9 @@ Q_SIGNALS:
   void bevImageReceived(const QImage &img);
   void roiImageReceived(const QImage &img);
   void skelImageReceived(const QImage &img);
+
+  // 노드 로그 (/rosout: brain_node, path_node, drive_node). stamp_ns: 로그를 찍은 쪽 시각 (unix ns)
+  void nodeLogReceived(const QString &node, int level, qint64 stamp_ns, const QString &text);
 
   // 상태
   void pathSourceReceived(const QString &src);

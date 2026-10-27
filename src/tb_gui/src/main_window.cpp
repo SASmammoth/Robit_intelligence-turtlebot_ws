@@ -18,6 +18,10 @@
 #include <QHBoxLayout>
 #include <QTabBar>
 #include <QApplication>
+#include <QDateTime>
+#include <QFontDatabase>
+#include <QPainter>
+#include <QScrollBar>
 #include <algorithm>
 #include <cstdlib>
 
@@ -1376,9 +1380,13 @@ void MainWindow::setupDisplayTabs()
   dg->addWidget(image("usb", "USB (YOLO)"), 0, 0);
   dg->addWidget(path(), 0, 1);
   dg->addWidget(image("skel", "Skeleton"), 0, 2);
+  dg->addWidget(makeLogPanel(), 1, 0);      // USB 밑: brain 로그
+  dg->addWidget(makeDebugPanel(), 1, 1, 1, 2); // 시간·수신 디버그
   dg->setColumnStretch(0, 4);
   dg->setColumnStretch(1, 3);
   dg->setColumnStretch(2, 3);
+  dg->setRowStretch(0, 3);
+  dg->setRowStretch(1, 2);
   display_tabs_->addTab(drive_page, "주행");
 
   // ====== 튜닝: 2 x 3
@@ -1429,6 +1437,7 @@ PathView *MainWindow::makePathView()
 // 같은 영상을 보여주는 라벨 중 지금 화면에 보이는 것만 그림 (숨은 탭은 크기 조정 안 함)
 void MainWindow::showStream(const QString &stream, const QImage &img)
 {
+  stream_ms_[stream] = clock_.elapsed(); // NO SIGNAL 판단용 (안 보이는 탭이어도 기록)
   for (QLabel *l : streams_.value(stream))
     if (l->isVisible())
       showImage(l, img);
@@ -1600,4 +1609,209 @@ void MainWindow::setupWhiteModeBox()
   }
 
   ui->gridLayout_3->addWidget(box, 2, 0);
+}
+
+// ───────── 주행 탭 아래: 노드 로그 / 시간·수신 디버그 / NO SIGNAL ─────────
+
+QWidget *MainWindow::makeLogPanel()
+{
+  auto *box = new QGroupBox("노드 로그 (/rosout)");
+  auto *vl = new QVBoxLayout(box);
+  vl->setContentsMargins(4, 4, 4, 4);
+  vl->setSpacing(2);
+
+  auto *row = new QHBoxLayout;
+  log_all_ = new QCheckBox("path·drive도", box);
+  log_all_->setToolTip("끄면 brain_node 로그만. 켜면 path_node(정지선 찾음 등)·drive_node 로그도");
+  log_all_->setFocusPolicy(Qt::NoFocus);
+  log_all_->setChecked(QSettings("tb_gui", "tb_gui").value("log_all", false).toBool());
+  connect(log_all_, &QCheckBox::toggled, this, [](bool on) { QSettings("tb_gui", "tb_gui").setValue("log_all", on); });
+  auto *btn_clear = new QPushButton("지우기", box);
+  btn_clear->setFocusPolicy(Qt::NoFocus);
+  row->addWidget(new QLabel("시각: 로그 찍은 쪽 unix 시간 (로봇 시계)", box));
+  row->addStretch(1);
+  row->addWidget(log_all_);
+  row->addWidget(btn_clear);
+  vl->addLayout(row);
+
+  log_view_ = new QPlainTextEdit(box);
+  log_view_->setReadOnly(true);
+  log_view_->setFocusPolicy(Qt::NoFocus); // View 탭 키 조작을 뺏지 않게
+  log_view_->setMaximumBlockCount(2000);
+  log_view_->setLineWrapMode(QPlainTextEdit::NoWrap);
+  QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+  mono.setStyleHint(QFont::TypeWriter); // 고정폭 글꼴이 없으면 비슷한 것으로
+  mono.setPointSizeF(std::max(7.0, mono.pointSizeF() - 1.0));
+  log_view_->setFont(mono);
+  log_view_->setStyleSheet("QPlainTextEdit { background: #1b1b1f; color: #e0e0e0; }"); // 밝은 테마에서도 색이 보이게
+  log_view_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+  vl->addWidget(log_view_, 1);
+
+  connect(btn_clear, &QPushButton::clicked, log_view_, &QPlainTextEdit::clear);
+  connect(qnode, &QNode::nodeLogReceived, this, &MainWindow::appendNodeLog);
+  return box;
+}
+
+void MainWindow::appendNodeLog(const QString &node, int level, qint64 stamp_ns, const QString &text)
+{
+  if (!log_view_ || (node != "brain_node" && !log_all_->isChecked()))
+    return;
+  // rcl_interfaces/Log: DEBUG 10, INFO 20, WARN 30, ERROR 40, FATAL 50
+  const char *color = level >= 40 ? "#ff6b6b" : level >= 30 ? "#f5a623" : node == "brain_node" ? "#e0e0e0" : "#9ab";
+  const QDateTime dt = QDateTime::fromMSecsSinceEpoch(stamp_ns / 1000000);
+  const QString line = QString("%1.%2 %3 %4 │ %5")
+                           .arg(stamp_ns / 1000000000)
+                           .arg((stamp_ns / 1000000) % 1000, 3, 10, QChar('0'))
+                           .arg(dt.toString("HH:mm:ss.zzz"))
+                           .arg(node.left(node.indexOf('_')).leftJustified(5))
+                           .arg(text);
+  QScrollBar *sb = log_view_->verticalScrollBar();
+  const bool at_bottom = sb->value() >= sb->maximum() - 2;
+  const int keep = sb->value();
+  log_view_->appendHtml(QString("<span style=\"color:%1; white-space:pre;\">%2</span>").arg(color, line.toHtmlEscaped()));
+  if (at_bottom)
+    sb->setValue(sb->maximum()); // 맨 아래 보고 있을 때만 따라감 (위로 올려 읽는 중이면 그대로)
+  else
+    sb->setValue(keep);
+}
+
+QWidget *MainWindow::makeDebugPanel()
+{
+  auto *box = new QGroupBox("시간·수신 (디버그)");
+  auto *vl = new QVBoxLayout(box);
+  vl->setContentsMargins(4, 4, 4, 4);
+  vl->setSpacing(2);
+
+  auto *row = new QHBoxLayout;
+  row->addWidget(new QLabel("영상이 이만큼 안 오면 NO SIGNAL", box));
+  spin_nosignal_ = new QDoubleSpinBox(box);
+  spin_nosignal_->setRange(0.2, 30.0);
+  spin_nosignal_->setSingleStep(0.5);
+  spin_nosignal_->setDecimals(1);
+  spin_nosignal_->setSuffix(" s");
+  spin_nosignal_->setValue(QSettings("tb_gui", "tb_gui").value("nosignal_s", 1.0).toDouble());
+  spin_nosignal_->setKeyboardTracking(false);
+  connect(spin_nosignal_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+          [](double v) { QSettings("tb_gui", "tb_gui").setValue("nosignal_s", v); });
+  row->addWidget(spin_nosignal_);
+  row->addStretch(1);
+  vl->addLayout(row);
+
+  label_debug_ = new QLabel(box);
+  label_debug_->setTextFormat(Qt::PlainText);
+  label_debug_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+  label_debug_->setTextInteractionFlags(Qt::TextSelectableByMouse); // 값 복사용
+  QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+  mono.setStyleHint(QFont::TypeWriter);
+  mono.setPointSizeF(std::max(7.0, mono.pointSizeF() - 1.0));
+  label_debug_->setFont(mono);
+  label_debug_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+  vl->addWidget(label_debug_, 1);
+
+  clock_.start();
+  debug_timer_.setInterval(200);
+  connect(&debug_timer_, &QTimer::timeout, this, &MainWindow::updateDebug);
+  debug_timer_.start();
+  return box;
+}
+
+void MainWindow::updateDebug()
+{
+  // ====== NO SIGNAL: 영상마다 마지막 프레임이 기준보다 오래되면 (한 번도 안 왔으면 바로)
+  const double thr = spin_nosignal_ ? spin_nosignal_->value() : 1.0;
+  const qint64 now_ms = clock_.elapsed();
+  for (auto it = streams_.begin(); it != streams_.end(); ++it)
+  {
+    const bool seen = stream_ms_.contains(it.key());
+    const double age = seen ? (now_ms - stream_ms_.value(it.key())) / 1000.0 : -1.0;
+    if (seen && age <= thr)
+      continue;
+    for (QLabel *l : it.value())
+      if (l->isVisible())
+        drawNoSignal(l, it.key(), age);
+  }
+
+  // ====== 시간·수신 표
+  if (!label_debug_ || !label_debug_->isVisible())
+    return;
+  const qint64 unix_ms = QDateTime::currentMSecsSinceEpoch();
+  QString t;
+  t += QString("PC  unix %1.%2  %3\n")
+           .arg(unix_ms / 1000)
+           .arg(unix_ms % 1000, 3, 10, QChar('0'))
+           .arg(QDateTime::fromMSecsSinceEpoch(unix_ms).toString("yyyy-MM-dd HH:mm:ss.zzz"));
+  t += QString("ROS now  %1   GUI uptime %2 s\n\n")
+           .arg(qnode->rosNowSec(), 0, 'f', 3)
+           .arg(now_ms / 1000.0, 0, 'f', 1);
+
+  struct Row
+  {
+    const char *key, *name;
+  };
+  static const Row rows[] = {
+      {"/camera/image_raw/compressed", "camera"},
+      {"/signs/debug/compressed", "yolo img"},
+      {"/signs/detections", "detections"},
+      {"/lane/debug/skel/compressed", "skel img"},
+      {"/lane/debug/mask/compressed", "mask img"},
+      {"/lane/path", "lane/path"},
+      {"/drive/state", "drive/state"},
+      {"/rosout brain_node", "log brain"},
+      {"/rosout path_node", "log path"},
+      {"/rosout drive_node", "log drive"},
+  };
+  t += QString("%1 %2 %3 %4\n").arg("topic", -12).arg("last", 8).arg("Hz", 6).arg("stamp lag", 11);
+  const auto rx = qnode->rxSnapshot();
+  for (const Row &r : rows)
+  {
+    const auto it = rx.find(r.key);
+    if (it == rx.end())
+    {
+      t += QString("%1 %2\n").arg(r.name, -12).arg("-", 8);
+      continue;
+    }
+    const QNode::RxInfo &i = it.value();
+    const QString age = i.age_s < 10.0 ? QString::number(i.age_s, 'f', 2) + "s" : QString::number(i.age_s, 'f', 0) + "s";
+    const QString lag = i.has_stamp ? QString::number(i.lat_ms, 'f', 0) + " ms" : QString("-");
+    t += QString("%1 %2 %3 %4%5\n")
+             .arg(r.name, -12)
+             .arg(age, 8)
+             .arg(i.hz, 6, 'f', 1)
+             .arg(lag, 11)
+             .arg(i.age_s > thr ? "  ← 끊김" : "");
+  }
+  t += "\nstamp lag = 받은 시각(PC) - 메시지 stamp(로봇). 로봇·PC 시계 차이 포함 (음수면 PC 시계가 느림)";
+  label_debug_->setText(t);
+}
+
+void MainWindow::drawNoSignal(QLabel *label, const QString &stream, double age_s)
+{
+  const QSize sz = label->size();
+  if (sz.width() < 8 || sz.height() < 8)
+    return;
+  QPixmap pm(sz);
+  pm.fill(QColor(24, 24, 28));
+  QPainter p(&pm);
+  p.setRenderHint(QPainter::Antialiasing);
+  // 가는 테두리 + 가운데 글자
+  p.setPen(QPen(QColor(200, 60, 60), 2));
+  p.drawRect(pm.rect().adjusted(1, 1, -2, -2));
+  QFont f = p.font();
+  f.setBold(true);
+  f.setPixelSize(std::max(12, std::min(sz.width() / 8, sz.height() / 5)));
+  p.setFont(f);
+  p.setPen(QColor(220, 220, 220));
+  QRect top = pm.rect();
+  top.setBottom(sz.height() / 2 + f.pixelSize() / 2);
+  p.drawText(top, Qt::AlignHCenter | Qt::AlignBottom, "NO SIGNAL");
+  f.setBold(false);
+  f.setPixelSize(std::max(10, f.pixelSize() / 3));
+  p.setFont(f);
+  p.setPen(QColor(150, 150, 150));
+  QRect bottom = pm.rect();
+  bottom.setTop(sz.height() / 2 + f.pixelSize() * 3);
+  p.drawText(bottom, Qt::AlignHCenter | Qt::AlignTop,
+             age_s < 0 ? stream + " · 수신 없음" : QString("%1 · 마지막 %2 s 전").arg(stream).arg(age_s, 0, 'f', 1));
+  p.end();
+  label->setPixmap(pm);
 }

@@ -16,6 +16,9 @@
 #include <QRadioButton>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QPlainTextEdit>
+#include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QGridLayout>
@@ -55,6 +58,20 @@ private:
   QTabWidget *display_tabs_ = nullptr;
   QMap<QString, QList<QLabel *>> streams_;               // "usb", "mask", "bev", "roi", "skel" → 라벨들
   void queueParam(const QString &name, int v); // 50ms 묶음 전송
+
+  // 주행 탭 아래: 노드 로그(/rosout) + 시간·수신 디버그, 영상 NO SIGNAL
+  QWidget *makeLogPanel();
+  QWidget *makeDebugPanel();
+  void appendNodeLog(const QString &node, int level, qint64 stamp_ns, const QString &text);
+  void updateDebug();                                         // 5Hz: 시간 표시 + NO SIGNAL
+  void drawNoSignal(QLabel *label, const QString &stream, double age_s);
+  QPlainTextEdit *log_view_ = nullptr;
+  QCheckBox *log_all_ = nullptr;      // path·drive 로그도 보기
+  QLabel *label_debug_ = nullptr;
+  QDoubleSpinBox *spin_nosignal_ = nullptr;
+  QTimer debug_timer_;
+  QElapsedTimer clock_;               // 영상 마지막 수신 (단조 시간)
+  QMap<QString, qint64> stream_ms_;   // stream → 마지막 프레임 시각 (clock_ ms)
 
   // HSV (대상별)
   struct HsvWidget
