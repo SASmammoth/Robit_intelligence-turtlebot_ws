@@ -229,7 +229,8 @@ std::vector<std::string> QNode::lineParamNames()
   for (const char *t : {"white", "yellow", "red"})
     for (const char *k : {"h_min", "h_max", "s_min", "s_max", "v_min", "v_max"})
       names.push_back(std::string(t) + "." + k);
-  for (const char *n : {"morph.open", "morph.close", "morph.min_area",
+  for (const char *n : {"white.mode", "white.bg_px", "white.contrast", "white.v_floor",
+                        "morph.open", "morph.close", "morph.min_area",
                         "bev.top_y", "bev.bot_y", "bev.top_w", "bev.bot_w", "bev.lane_w_px",
                         "geo.lane_w_mm", "geo.bev_depth_mm", "geo.bev_bottom_mm"})
     names.push_back(n);

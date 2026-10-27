@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QRadioButton>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QGridLayout>
@@ -72,9 +73,11 @@ private:
     QSlider *slider = nullptr;
     QLabel *label = nullptr;
     QSpinBox *spin = nullptr;
+    QComboBox *combo = nullptr; // itemData = 파라미터 값
   };
   void applyGlobalParam(const QString &name, int v);
   QMap<QString, GlobalWidget> global_widgets_;
+  void setupWhiteModeBox(); // Tab 1: 흰색 판단 방식 (HSV 절대 / 주변 대비)
 
   // 상태 표시
   void showPathSource(const QString &src);

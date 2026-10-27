@@ -57,11 +57,22 @@ private:
     void reload_params();
     void update_bev_matrix(const cv::Size &img_size);
     cv::Mat make_mask(const cv::Mat &hsv, Target t) const;
+    cv::Mat make_white_contrast(const cv::Mat &hsv) const; // white.mode=1: 주변 바닥보다 밝은 만큼으로 판단
+    void post_process(cv::Mat &mask) const;                // open → close → 작은 덩어리 제거
     void publish_debug(const rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr &pub,
                        const cv::Mat &img, const std_msgs::msg::Header &header);
 
     // HSV
     std::array<HsvRange, static_cast<size_t>(Target::COUNT)> hsv_ranges_;
+
+    // 흰색 판단 방식 (white.mode)
+    //  0: HSV 절대 밝기 (V >= white.v_min)
+    //  1: 대비 — V - 주변 바닥(white.bg_px 상자 opening) > white.contrast, V >= white.v_floor
+    //     (H·S 범위와 white.v_max는 두 모드 공통)
+    int white_mode_ = 0;
+    int white_bg_px_ = 41;
+    int white_contrast_ = 40;
+    int white_v_floor_ = 120;
 
     // 모폴로지
     int morph_open_ = 3;

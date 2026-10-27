@@ -124,6 +124,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
       queueParam(name, v); });
   }
 
+  setupWhiteModeBox();
+
   // 50ms마다 모아서 전송 (드래그 중 요청 폭주 방지)
   send_timer_.setSingleShot(true);
   send_timer_.setInterval(50);
@@ -1395,6 +1397,16 @@ void MainWindow::queueParam(const QString &name, int v)
 void MainWindow::applyGlobalParam(const QString &name, int v)
 {
   const GlobalWidget &w = global_widgets_[name];
+  if (w.combo)
+  {
+    const int i = w.combo->findData(v);
+    if (i >= 0 && i != w.combo->currentIndex())
+    {
+      QSignalBlocker block(w.combo);
+      w.combo->setCurrentIndex(i);
+    }
+    return;
+  }
   if (w.slider && !w.slider->isSliderDown())
   {
     QSignalBlocker block(w.slider);
@@ -1466,4 +1478,73 @@ MainWindow::~MainWindow()
 {
   delete qnode;
   delete ui;
+}
+// ───────── Tab 1: 흰색 판단 방식 ─────────
+// white.mode 0: HSV 절대 밝기 (위 Value Low 이상)
+// white.mode 1: 대비 — 주변 바닥 밝기(배경 상자로 opening)보다 '대비'만큼 밝고 'V 바닥' 이상이면 흰선
+//               H·S 범위와 Value High는 두 모드 공통, Value Low는 대비 모드에서 안 씀
+void MainWindow::setupWhiteModeBox()
+{
+  auto *box = new QGroupBox("흰색 판단 방식 (lineDetect_node)", ui->tab);
+  auto *g = new QGridLayout(box);
+
+  auto *combo = new QComboBox(box);
+  combo->addItem("HSV 절대 밝기 (Value Low 이상)", 0);
+  combo->addItem("대비 (주변 바닥보다 밝은 만큼)", 1);
+  combo->setToolTip("대비: 빛반사가 넓게 퍼진 곳·조명이 어두운 곳에서도 같은 값으로 잡힘\n"
+                    "H·S 범위와 Value High는 두 모드 공통, Value Low는 대비 모드에서 안 씀");
+  g->addWidget(new QLabel("모드", box), 0, 0);
+  g->addWidget(combo, 0, 1, 1, 2);
+  global_widgets_["white.mode"].combo = combo;
+  connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, combo](int)
+          { queueParam("white.mode", combo->currentData().toInt()); });
+
+  struct Def
+  {
+    const char *name, *text, *tip;
+    int min, max;
+    bool odd;
+  };
+  const Def defs[] = {
+      {"white.bg_px", "배경 상자(px)", "주변 바닥 밝기를 구할 상자 크기 (홀수). 선 폭(약 13px)의 3배쯤.\n"
+                                       "이보다 넓은 반사 덩어리는 빠지고, 너무 크면 위치별 밝기 차이를 못 따라감",
+       3, 151, true},
+      {"white.contrast", "대비", "주변 바닥보다 이만큼 이상 밝아야 흰선.\n올리면 반사·잡티 감소, 내리면 어두운 곳 선이 잘 잡힘",
+       0, 255, false},
+      {"white.v_floor", "V 바닥", "대비 모드에서 이보다 어두운 픽셀은 무시 (어두운 바닥의 잡티 방지)", 0, 255, false},
+  };
+  int row = 1;
+  for (const Def &d : defs)
+  {
+    const QString name = d.name;
+    const bool odd = d.odd;
+    auto *text = new QLabel(d.text, box);
+    auto *slider = new QSlider(Qt::Horizontal, box);
+    auto *value = new QLabel("000", box);
+    value->setMinimumWidth(40);
+    slider->setRange(d.min, d.max);
+    slider->setSingleStep(odd ? 2 : 1);
+    slider->setPageStep(odd ? 10 : 10);
+    text->setToolTip(d.tip);
+    slider->setToolTip(d.tip);
+    g->addWidget(text, row, 0);
+    g->addWidget(slider, row, 1);
+    g->addWidget(value, row, 2);
+    g->setColumnStretch(1, 1);
+    ++row;
+    global_widgets_[name] = {slider, value, nullptr};
+
+    connect(slider, &QSlider::valueChanged, this, [this, name, slider, value, odd](int v)
+            {
+      if (odd && v % 2 == 0)
+      {
+        v = std::min(v + 1, slider->maximum());
+        QSignalBlocker block(slider);
+        slider->setValue(v);
+      }
+      value->setNum(v);
+      queueParam(name, v); });
+  }
+
+  ui->gridLayout_3->addWidget(box, 2, 0);
 }
