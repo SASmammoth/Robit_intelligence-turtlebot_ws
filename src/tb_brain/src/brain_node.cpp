@@ -55,10 +55,11 @@
 //   1. /mission/turn = 1(left)을 time_enter초 동안 → pause 1
 //   2. 다음에 받은 brick 박스 중심이 x 320보다 왼쪽이면 brick_pos left(crit psd_L), 아니면 right(crit psd_R)
 //   3. TB_Uart_RX "psd period 100", "velocity move_vel move_vel"
-//      brick_pos 쪽 PSD(left: psd1, right: psd2)가 crit 초과 → velocity 0 0
-//   4. 0.5초 뒤 제자리 회전 (left: -turn_vel turn_vel, right: turn_vel -turn_vel), psd0 > psd_F → 0 0
+//      brick_pos 쪽 PSD(left: psd1, right: psd2)가 crit 초과 → 0.5초 더 간 뒤 velocity 0 0
+//   4. 0.5초 뒤 제자리 회전 (left: -turn_vel turn_vel, right: turn_vel -turn_vel), turn_deg만큼 도는 시간 뒤 → 0 0
+//      회전 시간 = turn_deg / (2v / PIVOT_SEP_M), v = turn_vel 원시값 → m/s (psd_F는 안 씀, GUI용으로 선언만 유지)
 //   5. dist_mm 후진 → 0 0 → parking_pause초 대기 → dist_mm 직진 → 0 0
-//   6. 같은 방향 제자리 회전, left: psd2 > psd_R / right: psd1 > psd_L → 0 0
+//   6. 같은 방향 제자리 회전, turn_deg만큼 도는 시간 뒤 → 0 0
 //   7. pause 0, /mission/turn = 1을 time_exit초 동안
 //   PSD는 TB_Uart_TX "psd <0> <1> <2>" (tb_uart: F L R 순서). 주차 중에는 다른 표지판 무시
 //   거리는 TB_Uart_TX "velocity L R" 피드백(33ms)을 적분: 원시값 → m/s는 tb_drive publish_uart의 역
@@ -126,9 +127,11 @@ static constexpr uint8_t TURN_RIGHT = 2;
 
 // ====== 주차
 static constexpr int IMG_CX = 320;                // 화면 가운데 x (640x480)
+static constexpr double PARK_APPROACH_EXTRA_S = 0.5; // 접근 PSD 기준을 넘은 뒤 이만큼 더 가고 정지
 static constexpr double PARK_STOP_S = 0.5;        // PSD로 멈춘 뒤 회전 전 정지 시간
 static constexpr double WHEEL_RADIUS_M = 0.0475;  // tb_drive drive.uart.wheel_radius_m
 static constexpr double RPM_PER_UNIT = 0.43;      // tb_drive drive.uart.rpm_per_unit (실측 보정값. 0.229면 거리를 약 1.9배 짧게 잼)
+static constexpr double PIVOT_SEP_M = 0.165;      // tb_drive drive.uart.pivot_sep_m (제자리 회전 실측 간격, 바퀴 사이 실제 193.4mm)
 static constexpr double PARK_SETTLE_S = 1.0;      // pause 뒤 tb_drive가 감속을 끝내고 UART를 놓을 때까지 기다림
 static constexpr double VEL_FB_TIMEOUT_S = 0.3;   // velocity 피드백이 이만큼 없으면 보낸 명령 × 시간으로 거리 계산
 
@@ -154,6 +157,7 @@ public:
         declare_int("mission.parking.psd_R", 2500, 0, 65535);    // brick right: 접근 정지 기준 / left: 나올 때 회전 정지 기준
         declare_int("mission.parking.psd_F", 3000, 0, 65535);    // 들어갈 때 회전 정지 기준 (psd0)
         declare_int("mission.parking.turn_vel", 70, 0, 1000);    // 제자리 회전 속도 (원시값)
+        declare_int("mission.parking.turn_deg", 90, 0, 360);     // 제자리 회전 각도 (들어갈 때·나올 때)
         declare_int("mission.parking.move_vel", 70, 1, 1000);    // 전진·후진 속도 (원시값)
         declare_int("mission.parking.dist_mm", 180, 0, 2000);    // 후진·직진 거리
         declare_int("mission.parking_pause", 1, 0, 60);          // [s] 주차: 후진 뒤 정지 시간
@@ -378,6 +382,7 @@ private:
         park_psd_r_ = ms("mission.parking.psd_R");
         park_psd_f_ = ms("mission.parking.psd_F");
         park_turn_vel_ = ms("mission.parking.turn_vel");
+        park_turn_deg_ = ms("mission.parking.turn_deg");
         park_move_vel_ = ms("mission.parking.move_vel");
         park_dist_mm_ = ms("mission.parking.dist_mm");
         park_pause_s_ = ms("mission.parking_pause");
@@ -609,6 +614,11 @@ private:
         case Park::Approach:
             if (!psd_new || psd_[brick_left_ ? 1 : 2] <= park_crit_)
                 return;
+            park_next(Park::ApproachExtra, t); // 그대로 진행, 0.5초 뒤 정지
+            break;
+        case Park::ApproachExtra:
+            if (el < PARK_APPROACH_EXTRA_S)
+                return;
             send_velocity(0, 0);
             park_next(Park::Stop, t);
             break;
@@ -619,7 +629,7 @@ private:
             park_next(Park::TurnIn, t);
             break;
         case Park::TurnIn:
-            if (!psd_new || psd_[0] <= park_psd_f_)
+            if (el < pivot_time_s())
                 return;
             send_velocity(0, 0);
             send_velocity(-park_move_vel_, -park_move_vel_);
@@ -645,7 +655,7 @@ private:
             park_next(Park::TurnOut, t);
             break;
         case Park::TurnOut:
-            if (!psd_new || (brick_left_ ? psd_[2] <= park_psd_r_ : psd_[1] <= park_psd_l_))
+            if (el < pivot_time_s())
                 return;
             send_velocity(0, 0);
             publish_bool(pause_pub_, false);
@@ -659,12 +669,19 @@ private:
         }
     }
 
-    enum class Park { Idle, Enter, WaitBrick, Approach, Stop, TurnIn, Back, Hold, Forward, TurnOut };
+    enum class Park { Idle, Enter, WaitBrick, Approach, ApproachExtra, Stop, TurnIn, Back, Hold, Forward, TurnOut };
     static const char *park_name(Park p)
     {
-        static const char *const n[] = {"idle", "enter", "wait_brick", "approach", "stop",
+        static const char *const n[] = {"idle", "enter", "wait_brick", "approach", "approach_extra", "stop",
                                         "turn_in", "back", "hold", "forward", "turn_out"};
         return n[int(p)];
+    }
+
+    // 제자리 회전 시간 [s]: turn_vel(원시값) → 바퀴 선속도 v [m/s], 각속도 = 2v / 바퀴 간격
+    double pivot_time_s() const
+    {
+        const double v = park_turn_vel_ * RPM_PER_UNIT * 2.0 * M_PI * WHEEL_RADIUS_M / 60.0;
+        return v > 0.0 ? park_turn_deg_ * M_PI / 180.0 * PIVOT_SEP_M / (2.0 * v) : 0.0;
     }
 
     void park_next(Park p, const rclcpp::Time &t)
@@ -775,6 +792,7 @@ private:
     int park_time_enter_ = 4, park_time_exit_ = 6, park_pause_s_ = 1; // [s]
     int park_psd_l_ = 2000, park_psd_r_ = 2500, park_psd_f_ = 3000;
     int park_turn_vel_ = 70, park_move_vel_ = 70, park_dist_mm_ = 180;
+    int park_turn_deg_ = 90;
     Park park_ = Park::Idle;
     rclcpp::Time park_t_{0, 0, RCL_ROS_TIME}; // 지금 단계 시작 시각
     bool brick_left_ = true;                  // brick_pos (true: left)
