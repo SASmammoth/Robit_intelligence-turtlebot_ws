@@ -63,6 +63,8 @@
 //   PSD는 TB_Uart_TX "psd <0> <1> <2>" (tb_uart: F L R 순서). 주차 중에는 다른 표지판 무시
 //   거리는 TB_Uart_TX "velocity L R" 피드백(33ms)을 적분: 원시값 → m/s는 tb_drive publish_uart의 역
 //   (피드백에는 direction 부호가 안 곱해져 있으므로 |L|, |R| 평균. 방향은 보낸 명령으로 앎)
+//   피드백이 0.3초 넘게 안 오면 보낸 명령 값 × 시간으로 계산
+//   tb_drive는 pause로 멈춘 뒤 UART를 보내지 않음 (안 그러면 brain 명령을 0으로 덮어씀)
 //   parking_pause는 GUI가 읽는 mission.parking_pause [s]
 //
 // 파라미터는 모두 정수 (GUI 스핀박스, Save 파일의 /brain_node 항목)
@@ -126,7 +128,9 @@ static constexpr uint8_t TURN_RIGHT = 2;
 static constexpr int IMG_CX = 320;                // 화면 가운데 x (640x480)
 static constexpr double PARK_STOP_S = 0.5;        // PSD로 멈춘 뒤 회전 전 정지 시간
 static constexpr double WHEEL_RADIUS_M = 0.0475;  // tb_drive drive.uart.wheel_radius_m
-static constexpr double RPM_PER_UNIT = 0.229;     // tb_drive drive.uart.rpm_per_unit (MX-64 Goal Velocity 단위)
+static constexpr double RPM_PER_UNIT = 0.43;      // tb_drive drive.uart.rpm_per_unit (실측 보정값. 0.229면 거리를 약 1.9배 짧게 잼)
+static constexpr double PARK_SETTLE_S = 1.0;      // pause 뒤 tb_drive가 감속을 끝내고 UART를 놓을 때까지 기다림
+static constexpr double VEL_FB_TIMEOUT_S = 0.3;   // velocity 피드백이 이만큼 없으면 보낸 명령 × 시간으로 거리 계산
 
 class BrainNode : public rclcpp::Node
 {
@@ -223,9 +227,7 @@ private:
             {
                 // 주차 중이면 brain이 직접 돌리던 모터를 세우고 drive에 넘겨줌
                 RCLCPP_WARN(get_logger(), "run: stop → 주차 중단");
-                send_velocity(0, 0);
-                publish_bool(pause_pub_, false);
-                park_ = Park::Idle;
+                abort_parking();
             }
             run_state_ = 0;
             // 다시 start 했을 때 이전 상태가 이어지지 않게
@@ -253,9 +255,22 @@ private:
         stop_line_on_ = false;
     }
 
+    // 주차 중단: 모터 0, pause 풀기 (run_state와 상관없이)
+    void abort_parking()
+    {
+        send_velocity(0, 0);
+        publish_now(pause_pub_, false);
+        park_ = Park::Idle;
+    }
+
     // /mission/reset: 상태를 지우고 중립 값을 한 번 보냄 (run_state 0이어도 보냄: 남아 있는 값 풀기)
     void on_reset()
     {
+        if (park_ != Park::Idle)
+        {
+            RCLCPP_WARN(get_logger(), "reset: 주차 중단");
+            abort_parking();
+        }
         clear_state();
         publish_now(turn_pub_, TURN_NONE);
         publish_now(construction_pub_, false);
@@ -525,6 +540,7 @@ private:
                 const double dt = std::clamp((t - vel_t_).seconds(), 0.0, 0.1);
                 const double raw = (std::abs(p[0]) + std::abs(p[1])) / 2.0;
                 park_dist_ += raw * RPM_PER_UNIT * 2.0 * M_PI * WHEEL_RADIUS_M / 60.0 * dt;
+                vel_fb_ = true;
             }
             vel_t_ = t;
         }
@@ -544,12 +560,16 @@ private:
                 best = &d;
         if (!best)
             return;
+        // pause 직후에는 tb_drive가 아직 감속 중이라 brain 명령을 덮어씀 → 멈춘 뒤에 시작
+        if ((now - park_t_).seconds() < PARK_SETTLE_S)
+            return;
         const double cx = best->x + best->w / 2.0;
         brick_left_ = cx < IMG_CX;
         park_crit_ = brick_left_ ? park_psd_l_ : park_psd_r_;
         RCLCPP_INFO(get_logger(), "parking: brick x %.0f → brick_pos %s (crit %d)", cx,
                     brick_left_ ? "left" : "right", park_crit_);
         send_uart("psd period 100");
+        send_uart("velocity period 33"); // 직진·후진 거리용 피드백 (안 오면 시간으로 계산)
         send_velocity(park_move_vel_, park_move_vel_);
         park_next(Park::Approach, now);
     }
@@ -559,6 +579,18 @@ private:
         if (park_ == Park::Idle || run_state_ != 1)
             return;
         const double el = (t - park_t_).seconds();
+        // 직진·후진 중 velocity 피드백이 끊기면 보낸 명령 × 시간으로 거리 (피드백이 안 오면 영원히 안 끝나는 것 방지)
+        if ((park_ == Park::Back || park_ == Park::Forward) && (t - vel_t_).seconds() > VEL_FB_TIMEOUT_S)
+        {
+            const double dt = std::clamp((t - vel_t_).seconds(), 0.0, 0.5); // 끊긴 동안 전체
+            if (!vel_fb_warned_)
+            {
+                RCLCPP_WARN(get_logger(), "parking: velocity 피드백 없음 → 명령 값 × 시간으로 거리 계산");
+                vel_fb_warned_ = true;
+            }
+            park_dist_ += park_move_vel_ * RPM_PER_UNIT * 2.0 * M_PI * WHEEL_RADIUS_M / 60.0 * dt;
+            vel_t_ = t;
+        }
         // 이 단계에 들어온 뒤 받은 PSD만 씀 (예전 값으로 바로 넘어가지 않게)
         const bool psd_new = psd_t_ > park_t_;
         const int tv = brick_left_ ? -park_turn_vel_ : park_turn_vel_; // left: 왼쪽 바퀴 뒤로
@@ -642,6 +674,7 @@ private:
         park_t_ = t;
         park_dist_ = 0.0;
         vel_t_ = t;
+        vel_fb_ = false;
     }
 
     void send_velocity(int l, int r)
@@ -750,6 +783,8 @@ private:
     rclcpp::Time psd_t_{0, 0, RCL_ROS_TIME};
     double park_dist_ = 0.0;                  // [m] 이번 단계에서 velocity 피드백으로 잰 이동 거리
     rclcpp::Time vel_t_{0, 0, RCL_ROS_TIME};  // 마지막 velocity 피드백 (적분 구간 시작)
+    bool vel_fb_ = false;                     // 이번 단계에서 velocity 피드백을 받았는지
+    bool vel_fb_warned_ = false;
 
     int confirm_frames_ = 2;
     double min_score_ = 0.0;

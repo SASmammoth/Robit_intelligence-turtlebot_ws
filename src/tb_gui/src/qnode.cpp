@@ -214,6 +214,9 @@ std::vector<std::string> QNode::brainParamNames()
   std::vector<std::string> names = {"mission.turn_ms", "mission.rearm_ms", "mission.parking_pause",
                                     "mission.barrier_release_ms", "mission.con_end_mode", "mission.con_hold_ms",
                                     "mission.con_once", "mission.start_follow", "mission.stop_line",
+                                    "mission.parking.time_enter", "mission.parking.time_exit", "mission.parking.psd_L",
+                                    "mission.parking.psd_R", "mission.parking.psd_F", "mission.parking.turn_vel",
+                                    "mission.parking.move_vel", "mission.parking.dist_mm",
                                     "sign.confirm_frames", "sign.min_score_pct"};
   for (const char *l : {"barrier_closed", "barrier_open", "construction", "left", "right", "parking", "tl_green"})
   {

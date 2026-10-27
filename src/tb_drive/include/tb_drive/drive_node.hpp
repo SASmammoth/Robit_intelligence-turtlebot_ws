@@ -107,4 +107,5 @@ private:
     long uart_l_ = 0, uart_r_ = 0;
     double uart_t_ = -1.0;
     bool uart_send_zero_ = false;
+    bool pause_quiet_ = false; // pause로 멈춘 뒤 UART를 안 보내는 중 (brain 주차가 직접 모터 제어)
 };

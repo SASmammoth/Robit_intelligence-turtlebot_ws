@@ -398,8 +398,23 @@ void DriveNode::on_timer()
 
     publish_cmd(lim_.v, lim_.w);
     follower_.record(t, lim_.v, lim_.w);
-    if (enable_)
+    // /mission/pause로 완전히 멈춘 뒤에는 0을 한 번 보내고 조용히 (그동안 tb_brain 주차가 모터를 직접 돌림.
+    // 계속 0을 보내면 brain의 "velocity L R"을 0.2초마다 덮어써서 주차 동작이 안 됨)
+    const bool stopped = std::abs(lim_.v) < 1e-4 && std::abs(lim_.w) < 1e-4;
+    if (enable_ && paused_ && stopped)
+    {
+        if (!pause_quiet_)
+        {
+            publish_uart(0.0, 0.0, t, true);
+            pause_quiet_ = true;
+            RCLCPP_INFO(get_logger(), "pause: 정지 완료 → UART 보내지 않음 (brain이 모터 사용 가능)");
+        }
+    }
+    else if (enable_)
+    {
+        pause_quiet_ = false;
         publish_uart(lim_.v, lim_.w, t, false);
+    }
     else if (uart_send_zero_)
     {
         publish_uart(0.0, 0.0, t, true);
