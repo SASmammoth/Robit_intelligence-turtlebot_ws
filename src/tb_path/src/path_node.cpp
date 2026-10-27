@@ -9,6 +9,7 @@ namespace {
 // tb_line 라벨 값
 constexpr uint8_t LABEL_WHITE = 1;
 constexpr uint8_t LABEL_YELLOW = 2;
+constexpr uint8_t LABEL_RED = 250;
 constexpr uint8_t LABEL_BLIND = 255;
 } // namespace
 
@@ -36,6 +37,17 @@ PathNode::PathNode() : Node("path_node")
             if (m->data != parking_)
                 RCLCPP_INFO(get_logger(), "parking: %d", m->data);
             parking_ = m->data; });
+
+    // 정지선 모드 (tb_brain이 빨간불 등에서 켬). 켜져 있는 동안 빨간 가로선 앞에서 경로를 자름
+    // true → false가 오면 끄고 기억한 정지선도 지움. 켤 때도 새로 찾음
+    stop_line_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "/mission/stop_line", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+        {
+            if (m->data == stop_line_)
+                return;
+            RCLCPP_INFO(get_logger(), "stop_line: %s", m->data ? "켬" : "끔");
+            stop_line_ = m->data;
+            sl_have_ = false; });
 
     odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
         "/odom", 10, [this](const nav_msgs::msg::Odometry::ConstSharedPtr m)
@@ -115,6 +127,9 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_offscreen_side", 1, 1);     // 공사 구간: 화면 옆 끝까지 간 벽돌은 화면 밖 선에 붙은 것 (반대쪽 선 틈은 막지 않음)
     declare_int("path.con_cross_override_frames", 15, 100); // 공사 구간: 새 경로가 기억과 차선 너머에 있으면 이만큼 연속으로 보여야 믿음 (0 끔)
     declare_int("path.con_straight_by_lane", 1, 1);   // 공사 구간: 직진 갈림길에서 차선 방향 기준으로 가장 곧은 가지 (화면 밖 선에 붙은 벽돌 앞으로 새지 않게)
+    // 정지선 (/mission/stop_line true 동안만)
+    declare_int("path.sl_margin_mm", 60, 500);  // 경로 끝 = 정지선 - 이만큼 (바퀴 축 기준. 로봇 앞 9cm + tb_drive stop_dist도 생각)
+    declare_int("path.sl_min_w_px", 60, 320);   // BEV 한 줄에 빨강이 이만큼 있어야 정지선 (잡티·옆 빨간 것 거르기)
 
     reload_params();
     skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
@@ -187,6 +202,29 @@ void PathNode::reload_params()
     con_cross_override_frames_ = int(get_parameter("path.con_cross_override_frames").as_int());
     con_straight_by_lane_ = get_parameter("path.con_straight_by_lane").as_int() != 0;
     con_offscreen_side_ = get_parameter("path.con_offscreen_side").as_int() != 0;
+    sl_margin_mm_ = int(get_parameter("path.sl_margin_mm").as_int());
+    sl_min_w_px_ = int(get_parameter("path.sl_min_w_px").as_int());
+}
+
+// BEV에서 로봇에 가장 가까운 빨간 가로선 → 로봇 기준 거리 [m]. 없으면 false
+// 아래 행부터 올라가며 빨강이 min_w 이상인 첫 행 (그 행 빨강 가운데 열 기준)
+static bool find_stop_line(const cv::Mat &red, int min_w, const lane_path::Geo &g, double &x_m)
+{
+    for (int y = red.rows - 1; y >= 0; --y)
+    {
+        const uchar *r = red.ptr<uchar>(y);
+        int n = 0;
+        long sx = 0;
+        for (int x = 0; x < red.cols; ++x)
+            if (r[x])
+                ++n, sx += x;
+        if (n >= std::max(1, min_w))
+        {
+            x_m = lane_path::bev_to_robot({double(sx) / n, double(y)}, g).x;
+            return true;
+        }
+    }
+    return false;
 }
 
 // 로봇 앞 통로(차선 폭) 안의 각 열에서 처음 만나는 차선 행 → 대부분 열이 막혀 있고 높이가 비슷하면 벽
@@ -285,6 +323,21 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     const cv::Mat white = (label == LABEL_WHITE);
     const cv::Mat yellow = (label == LABEL_YELLOW);
     const cv::Mat valid = (label != LABEL_BLIND);
+
+    // ====== 정지선: 보이면 월드 좌표로 기억 (BEV 아래 사각지대로 들어가 안 보여도 계속 자르게)
+    cv::Mat red;
+    if (stop_line_)
+    {
+        red = (label == LABEL_RED);
+        double xr;
+        if (find_stop_line(red, sl_min_w_px_, geo_, xr))
+        {
+            if (!sl_have_)
+                RCLCPP_INFO(get_logger(), "stop_line: 정지선 찾음 %.2fm", xr);
+            sl_pt_ = {pose_.x + xr * std::cos(pose_.th), pose_.y + xr * std::sin(pose_.th)};
+            sl_have_ = true;
+        }
+    }
 
     // 주차 모드: 노란 점선을 벽에서 빼서 칸 안까지 가지가 뻗게 함
     cv::Mat yellow_wall = yellow;
@@ -499,6 +552,24 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
         con_near_ = near;
     }
 
+    // ====== 정지선: 경로를 정지선 - 여유 앞에서 자름 (fillet·공사 처리 뒤, 점이 새로 생길 수 있어서 마지막에)
+    //   필터가 아니라 처음 넘는 점에서 끊음 (커브로 다시 앞으로 오는 점이 남지 않게)
+    //   다 잘리면 빈 경로 대신 로봇 앞 짧은 경로 → tb_drive가 경로 끝(stop_dist)에서 멈춤
+    //   (빈 경로를 보내면 tb_drive가 hold_ms 동안 직전 경로로 계속 감)
+    sl_cut_x_ = -1.0;
+    if (stop_line_ && sl_have_)
+    {
+        const double x_line = (sl_pt_.x - pose_.x) * std::cos(pose_.th) + (sl_pt_.y - pose_.y) * std::sin(pose_.th);
+        sl_cut_x_ = x_line - sl_margin_mm_ / 1000.0;
+        size_t keep = 0;
+        while (keep < out.path.size() && out.path[keep].x <= sl_cut_x_)
+            ++keep;
+        if (keep < out.path.size())
+            out.path.resize(keep);
+        if (out.path.size() < 2)
+            out.path = {cv::Point2d(0.0, 0.0), cv::Point2d(0.01, 0.0)};
+    }
+
 
     nav_msgs::msg::Path path;
     path.header.stamp = msg->header.stamp;
@@ -546,7 +617,15 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             for (const auto &p : pts)
                 cv::circle(view, p * skel_p_.scale, 1, cv::Scalar(200, 255, 100), -1);
         }
+        if (!red.empty())
+            view.setTo(cv::Scalar(60, 60, 255), red & valid); // 빨간선 (정지선 모드일 때만)
         lane_path::draw_path(view, out, geo_);
+        if (sl_cut_x_ > geo_.bottom_m) // 경로를 자른 줄 (보이는 곳에 있을 때)
+        {
+            const cv::Point2d a = lane_path::robot_to_bev({sl_cut_x_, 0.15}, geo_);
+            const cv::Point2d b = lane_path::robot_to_bev({sl_cut_x_, -0.15}, geo_);
+            cv::line(view, {cvRound(a.x), cvRound(a.y)}, {cvRound(b.x), cvRound(b.y)}, cv::Scalar(0, 0, 255), 2);
+        }
         for (const auto &q : con_near_) // 기억한 벽돌 (주황)
         {
             std::vector<cv::Point> px;
@@ -559,7 +638,7 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
         }
         static const char *turn_txt[] = {"straight", "left", "right"};
         cv::putText(view, std::string(turn_txt[static_cast<int>(turn)]) + (parking_ ? " +park" : "") +
-                              (con_on() ? " +con" : ""),
+                              (con_on() ? " +con" : "") + (stop_line_ ? (sl_have_ ? " +stop" : " +stop?") : ""),
                     {6, label.rows - 8}, cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(255, 255, 255), 1);
         publish_debug(view, msg->header);
     }

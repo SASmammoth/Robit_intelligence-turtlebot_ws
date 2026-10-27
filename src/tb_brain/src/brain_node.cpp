@@ -9,10 +9,14 @@
 //   5 parking           /mission/construction = 0  (mission.parking_pause = 1이면 pause = 1도)
 //   4 left              /mission/turn = 1 을 mission.turn_ms 동안 발행 후 0
 //   6 right             /mission/turn = 2 를 mission.turn_ms 동안 발행 후 0
-//   7 tl_green          /drive/cmd = FOLLOW 를 계속 발행 (stop 받을 때까지)
+//   7 tl_green          /drive/cmd = FOLLOW 를 계속 발행 (stop 받을 때까지), /mission/stop_line = 0
 //   8 tl_off
-//   9 tl_red
-//   10 tl_yellow
+//   9 tl_red            /mission/stop_line = 1  (mission.stop_line = 1일 때)
+//   10 tl_yellow        /mission/stop_line = 1  (mission.stop_line = 1일 때)
+//
+// 정지선 (/mission/stop_line): 켜져 있는 동안 path_node가 빨간 가로선 앞에서 경로를 잘라
+//   tb_drive가 선 앞에서 멈춤. 초록불을 보면 끔. 10Hz로 현재 값을 계속 보냄 (path_node 재시작 대비)
+//   mission.stop_line = 0이면 아예 발행하지 않음
 //
 // /brain/run 으로 "start"를 받아야 동작(run_state 1), "stop"을 받으면 멈춤(run_state 0).
 // run_state 0 동안에는 검출을 무시하고 어떤 토픽도 발행하지 않는다.
@@ -64,6 +68,7 @@ static constexpr const char *TOPIC_DETECTIONS = "/signs/detections";     // 구�
 static constexpr const char *TOPIC_TURN = "/mission/turn";               // 발행 (UInt8: 0 직진, 1 좌, 2 우)
 static constexpr const char *TOPIC_CONSTRUCTION = "/mission/construction"; // 발행 (Bool)
 static constexpr const char *TOPIC_PAUSE = "/mission/pause";             // 발행 (Bool)
+static constexpr const char *TOPIC_STOP_LINE = "/mission/stop_line";     // 발행 (Bool: 정지선 앞에서 경로 자르기)
 static constexpr const char *TOPIC_DRIVE_CMD = "/drive/cmd";             // 발행 (DriveCmd)
 static constexpr const char *TOPIC_RUN = "/brain/run";                   // 구독 (String: "start" / "stop")
 static constexpr const char *TOPIC_INJECT = "/brain/inject";             // 구독 (String: 표지판 이름, 가짜 표지판)
@@ -104,6 +109,7 @@ public:
         declare_int("mission.con_hold_ms", 10000, 0, 120000);   // con_end_mode 1: 진입 후 이만큼 지나면 끝
         declare_int("mission.con_once", 1, 0, 1);               // 1: 진입 후 주차 표지판 전까지 공사 표지판 무시
         declare_int("mission.start_follow", 0, 0, 1);           // 1: start 받자마자 FOLLOW (초록불 안 기다림)
+        declare_int("mission.stop_line", 1, 0, 1);              // 1: 빨간·노란불 → 정지선 앞에서 멈춤, 초록불 → 풂
 
         // 검출 필터
         declare_int("sign.confirm_frames", 2, 1, 30);
@@ -121,6 +127,7 @@ public:
         turn_pub_ = create_publisher<std_msgs::msg::UInt8>(TOPIC_TURN, 10);
         construction_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_CONSTRUCTION, 10);
         pause_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_PAUSE, 10);
+        stop_line_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_STOP_LINE, 10);
         drive_cmd_pub_ = create_publisher<DriveCmd>(TOPIC_DRIVE_CMD, 10);
 
         run_sub_ = create_subscription<std_msgs::msg::String>(
@@ -169,6 +176,13 @@ private:
             con_on_ = false;
             con_latched_ = false;
             barrier_pause_ = false;
+            if (stop_line_on_) // 멈추면 더 발행하지 않으므로 마지막으로 풀어 둠
+            {
+                std_msgs::msg::Bool m;
+                m.data = false;
+                stop_line_pub_->publish(m);
+            }
+            stop_line_on_ = false;
             RCLCPP_INFO(get_logger(), "run: stop → run_state 0");
         }
         else
@@ -182,7 +196,8 @@ private:
     {
         static const std::map<std::string, int> ids = {
             {"barrier_closed", ID_BARRIER_CLOSED}, {"barrier_open", ID_BARRIER_OPEN}, {"construction", ID_CONSTRUCTION},
-            {"left", ID_LEFT}, {"parking", ID_PARKING}, {"right", ID_RIGHT}, {"tl_green", ID_TL_GREEN}};
+            {"left", ID_LEFT}, {"parking", ID_PARKING}, {"right", ID_RIGHT}, {"tl_green", ID_TL_GREEN},
+            {"tl_red", ID_TL_RED}, {"tl_yellow", ID_TL_YELLOW}};
         if (run_state_ != 1)
         {
             RCLCPP_WARN(get_logger(), "inject '%s' 무시: brain 꺼져 있음 (/brain/run start 먼저)", label.c_str());
@@ -206,7 +221,7 @@ private:
 
     // 동작에 쓰는 표지판만 필터 파라미터를 둠 (brick, tl_off/red/yellow는 동작 없음)
     static constexpr const char *FILTER_LABELS[] = {"barrier_closed", "barrier_open", "construction",
-                                                    "left", "right", "parking", "tl_green"};
+                                                    "left", "right", "parking", "tl_green", "tl_red", "tl_yellow"};
 
     void declare_int(const std::string &name, int def, int min, int max)
     {
@@ -230,6 +245,7 @@ private:
         con_hold_ms_ = ms("mission.con_hold_ms");
         con_once_ = ms("mission.con_once") != 0;
         start_follow_ = ms("mission.start_follow") != 0;
+        stop_line_mode_ = ms("mission.stop_line") != 0;
 
         confirm_frames_ = std::max(1, int(get_parameter("sign.confirm_frames").as_int()));
         min_score_ = get_parameter("sign.min_score_pct").as_int() / 100.0;
@@ -326,11 +342,23 @@ private:
             start_turn(TURN_RIGHT, now, "right");
             break;
         case ID_TL_GREEN:
+            if (stop_line_on_)
+            {
+                RCLCPP_INFO(get_logger(), "tl_green → stop_line 0");
+                set_stop_line(false);
+            }
             if (follow_)
                 break;
             RCLCPP_INFO(get_logger(), "tl_green → drive FOLLOW");
             follow_ = true;
             publish_follow();
+            break;
+        case ID_TL_RED:
+        case ID_TL_YELLOW:
+            if (!stop_line_mode_ || stop_line_on_)
+                break;
+            RCLCPP_INFO(get_logger(), "%s → stop_line 1 (정지선 앞에서 멈춤)", id == ID_TL_RED ? "tl_red" : "tl_yellow");
+            set_stop_line(true);
             break;
         default:
             break;
@@ -354,6 +382,8 @@ private:
         // tb_drive는 cmd_timeout_ms 동안 명령이 없으면 버리므로 계속 발행
         if (follow_)
             publish_follow();
+        if (stop_line_mode_)
+            publish_bool(stop_line_pub_, stop_line_on_); // path_node가 재시작돼도 맞게
 
         const rclcpp::Time t = now();
         // 공사 구간: 시간으로 끝내기 (con_end_mode 1)
@@ -383,6 +413,12 @@ private:
         {
             publish_turn(turn_value_);
         }
+    }
+
+    void set_stop_line(bool on)
+    {
+        stop_line_on_ = on;
+        publish_bool(stop_line_pub_, on);
     }
 
     void publish_turn(uint8_t v)
@@ -437,13 +473,15 @@ private:
     int run_state_ = 0;   // 0: 정지(발행 안 함), 1: 동작. /brain/run 으로 변경
     bool follow_ = false; // tl_green 본 뒤 FOLLOW 발행 중
     bool start_follow_ = false;
+    bool stop_line_mode_ = true; // mission.stop_line
+    bool stop_line_on_ = false;  // 정지선 켜 둔 상태 (빨간·노란불 → 1, 초록불 → 0)
 
     uint8_t turn_value_ = TURN_NONE;
     rclcpp::Time turn_end_{0, 0, RCL_ROS_TIME};
     std::map<int, rclcpp::Time> last_seen_; // class_id → 마지막으로 본 시각
 
     rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr turn_pub_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_, pause_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_, pause_pub_, stop_line_pub_;
     rclcpp::Publisher<DriveCmd>::SharedPtr drive_cmd_pub_;
     rclcpp::Subscription<DetectionArray>::SharedPtr det_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr run_sub_, inject_sub_;

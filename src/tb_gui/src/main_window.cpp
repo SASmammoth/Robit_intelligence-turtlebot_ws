@@ -507,7 +507,7 @@ void MainWindow::setupViewTab()
   static const std::pair<const char *, const char *> fake_signs[] = {
       {"tl_green", "초록불 (출발)"}, {"left", "좌회전"}, {"right", "우회전"},
       {"construction", "공사"}, {"parking", "주차"}, {"barrier_closed", "차단바 닫힘"},
-      {"barrier_open", "차단바 열림"}};
+      {"barrier_open", "차단바 열림"}, {"tl_red", "빨간불 (정지선)"}};
   int fi = 0;
   for (const auto &[label, text] : fake_signs)
   {
@@ -854,6 +854,11 @@ void MainWindow::setupParamTab()
            {"path.turn_radius_mm", "교차로 회전 반지름 (0=끔)", " mm", 0, 500, 10},
            {"path.turn_min_deg", "둥글게 할 꺾임", " °", 0, 180, 5},
        }},
+      {"정지선 (path_node) — /mission/stop_line 켜져 있을 때만 (brain: 빨간·노란불 켬, 초록불 끔)",
+       {
+           {"path.sl_margin_mm", "경로 끝 = 빨간선 - (바퀴 축 기준)", " mm", 0, 500, 5},
+           {"path.sl_min_w_px", "한 줄 빨강 최소 폭 (BEV)", " px", 0, 320, 5},
+       }},
       {"공사 구간 (path_node) — 표지판 또는 View 탭 C키",
        {
            {"path.con_brick_depth_mm", "벽돌 벽 앞뒤", " mm", 0, 500, 10},
@@ -885,6 +890,7 @@ void MainWindow::setupParamTab()
            {"mission.parking_pause", "주차 표지판에서 정지 (1=정지)", "", 0, 1, 1},
            {"mission.barrier_release_ms", "차단바 안 보이면 정지 풀기 (0=끔)", " ms", 0, 30000, 250},
            {"mission.start_follow", "시작하자마자 출발 (1=초록불 안 기다림)", "", 0, 1, 1},
+           {"mission.stop_line", "빨간·노란불 → 정지선 앞 정지 (1=켬)", "", 0, 1, 1},
        },
        2},
       {"표지판 검출 필터 (brain_node) — 원본 640x480 기준, 0 = 끔. 높이·너비·면적을 모두 넘어야 동작",
@@ -910,6 +916,12 @@ void MainWindow::setupParamTab()
            {"sign.tl_green.min_h_px", "초록불 최소 높이", " px", 0, 480, 5},
            {"sign.tl_green.min_w_px", "초록불 최소 너비", " px", 0, 640, 5},
            {"sign.tl_green.min_area_px", "초록불 최소 면적 (w×h)", " px²", 0, 307200, 500},
+           {"sign.tl_red.min_h_px", "빨간불 최소 높이", " px", 0, 480, 5},
+           {"sign.tl_red.min_w_px", "빨간불 최소 너비", " px", 0, 640, 5},
+           {"sign.tl_red.min_area_px", "빨간불 최소 면적 (w×h)", " px²", 0, 307200, 500},
+           {"sign.tl_yellow.min_h_px", "노란불 최소 높이", " px", 0, 480, 5},
+           {"sign.tl_yellow.min_w_px", "노란불 최소 너비", " px", 0, 640, 5},
+           {"sign.tl_yellow.min_area_px", "노란불 최소 면적 (w×h)", " px²", 0, 307200, 500},
            {"sign.confirm_frames", "연속 프레임 (한 프레임 오검출 거르기)", "", 1, 30, 1},
            {"sign.min_score_pct", "최소 점수", " %", 0, 100, 5},
        },

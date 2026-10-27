@@ -212,9 +212,9 @@ std::vector<std::string> QNode::brainParamNames()
 {
   std::vector<std::string> names = {"mission.turn_ms", "mission.rearm_ms", "mission.parking_pause",
                                     "mission.barrier_release_ms", "mission.con_end_mode", "mission.con_hold_ms",
-                                    "mission.con_once", "mission.start_follow",
+                                    "mission.con_once", "mission.start_follow", "mission.stop_line",
                                     "sign.confirm_frames", "sign.min_score_pct"};
-  for (const char *l : {"barrier_closed", "barrier_open", "construction", "left", "right", "parking", "tl_green"})
+  for (const char *l : {"barrier_closed", "barrier_open", "construction", "left", "right", "parking", "tl_green", "tl_red", "tl_yellow"})
   {
     names.push_back(std::string("sign.") + l + ".min_h_px");
     names.push_back(std::string("sign.") + l + ".min_w_px");
@@ -244,7 +244,8 @@ std::vector<std::string> QNode::pathParamNames()
           "path.max_dev_mm", "path.override_frames", "path.turn_drop_memory", "path.min_len_mm",
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm", "path.turn_radius_mm", "path.turn_min_deg",
           "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_attach_mm", "path.con_extend_mm", "path.con_edge_mm", "path.con_dead_end_mm", "path.con_keep", "path.con_keep_rear_mm", "path.con_hold_mm", "path.con_clear_mm",
-          "path.con_exit_mm", "path.con_no_brick_mm", "path.con_override_frames", "path.con_cross_override_frames", "path.con_straight_by_lane", "path.con_offscreen_side"};
+          "path.con_exit_mm", "path.con_no_brick_mm", "path.con_override_frames", "path.con_cross_override_frames", "path.con_straight_by_lane", "path.con_offscreen_side",
+          "path.sl_margin_mm", "path.sl_min_w_px"};
 }
 
 std::vector<std::string> QNode::driveParamNames(bool with_enable)
