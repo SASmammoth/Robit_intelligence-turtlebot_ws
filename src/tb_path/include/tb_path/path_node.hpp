@@ -9,6 +9,7 @@
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/opencv.hpp>
 
@@ -28,6 +29,7 @@ private:
     void reload_params();
     void declare_int(const std::string &name, int def, int max);
     void update_pose(const rclcpp::Time &now);
+    void reset_all(); // /mission/reset
     void publish_debug(const cv::Mat &img, const std_msgs::msg::Header &header);
 
     // 스켈레톤
@@ -83,6 +85,13 @@ private:
     bool turn_drop_memory_ = true;      // path.turn_drop_memory
     bool parking_ = false;
 
+    // 정지선 모드 (/mission/stop_line, tb_brain이 켬): 빨간 가로선(라벨 250) 앞에서 경로를 자름
+    bool stop_line_ = false;
+    bool sl_have_ = false;              // 켜진 뒤 정지선을 한 번이라도 찾았는지
+    cv::Point2d sl_pt_;                 // 정지선 위치 (pose_ 좌표계, 로봇 정면 방향의 점)
+    double sl_cut_x_ = -1.0;            // 이번 프레임에 자른 위치 (로봇 기준 x, 디버그)
+    int sl_margin_mm_ = 60, sl_min_w_px_ = 60;
+
     // 장애물 (YOLO brick)
     tb_interfaces::msg::DetectionArray::ConstSharedPtr last_det_;
     int brick_depth_mm_ = 60;           // 벽돌 앞뒤 길이
@@ -103,6 +112,8 @@ private:
     rclcpp::Subscription<tb_interfaces::msg::DetectionArray>::SharedPtr det_sub_;
     rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr turn_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr parking_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr stop_line_sub_; // /mission/stop_line
+    rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr reset_sub_;    // /mission/reset
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_exit_sub_;  // /mission/construction_exit
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr con_pub_;

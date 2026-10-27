@@ -62,6 +62,12 @@ LineDetectNode::LineDetectNode() : Node("lineDetect_node")
     declare_odd("morph.close", 9, 31);
     declare_int("morph.min_area", 150, 5000);
 
+    // ====== 흰색 판단 방식 (빛반사·위치별 밝기 차이 대응)
+    declare_int("white.mode", 0, 1);        // 0 HSV 절대 밝기, 1 주변 대비
+    declare_odd("white.bg_px", 41, 151);    // 주변 바닥 밝기를 구할 상자 크기 (선 폭의 3배쯤)
+    declare_int("white.contrast", 40, 255); // 주변보다 이만큼 밝으면 선
+    declare_int("white.v_floor", 120, 255); // 대비 모드에서 이보다 어두우면 무시
+
     // ====== BEV
     declare_int("bev.top_y", 40, 100);
     declare_int("bev.bot_y", 100, 100);
@@ -112,7 +118,7 @@ void LineDetectNode::image_callback(const sensor_msgs::msg::Image::ConstSharedPt
     cv::Mat hsv;
     cv::cvtColor(bev, hsv, cv::COLOR_BGR2HSV);
 
-    cv::Mat white_bin = make_mask(hsv, Target::WhiteLine);
+    cv::Mat white_bin = white_mode_ == 1 ? make_white_contrast(hsv) : make_mask(hsv, Target::WhiteLine);
     cv::Mat yellow_bin = make_mask(hsv, Target::YellowLine);
     cv::Mat red_bin = make_mask(hsv, Target::RedLine);
 
@@ -192,14 +198,54 @@ cv::Mat LineDetectNode::make_mask(const cv::Mat &hsv, Target t) const
 
     cv::Mat mask;
     cv::inRange(hsv, r.lower, r.upper, mask);
+    post_process(mask);
+    return mask;
+}
 
+// 주변 대비 흰색: 바닥이 밝은 곳·어두운 곳 모두 "주변 바닥보다 얼마나 밝은가"로 판단
+//  배경 = V를 상자(white.bg_px)로 opening → 상자보다 좁은 밝은 것(선)만 빠진 바닥 밝기
+//  상자보다 넓게 퍼진 반사는 배경에 그대로 남아서 빠짐
+cv::Mat LineDetectNode::make_white_contrast(const cv::Mat &hsv) const
+{
+    const HsvRange &r = hsv_ranges_[idx(Target::WhiteLine)];
+
+    cv::Mat v, vf;
+    cv::extractChannel(hsv, v, 2);
+    v.convertTo(vf, CV_32F);
+
+    // 사각지대(0)를 주변 평균으로 채움 (안 채우면 opening이 경계에서 0으로 끌려가 경계가 선처럼 튐)
+    const cv::Size k(white_bg_px_, white_bg_px_);
+    cv::Mat wf, sum, cnt;
+    bev_valid_.convertTo(wf, CV_32F, 1.0 / 255.0);
+    cv::blur(vf.mul(wf), sum, k);
+    cv::blur(wf, cnt, k);
+    cv::Mat filled = vf.clone();
+    cv::Mat mean = sum / cv::max(cnt, 1e-3);
+    mean.copyTo(filled, bev_valid_ == 0);
+
+    cv::Mat bg;
+    cv::morphologyEx(filled, bg, cv::MORPH_OPEN, cv::getStructuringElement(cv::MORPH_RECT, k));
+
+    cv::Mat mask = (vf - bg) > white_contrast_;
+
+    // H·S 범위, V 바닥 ~ v_max
+    cv::Mat hsv_ok;
+    cv::inRange(hsv, cv::Scalar(r.lower[0], r.lower[1], white_v_floor_),
+                cv::Scalar(r.upper[0], r.upper[1], r.upper[2]), hsv_ok);
+    cv::bitwise_and(mask, hsv_ok, mask);
+
+    post_process(mask);
+    return mask;
+}
+
+void LineDetectNode::post_process(cv::Mat &mask) const
+{
     const cv::Mat k_open = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(morph_open_, morph_open_));
     const cv::Mat k_close = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(morph_close_, morph_close_));
     cv::morphologyEx(mask, mask, cv::MORPH_OPEN, k_open);   // 1~2픽셀 잡티
     cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, k_close); // 구멍 메우기
 
     clean_mask(mask, min_blob_area_);
-    return mask;
 }
 
 void LineDetectNode::publish_debug(
@@ -267,6 +313,11 @@ void LineDetectNode::reload_params()
     morph_open_ = get_parameter("morph.open").as_int();
     morph_close_ = get_parameter("morph.close").as_int();
     min_blob_area_ = get_parameter("morph.min_area").as_int();
+
+    white_mode_ = static_cast<int>(get_parameter("white.mode").as_int());
+    white_bg_px_ = std::max(3, static_cast<int>(get_parameter("white.bg_px").as_int()) | 1);
+    white_contrast_ = static_cast<int>(get_parameter("white.contrast").as_int());
+    white_v_floor_ = static_cast<int>(get_parameter("white.v_floor").as_int());
 
     const int top_y = get_parameter("bev.top_y").as_int();
     const int bot_y = get_parameter("bev.bot_y").as_int();

@@ -1,7 +1,12 @@
 lineDetect_node:
   ros__parameters:
     # ── HSV
-    white:  {h_min: 75, h_max: 179, s_min: 0,  s_max: 160, v_min: 200, v_max: 255}
+    white:  {h_min: 75, h_max: 179, s_min: 0,  s_max: 160, v_min: 200, v_max: 255,
+             mode: 0, bg_px: 41, contrast: 40, v_floor: 120}
+    # white 판단 방식 (GUI Tab 1에서 전환)
+    #  mode 0: HSV 절대 밝기 (v_min 이상)
+    #  mode 1: 대비 — 주변 바닥(bg_px 상자로 opening)보다 contrast 이상 밝고 v_floor 이상
+    #          빛반사·위치마다 밝기가 다른 곳에 강함. H·S 범위와 v_max는 공통
     yellow: {h_min: 35, h_max: 60,  s_min: 60, s_max: 255, v_min: 60,  v_max: 255}
     red:    {h_min: 0,  h_max: 30,  s_min: 60, s_max: 255, v_min: 0,   v_max: 255}
 

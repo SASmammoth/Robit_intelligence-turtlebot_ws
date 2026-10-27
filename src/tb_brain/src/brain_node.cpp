@@ -4,6 +4,7 @@
 //   ------------------  ------------------------------------------------------
 //   0 barrier_closed    pause = 1  (mission.barrier_release_ms 동안 안 보이면 pause = 0)
 //   1 barrier_open      pause = 0
+//   차단바 끝 (pause 해제)  /mission/stop_line = 1  (mission.stop_line = 1일 때, 한 번)
 //   2 brick             (구현 안 함)
 //   3 construction      /mission/construction = 1  (끝나는 방법은 mission.con_end_mode)
 //   5 parking           /mission/construction = 0, 주차 동작 시작 (아래 "주차")
@@ -13,6 +14,15 @@
 //   8 tl_off
 //   9 tl_red
 //   10 tl_yellow
+//
+// 정지선 (/mission/stop_line): 차단바 다음 단계. 차단바가 끝나면(열림 검출 또는 닫힘이
+//   barrier_release_ms 동안 안 보임) 켜고, 켜져 있는 동안 path_node가 빨간 가로선 앞에서
+//   경로를 잘라 tb_drive가 선 앞에서 멈춤. 한 번 켜면 /brain/run stop 또는 /mission/reset까지 유지.
+//   10Hz로 현재 값을 계속 보냄 (path_node 재시작 대비). mission.stop_line = 0이면 아예 발행하지 않음
+//   가짜 표지판 "stop_line"으로 바로 켤 수도 있음
+//
+// /mission/reset (Empty): 미션 상태를 처음처럼 (run_state는 그대로). turn 0, construction 0,
+//   pause 0, stop_line 0을 한 번 보냄. path_node·drive_node도 같은 토픽으로 초기화
 //
 // /brain/run 으로 "start"를 받아야 동작(run_state 1), "stop"을 받으면 멈춤(run_state 0).
 // run_state 0 동안에는 검출을 무시하고 어떤 토픽도 발행하지 않는다.
@@ -66,6 +76,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/empty.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8.hpp>
 
@@ -80,9 +91,11 @@ static constexpr const char *TOPIC_DETECTIONS = "/signs/detections";     // 구�
 static constexpr const char *TOPIC_TURN = "/mission/turn";               // 발행 (UInt8: 0 직진, 1 좌, 2 우)
 static constexpr const char *TOPIC_CONSTRUCTION = "/mission/construction"; // 발행 (Bool)
 static constexpr const char *TOPIC_PAUSE = "/mission/pause";             // 발행 (Bool)
+static constexpr const char *TOPIC_STOP_LINE = "/mission/stop_line";     // 발행 (Bool: 정지선 앞에서 경로 자르기)
 static constexpr const char *TOPIC_DRIVE_CMD = "/drive/cmd";             // 발행 (DriveCmd)
 static constexpr const char *TOPIC_RUN = "/brain/run";                   // 구독 (String: "start" / "stop")
 static constexpr const char *TOPIC_INJECT = "/brain/inject";             // 구독 (String: 표지판 이름, 가짜 표지판)
+static constexpr const char *TOPIC_RESET = "/mission/reset";             // 구독 (Empty: 전체 초기화)
 static constexpr const char *TOPIC_UART_RX = "TB_Uart_RX";              // 발행 (String: tb_uart 명령)
 static constexpr const char *TOPIC_UART_TX = "TB_Uart_TX";              // 구독 (String: "psd F L R" 등)
 
@@ -127,6 +140,7 @@ public:
         declare_int("mission.con_hold_ms", 10000, 0, 120000);   // con_end_mode 1: 진입 후 이만큼 지나면 끝
         declare_int("mission.con_once", 1, 0, 1);               // 1: 진입 후 주차 표지판 전까지 공사 표지판 무시
         declare_int("mission.start_follow", 0, 0, 1);           // 1: start 받자마자 FOLLOW (초록불 안 기다림)
+        declare_int("mission.stop_line", 1, 0, 1);              // 1: 차단바가 끝나면 정지선 켬 (빨간 가로선 앞에서 멈춤)
 
         // 주차
         declare_int("mission.parking.time_enter", 4, 0, 60);     // [s] 주차 표지판 → left 유지 후 pause
@@ -155,12 +169,15 @@ public:
         turn_pub_ = create_publisher<std_msgs::msg::UInt8>(TOPIC_TURN, 10);
         construction_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_CONSTRUCTION, 10);
         pause_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_PAUSE, 10);
+        stop_line_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_STOP_LINE, 10);
         drive_cmd_pub_ = create_publisher<DriveCmd>(TOPIC_DRIVE_CMD, 10);
         uart_pub_ = create_publisher<std_msgs::msg::String>(TOPIC_UART_RX, 10);
 
         run_sub_ = create_subscription<std_msgs::msg::String>(
             TOPIC_RUN, 10,
             [this](const std_msgs::msg::String::ConstSharedPtr m) { on_run(m->data); });
+        reset_sub_ = create_subscription<std_msgs::msg::Empty>(
+            TOPIC_RESET, 10, [this](const std_msgs::msg::Empty::ConstSharedPtr) { on_reset(); });
         inject_sub_ = create_subscription<std_msgs::msg::String>(
             TOPIC_INJECT, 10,
             [this](const std_msgs::msg::String::ConstSharedPtr m) { on_inject(m->data); });
@@ -210,19 +227,68 @@ private:
             }
             run_state_ = 0;
             // 다시 start 했을 때 이전 상태가 이어지지 않게
-            turn_value_ = TURN_NONE;
-            follow_ = false;
-            streak_.clear();
-            last_seen_.clear(); // 다시 켰을 때 앞에 보이는 표지판을 새로 봄
-            con_on_ = false;
-            con_latched_ = false;
-            barrier_pause_ = false;
+            if (stop_line_on_) // 멈추면 더 발행하지 않으므로 마지막으로 풀어 둠
+                publish_now(stop_line_pub_, false);
+            clear_state();
             RCLCPP_INFO(get_logger(), "run: stop → run_state 0");
         }
         else
         {
             RCLCPP_WARN(get_logger(), "run: unknown command '%s' (use '%s' / '%s')", cmd.c_str(), RUN_START, RUN_STOP);
         }
+    }
+
+    // 미션 상태만 처음으로 (run_state·파라미터는 그대로)
+    void clear_state()
+    {
+        turn_value_ = TURN_NONE;
+        follow_ = false;
+        streak_.clear();
+        last_seen_.clear(); // 앞에 보이는 표지판을 새로 봄
+        con_on_ = false;
+        con_latched_ = false;
+        barrier_pause_ = false;
+        stop_line_on_ = false;
+    }
+
+    // /mission/reset: 상태를 지우고 중립 값을 한 번 보냄 (run_state 0이어도 보냄: 남아 있는 값 풀기)
+    void on_reset()
+    {
+        clear_state();
+        publish_now(turn_pub_, TURN_NONE);
+        publish_now(construction_pub_, false);
+        publish_now(pause_pub_, false);
+        publish_now(stop_line_pub_, false);
+        RCLCPP_INFO(get_logger(), "reset: 미션 상태 초기화 (run_state %d 유지)", run_state_);
+        if (run_state_ == 1 && start_follow_)
+        {
+            follow_ = true;
+            publish_follow();
+        }
+    }
+
+    // run_state와 상관없이 바로 발행 (reset·stop 때 남은 값 풀기)
+    static void publish_now(const rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr &pub, bool v)
+    {
+        std_msgs::msg::Bool m;
+        m.data = v;
+        pub->publish(m);
+    }
+    static void publish_now(const rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr &pub, uint8_t v)
+    {
+        std_msgs::msg::UInt8 m;
+        m.data = v;
+        pub->publish(m);
+    }
+
+    // 차단바 단계 끝 → 정지선 켬 (한 번)
+    void barrier_done(const char *why)
+    {
+        if (!stop_line_mode_ || stop_line_on_)
+            return;
+        RCLCPP_INFO(get_logger(), "차단바 끝 (%s) → stop_line 1 (빨간 정지선 앞에서 멈춤)", why);
+        stop_line_on_ = true;
+        publish_bool(stop_line_pub_, true);
     }
 
     // 가짜 표지판: 이름 → class_id, 필터·rearm 없이 바로 동작
@@ -234,6 +300,12 @@ private:
         if (run_state_ != 1)
         {
             RCLCPP_WARN(get_logger(), "inject '%s' 무시: brain 꺼져 있음 (/brain/run start 먼저)", label.c_str());
+            return;
+        }
+        if (label == "stop_line") // 표지판이 아닌 단계: 바로 정지선 켬
+        {
+            RCLCPP_INFO(get_logger(), "inject: stop_line");
+            barrier_done("가짜 표지판");
             return;
         }
         auto it = ids.find(label);
@@ -282,6 +354,7 @@ private:
         con_hold_ms_ = ms("mission.con_hold_ms");
         con_once_ = ms("mission.con_once") != 0;
         start_follow_ = ms("mission.start_follow") != 0;
+        stop_line_mode_ = ms("mission.stop_line") != 0;
         park_time_enter_ = ms("mission.parking.time_enter");
         park_time_exit_ = ms("mission.parking.time_exit");
         park_psd_l_ = ms("mission.parking.psd_L");
@@ -359,6 +432,7 @@ private:
             RCLCPP_INFO(get_logger(), "barrier_open → pause 0");
             barrier_pause_ = false;
             publish_bool(pause_pub_, false);
+            barrier_done("열림");
             break;
         case ID_BRICK:
             break; // 구현 안 함
@@ -581,6 +655,8 @@ private:
         // tb_drive는 cmd_timeout_ms 동안 명령이 없으면 버리므로 계속 발행
         if (follow_)
             publish_follow();
+        if (stop_line_mode_)
+            publish_bool(stop_line_pub_, stop_line_on_); // path_node가 재시작돼도 맞게
 
         const rclcpp::Time t = now();
         // 공사 구간: 시간으로 끝내기 (con_end_mode 1)
@@ -596,6 +672,7 @@ private:
             RCLCPP_INFO(get_logger(), "barrier_closed %dms 동안 안 보임 → pause 0", barrier_release_ms_);
             barrier_pause_ = false;
             publish_bool(pause_pub_, false);
+            barrier_done("닫힘이 안 보임");
         }
 
         if (turn_value_ == TURN_NONE)
@@ -676,17 +753,20 @@ private:
     int run_state_ = 0;   // 0: 정지(발행 안 함), 1: 동작. /brain/run 으로 변경
     bool follow_ = false; // tl_green 본 뒤 FOLLOW 발행 중
     bool start_follow_ = false;
+    bool stop_line_mode_ = true; // mission.stop_line
+    bool stop_line_on_ = false;  // 정지선 켜 둔 상태 (차단바 끝 → 1, run stop·reset → 0)
 
     uint8_t turn_value_ = TURN_NONE;
     rclcpp::Time turn_end_{0, 0, RCL_ROS_TIME};
     std::map<int, rclcpp::Time> last_seen_; // class_id → 마지막으로 본 시각
 
     rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr turn_pub_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_, pause_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_, pause_pub_, stop_line_pub_;
     rclcpp::Publisher<DriveCmd>::SharedPtr drive_cmd_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr uart_pub_;
     rclcpp::Subscription<DetectionArray>::SharedPtr det_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr run_sub_, inject_sub_, uart_sub_;
+    rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr reset_sub_;
     rclcpp::TimerBase::SharedPtr timer_, park_timer_;
 };
 

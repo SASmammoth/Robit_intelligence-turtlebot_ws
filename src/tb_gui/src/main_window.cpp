@@ -124,6 +124,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
       queueParam(name, v); });
   }
 
+  setupWhiteModeBox();
+
   // 50ms마다 모아서 전송 (드래그 중 요청 폭주 방지)
   send_timer_.setSingleShot(true);
   send_timer_.setInterval(50);
@@ -409,6 +411,26 @@ void MainWindow::showConstructionInfo(const QString &info)
                                 .arg(info.isEmpty() ? "#555555" : on ? "#d35400" : "#7f8c8d"));
 }
 
+void MainWindow::resetAll()
+{
+  setBarrier(false);
+  if (ui->radioTurnStraight->isChecked())
+    qnode->publishTurn(0);
+  else
+    ui->radioTurnStraight->setChecked(true); // toggled에서 /mission/turn 0
+  if (ui->checkParking->isChecked())
+    ui->checkParking->setChecked(false); // toggled에서 /mission/parking false
+  if (check_construction_->isChecked())
+  {
+    QSignalBlocker block(check_construction_);
+    check_construction_->setChecked(false);
+    construction_ = false;
+  }
+  qnode->publishReset(); // GUI가 보낸 turn·parking 뒤에 → 노드들이 초기화
+  statusBar()->showMessage("초기화 보냄: path·drive·brain 상태를 처음처럼 (모드·파라미터는 그대로)", 4000);
+  showMission();
+}
+
 void MainWindow::exitConstruction()
 {
   // /mission/construction_exit (= false와 같음). 체크는 /lane/construction이 오면 맞춰짐
@@ -496,6 +518,14 @@ void MainWindow::setupViewTab()
   box->insertWidget(park_idx + 3, label_con_);
   box->insertWidget(park_idx + 4, btn_con_exit);
 
+  // 전체 초기화: path(기억 경로·공사·정지선), drive(추종·피봇 상태), brain(미션 상태) + GUI 미션 표시
+  auto *btn_reset = new QPushButton("초기화 (R)", ui->groupStatus);
+  btn_reset->setFocusPolicy(Qt::NoFocus);
+  btn_reset->setToolTip("/mission/reset: path_node 경로 기억·공사·정지선, drive_node 추종 상태, brain 미션 상태를 처음처럼.\n"
+                        "주행 모드·파라미터는 그대로 (로봇을 출발점에 다시 놓고 누르기)");
+  box->insertWidget(park_idx + 5, btn_reset);
+  connect(btn_reset, &QPushButton::clicked, this, [this] { resetAll(); });
+
   // 가짜 표지판 → tb_brain (/brain/inject). 필터 없이 바로 그 표지판 동작 (Brain 모드에서만 의미 있음)
   //   중간에서 시작할 때 초록불로 출발, 표지판을 놓쳤을 때 대신 보내기 등
   auto *inject_box = new QGroupBox("가짜 표지판 → brain", ui->groupStatus);
@@ -505,7 +535,7 @@ void MainWindow::setupViewTab()
   static const std::pair<const char *, const char *> fake_signs[] = {
       {"tl_green", "초록불 (출발)"}, {"left", "좌회전"}, {"right", "우회전"},
       {"construction", "공사"}, {"parking", "주차"}, {"barrier_closed", "차단바 닫힘"},
-      {"barrier_open", "차단바 열림"}};
+      {"barrier_open", "차단바 열림"}, {"stop_line", "정지선 켜기"}};
   int fi = 0;
   for (const auto &[label, text] : fake_signs)
   {
@@ -523,7 +553,7 @@ void MainWindow::setupViewTab()
     inject_grid->addWidget(b, fi / 3, fi % 3);
     ++fi;
   }
-  box->insertWidget(park_idx + 5, inject_box);
+  box->insertWidget(park_idx + 6, inject_box);
   connect(btn_con_exit, &QPushButton::clicked, this, [this] { exitConstruction(); });
   connect(qnode, &QNode::constructionInfoReceived, this, &MainWindow::showConstructionInfo);
   showConstructionInfo("");
@@ -655,10 +685,10 @@ void MainWindow::refreshViewStatus()
                                      "padding: 4px; background: %1;").arg(color[i]));
   const DriveMode dm = driveMode();
   label_keys_->setText(dm == DriveMode::Auto
-                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter: Brain   Esc 정지"
+                           ? "Space: WASD로   A/D 누르는 동안: Left/Right   P 주차  C 공사 켜기  X 공사 끝  B 차단바  R 초기화   Enter: Brain   Esc 정지"
                        : dm == DriveMode::Brain
-                           ? "Brain이 /drive/cmd·/mission/* 를 냄 (수동 조작 자제)   Space: WASD로   B 차단바   Enter·Esc: 정지"
-                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바   Enter: Brain   Esc 정지");
+                           ? "Brain이 /drive/cmd·/mission/* 를 냄 (수동 조작 자제)   Space: WASD로   B 차단바  R 초기화   Enter·Esc: 정지"
+                           : "Space: 자동으로   W/A/S/D: 수동 주행   P 주차  C 공사 켜기  X 공사 끝  B 차단바  R 초기화   Enter: Brain   Esc 정지");
 }
 
 void MainWindow::setTurnMomentary(int key, bool press)
@@ -758,6 +788,10 @@ bool MainWindow::handleViewKey(QKeyEvent *ke, bool press)
     if (press && !repeat)
       setBarrier(!check_barrier_->isChecked());
     return true;
+  case Qt::Key_R:
+    if (press && !repeat)
+      resetAll();
+    return true;
   case Qt::Key_A:
   case Qt::Key_D:
     if (m == DriveMode::Auto)
@@ -852,6 +886,11 @@ void MainWindow::setupParamTab()
            {"path.turn_radius_mm", "교차로 회전 반지름 (0=끔)", " mm", 0, 500, 10},
            {"path.turn_min_deg", "둥글게 할 꺾임", " °", 0, 180, 5},
        }},
+      {"정지선 (path_node) — /mission/stop_line 켜져 있을 때만 (brain: 차단바 끝나면 켬, 초기화·brain 정지로 끔)",
+       {
+           {"path.sl_margin_mm", "경로 끝 = 빨간선 - (바퀴 축 기준)", " mm", 0, 500, 5},
+           {"path.sl_min_w_px", "한 줄 빨강 최소 폭 (BEV)", " px", 0, 320, 5},
+       }},
       {"공사 구간 (path_node) — 표지판 또는 View 탭 C키",
        {
            {"path.con_brick_depth_mm", "벽돌 벽 앞뒤", " mm", 0, 500, 10},
@@ -883,6 +922,7 @@ void MainWindow::setupParamTab()
            {"mission.parking_pause", "주차 표지판에서 정지 (1=정지)", "", 0, 1, 1},
            {"mission.barrier_release_ms", "차단바 안 보이면 정지 풀기 (0=끔)", " ms", 0, 30000, 250},
            {"mission.start_follow", "시작하자마자 출발 (1=초록불 안 기다림)", "", 0, 1, 1},
+           {"mission.stop_line", "차단바 끝나면 정지선 앞 정지 (1=켬)", "", 0, 1, 1},
        },
        2},
       {"표지판 검출 필터 (brain_node) — 원본 640x480 기준, 0 = 끔. 높이·너비·면적을 모두 넘어야 동작",
@@ -1395,6 +1435,16 @@ void MainWindow::queueParam(const QString &name, int v)
 void MainWindow::applyGlobalParam(const QString &name, int v)
 {
   const GlobalWidget &w = global_widgets_[name];
+  if (w.combo)
+  {
+    const int i = w.combo->findData(v);
+    if (i >= 0 && i != w.combo->currentIndex())
+    {
+      QSignalBlocker block(w.combo);
+      w.combo->setCurrentIndex(i);
+    }
+    return;
+  }
   if (w.slider && !w.slider->isSliderDown())
   {
     QSignalBlocker block(w.slider);
@@ -1466,4 +1516,73 @@ MainWindow::~MainWindow()
 {
   delete qnode;
   delete ui;
+}
+// ───────── Tab 1: 흰색 판단 방식 ─────────
+// white.mode 0: HSV 절대 밝기 (위 Value Low 이상)
+// white.mode 1: 대비 — 주변 바닥 밝기(배경 상자로 opening)보다 '대비'만큼 밝고 'V 바닥' 이상이면 흰선
+//               H·S 범위와 Value High는 두 모드 공통, Value Low는 대비 모드에서 안 씀
+void MainWindow::setupWhiteModeBox()
+{
+  auto *box = new QGroupBox("흰색 판단 방식 (lineDetect_node)", ui->tab);
+  auto *g = new QGridLayout(box);
+
+  auto *combo = new QComboBox(box);
+  combo->addItem("HSV 절대 밝기 (Value Low 이상)", 0);
+  combo->addItem("대비 (주변 바닥보다 밝은 만큼)", 1);
+  combo->setToolTip("대비: 빛반사가 넓게 퍼진 곳·조명이 어두운 곳에서도 같은 값으로 잡힘\n"
+                    "H·S 범위와 Value High는 두 모드 공통, Value Low는 대비 모드에서 안 씀");
+  g->addWidget(new QLabel("모드", box), 0, 0);
+  g->addWidget(combo, 0, 1, 1, 2);
+  global_widgets_["white.mode"].combo = combo;
+  connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this, [this, combo](int)
+          { queueParam("white.mode", combo->currentData().toInt()); });
+
+  struct Def
+  {
+    const char *name, *text, *tip;
+    int min, max;
+    bool odd;
+  };
+  const Def defs[] = {
+      {"white.bg_px", "배경 상자(px)", "주변 바닥 밝기를 구할 상자 크기 (홀수). 선 폭(약 13px)의 3배쯤.\n"
+                                       "이보다 넓은 반사 덩어리는 빠지고, 너무 크면 위치별 밝기 차이를 못 따라감",
+       3, 151, true},
+      {"white.contrast", "대비", "주변 바닥보다 이만큼 이상 밝아야 흰선.\n올리면 반사·잡티 감소, 내리면 어두운 곳 선이 잘 잡힘",
+       0, 255, false},
+      {"white.v_floor", "V 바닥", "대비 모드에서 이보다 어두운 픽셀은 무시 (어두운 바닥의 잡티 방지)", 0, 255, false},
+  };
+  int row = 1;
+  for (const Def &d : defs)
+  {
+    const QString name = d.name;
+    const bool odd = d.odd;
+    auto *text = new QLabel(d.text, box);
+    auto *slider = new QSlider(Qt::Horizontal, box);
+    auto *value = new QLabel("000", box);
+    value->setMinimumWidth(40);
+    slider->setRange(d.min, d.max);
+    slider->setSingleStep(odd ? 2 : 1);
+    slider->setPageStep(odd ? 10 : 10);
+    text->setToolTip(d.tip);
+    slider->setToolTip(d.tip);
+    g->addWidget(text, row, 0);
+    g->addWidget(slider, row, 1);
+    g->addWidget(value, row, 2);
+    g->setColumnStretch(1, 1);
+    ++row;
+    global_widgets_[name] = {slider, value, nullptr};
+
+    connect(slider, &QSlider::valueChanged, this, [this, name, slider, value, odd](int v)
+            {
+      if (odd && v % 2 == 0)
+      {
+        v = std::min(v + 1, slider->maximum());
+        QSignalBlocker block(slider);
+        slider->setValue(v);
+      }
+      value->setNum(v);
+      queueParam(name, v); });
+  }
+
+  ui->gridLayout_3->addWidget(box, 2, 0);
 }
