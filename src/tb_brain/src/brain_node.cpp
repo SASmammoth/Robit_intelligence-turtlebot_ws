@@ -35,6 +35,7 @@
 //   sign.<label>.min_area_px          박스 면적(w×h)이 이보다 작으면 무시 (차단바처럼 가로로 긴 것)
 //   sign.min_score_pct               이보다 낮은 점수는 무시
 //   sign.confirm_frames              필터를 통과한 검출이 이만큼 연속 프레임이어야 동작 (한 프레임 오검출 거르기)
+//   sign.<label>.confirm_frames      그 표지판만 따로 (0이면 sign.confirm_frames)
 //
 // 공사 구간 (판단은 여기 한 곳에서만, path_node는 /mission/construction만 받음)
 //   mission.con_end_mode  0: path_node가 벽돌 기준으로 끝냄 (path.con_exit_mm, con_no_brick_mm)
@@ -161,6 +162,7 @@ public:
             declare_int(std::string("sign.") + l + ".min_h_px", 0, 0, 480);
             declare_int(std::string("sign.") + l + ".min_w_px", 0, 0, 640);
             declare_int(std::string("sign.") + l + ".min_area_px", 0, 0, 640 * 480);
+            declare_int(std::string("sign.") + l + ".confirm_frames", 0, 0, 30); // 0이면 sign.confirm_frames
         }
         reload_filter();
         post_cb_handle_ = add_post_set_parameters_callback(
@@ -371,7 +373,8 @@ private:
         {
             const std::string p = std::string("sign.") + l;
             min_size_[l] = {int(get_parameter(p + ".min_h_px").as_int()), int(get_parameter(p + ".min_w_px").as_int()),
-                            int(get_parameter(p + ".min_area_px").as_int())};
+                            int(get_parameter(p + ".min_area_px").as_int()),
+                            int(get_parameter(p + ".confirm_frames").as_int())};
         }
     }
 
@@ -396,15 +399,20 @@ private:
 
         // 이번 프레임에 필터를 통과한 class_id → 연속 프레임 수 갱신 (안 보이면 0부터 다시)
         std::set<int> passed;
+        std::map<int, int> need; // class_id → 필요한 연속 프레임 (표지판별 값, 0이면 공통 값)
         for (const auto &d : msg.detections)
             if (pass_filter(d))
+            {
                 passed.insert(d.class_id);
+                auto m = min_size_.find(d.label);
+                need[d.class_id] = (m != min_size_.end() && m->second.confirm > 0) ? m->second.confirm : confirm_frames_;
+            }
         for (auto it = streak_.begin(); it != streak_.end();)
             it = passed.count(it->first) ? std::next(it) : streak_.erase(it);
 
         for (int id : passed)
         {
-            if (++streak_[id] < confirm_frames_)
+            if (++streak_[id] < need[id])
                 continue; // 아직 확인 중
             if (id == ID_BARRIER_CLOSED)
                 barrier_last_ = now; // 보이는 동안 계속 갱신 (barrier_release_ms 기준)
@@ -745,7 +753,7 @@ private:
 
     int confirm_frames_ = 2;
     double min_score_ = 0.0;
-    struct MinSize { int h = 0, w = 0, area = 0; };   // [px], area = w×h [px²]
+    struct MinSize { int h = 0, w = 0, area = 0, confirm = 0; }; // [px], area = w×h [px²], confirm: 연속 프레임 (0 = 공통)
     std::map<std::string, MinSize> min_size_;          // label → 최소 박스 크기
     std::map<int, int> streak_;                           // class_id → 필터 통과 연속 프레임 수
     rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr post_cb_handle_;
