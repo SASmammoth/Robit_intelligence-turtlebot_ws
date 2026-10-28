@@ -27,6 +27,7 @@
 #include <QPointF>
 #include <QMap>
 #include <QString>
+#include <QStringList>
 #include <atomic>
 #include <mutex>
 #include <map>
@@ -47,6 +48,7 @@ public:
   void refreshParams();                 // 연결된 노드의 현재 값을 다시 읽음 (주기적으로 호출 → 화면이 항상 노드 값)
   void saveParams(const QString &path); // 연결된 노드의 현재 값 → YAML (drive.enable 제외)
   void loadParams(const QString &path); // YAML → 각 노드에 설정 (drive.enable 제외)
+  QStringList paramNodesReady();        // 파라미터 서비스가 연결된 노드 이름 (saveParams 대상과 같은 기준)
 
   // ====== 미션
   void publishTurn(int turn); // 0 직진, 1 좌, 2 우

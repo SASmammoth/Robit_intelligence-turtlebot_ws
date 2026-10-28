@@ -1539,9 +1539,12 @@ void MainWindow::setupRecorder()
   btn_record_ = new QPushButton(display_tabs_);
   btn_record_->setCheckable(true);
   btn_record_->setFocusPolicy(Qt::NoFocus); // WASD·방향 키 입력을 뺏지 않게
-  btn_record_->setToolTip(QString("USB · Skeleton · 경로 보기를 영상(mp4, %1 fps)으로, 노드 로그를 events.log로,\n"
-                                  "시작할 때 노드의 현재 파라미터 값을 params.yaml로 저장\n"
+  btn_record_->setToolTip(QString("USB · 경로 보기 · Skeleton + 시간 + 로그를 한 영상(record.mp4, %1x%2, %3 fps)으로,\n"
+                                  "노드 로그를 events.log로, 시작할 때 노드의 현재 파라미터 값을 params.yaml로 저장\n"
+                                  "파라미터 노드가 하나도 연결되어 있지 않으면 녹화하지 않음\n"
                                   "저장 위치: ~/tb_records/<날짜.시작시각>/")
+                              .arg(Recorder::kW)
+                              .arg(Recorder::kH)
                               .arg(Recorder::kFps));
   display_tabs_->setCornerWidget(btn_record_, Qt::TopRightCorner);
   connect(btn_record_, &QPushButton::toggled, this, &MainWindow::setRecording);
@@ -1553,9 +1556,16 @@ void MainWindow::setRecording(bool on)
 {
   if (on && !recorder_->isRecording())
   {
-    if (!recorder_->start(QDir::home().filePath("tb_records")))
+    // 파라미터 노드가 하나도 없으면 녹화 안 함 (폴더·파일도 안 만듦)
+    const QStringList nodes = qnode->paramNodesReady();
+    QString fail;
+    if (nodes.isEmpty())
+      fail = "녹화 안 함: 연결된 노드 없음 (lineDetect_node, path_node, drive_node, brain_node)";
+    else if (!recorder_->start(QDir::home().filePath("tb_records")))
+      fail = "녹화 실패: 폴더/파일을 만들 수 없음";
+    if (!fail.isEmpty())
     {
-      statusBar()->showMessage("녹화 실패: 폴더/파일을 만들 수 없음", 5000);
+      statusBar()->showMessage(fail, 5000);
       QSignalBlocker block(btn_record_);
       btn_record_->setChecked(false);
     }
@@ -1564,7 +1574,7 @@ void MainWindow::setRecording(bool on)
       // 녹화 당시 노드의 현재 파라미터 값 (Save 버튼과 같은 형식, 결과는 파라미터 파일 표시 줄에 나옴)
       const QString params = QDir(recorder_->dir()).filePath("params.yaml");
       qnode->saveParams(params);
-      recorder_->logEvent("파라미터 저장 요청: " + params);
+      recorder_->logEvent(QString("파라미터 저장 요청: %1 (연결된 노드: %2)").arg(params, nodes.join(", ")));
       statusBar()->showMessage("녹화 시작: " + recorder_->dir(), 5000);
     }
   }

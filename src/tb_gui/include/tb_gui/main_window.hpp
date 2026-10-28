@@ -68,7 +68,8 @@ private:
   QPushButton *btn_hide_video_ = nullptr;
   QMap<QString, QList<QLabel *>> streams_;               // "usb", "mask", "bev", "roi", "skel" → 라벨들
 
-  // 녹화 (영상 탭 오른쪽 위 버튼): USB·Skeleton·경로 보기 영상 + 노드 로그 + 현재 파라미터 → ~/tb_records/<날짜.시작시각>/
+  // 녹화 (영상 탭 오른쪽 위 버튼): USB·경로 보기·Skeleton·시간·로그를 합친 영상 + 노드 로그 + 현재 파라미터
+  //  → ~/tb_records/<날짜.시작시각>/. 파라미터 노드가 하나도 없으면 녹화 안 함
   void setupRecorder();
   void setRecording(bool on);
   void updateRecordButton(); // 녹화 중이면 경과 시간 표시

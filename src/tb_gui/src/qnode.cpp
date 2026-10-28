@@ -471,6 +471,16 @@ bool QNode::setBoolParam(const QString &name, bool on)
   return true;
 }
 
+QStringList QNode::paramNodesReady()
+{
+  QStringList ready;
+  for (const auto &[name, client] : {std::pair{LINE_NODE, line_client_}, std::pair{PATH_NODE, path_client_},
+                                     std::pair{DRIVE_NODE, drive_client_}, std::pair{BRAIN_NODE, brain_client_}})
+    if (client && client->service_is_ready())
+      ready << QString(name).mid(1);
+  return ready;
+}
+
 bool QNode::requestParams()
 {
   auto request = [this](rclcpp::AsyncParametersClient::SharedPtr client, const std::vector<std::string> &names)
