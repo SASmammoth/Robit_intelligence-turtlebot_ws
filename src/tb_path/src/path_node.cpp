@@ -63,7 +63,8 @@ PathNode::PathNode() : Node("path_node")
             pose_.x = m->pose.pose.position.x;
             pose_.y = m->pose.pose.position.y;
             pose_.th = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
-            last_odom_time_ = now(); });
+            last_odom_time_ = now();
+            push_pose(last_odom_time_); }); // 받은 시각 (카메라 stamp와 같은 시계. odom stamp는 다른 시계일 수 있음)
 
     cmd_sub_ = create_subscription<geometry_msgs::msg::Twist>(
         "/cmd_vel", 10, [this](const geometry_msgs::msg::Twist::ConstSharedPtr m)
@@ -177,6 +178,7 @@ void PathNode::reset_all()
     tracker_.reset();
     last_seed_ = {-1, -1};
     pose_ = lane_path::Pose2D{};
+    pose_hist_.clear();
     turn_ = last_turn_ = 0;
     parking_ = false;
     white_dash_ = false;
@@ -333,6 +335,7 @@ void PathNode::update_pose(const rclcpp::Time &t)
         pose_.x += v * dt * std::cos(pose_.th + 0.5 * w * dt);
         pose_.y += v * dt * std::sin(pose_.th + 0.5 * w * dt);
         pose_.th += w * dt;
+        push_pose(t);
     }
     last_integ_time_ = t;
 }
@@ -345,8 +348,16 @@ bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::
     cv::perspectiveTransform(src, dst, H);
     if (dst[0].y < 0 || dst[1].y < 0 || dst[0].y >= rows - 2 || dst[1].y >= rows - 2)
         return false;
-    const cv::Point2d A = lane_path::bev_to_robot({dst[0].x, dst[0].y}, geo_);
-    const cv::Point2d C = lane_path::bev_to_robot({dst[1].x, dst[1].y}, geo_);
+    // 박스는 YOLO가 본 영상(det_pose_) 기준 → 이번 마스크 프레임(cur_pose_) 기준으로 옮김
+    //   (YOLO 15Hz + det_max_age_ms 동안 같은 탐지를 계속 쓰므로, 안 옮기면 그동안 벽돌이 로봇을 따라옴)
+    auto to_cur = [this](const cv::Point2d &p) { return world_to_robot(robot_to_world(p, det_pose_), cur_pose_); };
+    const cv::Point2d A = to_cur(lane_path::bev_to_robot({dst[0].x, dst[0].y}, geo_));
+    const cv::Point2d C = to_cur(lane_path::bev_to_robot({dst[1].x, dst[1].y}, geo_));
+    {
+        const cv::Point2d a = lane_path::robot_to_bev(A, geo_), c = lane_path::robot_to_bev(C, geo_);
+        dst[0] = cv::Point2f(float(a.x), float(a.y));
+        dst[1] = cv::Point2f(float(c.x), float(c.y));
+    }
     const double x0 = std::min(A.x, C.x);
     double yl = std::max(A.y, C.y), yr = std::min(A.y, C.y);
     // 쪽: 벽돌이 붙은 선(side_hint)을 먼저 씀. 곡선 진입에서는 오른쪽 선 벽돌이 로봇 왼쪽에 보이기도 해서
@@ -399,16 +410,50 @@ cv::Point2d PathNode::robot_to_world(const cv::Point2d &r, const lane_path::Pose
     return {p.x + c * r.x - s * r.y, p.y + s * r.x + c * r.y};
 }
 
-// 기억한 벽돌 k(0 오른쪽 선, 1 왼쪽 선)를 지금 로봇 좌표로 (월드 좌표로 기억함)
+cv::Point2d PathNode::world_to_robot(const cv::Point2d &w, const lane_path::Pose2D &p)
+{
+    const double c = std::cos(p.th), s = std::sin(p.th);
+    const double dx = w.x - p.x, dy = w.y - p.y;
+    return {c * dx + s * dy, -s * dx + c * dy};
+}
+
+// 자세 기록 (odom 수신 시각 또는 cmd_vel 적분). 2초만 둠
+void PathNode::push_pose(const rclcpp::Time &t)
+{
+    const int64_t ns = t.nanoseconds();
+    if (!pose_hist_.empty() && ns < pose_hist_.back().first)
+        pose_hist_.clear(); // 시계가 뒤로 감 (bag 재생 등)
+    pose_hist_.emplace_back(ns, pose_);
+    while (pose_hist_.size() > 2 && ns - pose_hist_.front().first > 2000000000LL)
+        pose_hist_.pop_front();
+}
+
+// t 시각의 자세 (기록 사이는 선형 보간, 범위 밖이면 가장 가까운 끝). 기록이 없으면 지금 자세
+lane_path::Pose2D PathNode::pose_at(const rclcpp::Time &t) const
+{
+    if (pose_hist_.empty() || t.nanoseconds() <= 0)
+        return pose_;
+    const int64_t ns = t.nanoseconds();
+    if (ns <= pose_hist_.front().first)
+        return pose_hist_.front().second;
+    if (ns >= pose_hist_.back().first)
+        return pose_hist_.back().second;
+    auto it = std::lower_bound(pose_hist_.begin(), pose_hist_.end(), ns,
+                               [](const std::pair<int64_t, lane_path::Pose2D> &e, int64_t v) { return e.first < v; });
+    const auto &b = *it, &a = *(it - 1);
+    const double u = double(ns - a.first) / double(std::max<int64_t>(1, b.first - a.first));
+    double dth = b.second.th - a.second.th;
+    while (dth > M_PI) dth -= 2 * M_PI;
+    while (dth < -M_PI) dth += 2 * M_PI;
+    return {a.second.x + u * (b.second.x - a.second.x), a.second.y + u * (b.second.y - a.second.y), a.second.th + u * dth};
+}
+
+// 기억한 벽돌 k(0 오른쪽 선, 1 왼쪽 선)를 이번 프레임 로봇 좌표로 (월드 좌표로 기억함)
 obstacles::Quad PathNode::held_quads_one(int k) const
 {
     obstacles::Quad r;
-    const double c = std::cos(pose_.th), s = std::sin(pose_.th);
     for (int j = 0; j < 4; ++j)
-    {
-        const double dx = con_hold_[k].q[j].x - pose_.x, dy = con_hold_[k].q[j].y - pose_.y;
-        r[j] = {c * dx + s * dy, -s * dx + c * dy};
-    }
+        r[j] = world_to_robot(con_hold_[k].q[j], cur_pose_);
     return r;
 }
 
@@ -429,6 +474,9 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
         return;
 
     update_pose(now());
+    // 이번 마스크(카메라 stamp)와 마지막 YOLO 탐지 때의 자세: 벽돌 위치를 같은 기준으로 맞춤
+    cur_pose_ = pose_at(rclcpp::Time(msg->header.stamp));
+    det_pose_ = last_det_ ? pose_at(rclcpp::Time(last_det_->header.stamp)) : cur_pose_;
 
     // ====== BEV가 바뀌었으면 (tb_line 파라미터 변경) 기억 초기화
     std::array<double, 9> h;
@@ -667,7 +715,7 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             // 월드(odom) 좌표로 기억 → 로봇이 돌아도 제자리 (예전: 회전 무시하고 이동 거리만큼 뒤로만 옮겨서 곡선에서 어긋남)
             const obstacles::Quad qr = {cv::Point2d(x0, yl), cv::Point2d(x0, yr), cv::Point2d(x0 + 0.10, yr), cv::Point2d(x0 + 0.10, yl)}; // 두께 8cm + 여유
             for (int j = 0; j < 4; ++j)
-                hd.q[j] = robot_to_world(qr[j], pose_);
+                hd.q[j] = robot_to_world(qr[j], cur_pose_);
             hd.travel0 = con_travel_;
         }
 

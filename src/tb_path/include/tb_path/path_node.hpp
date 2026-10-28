@@ -12,6 +12,7 @@
 #include <std_msgs/msg/empty.hpp>
 #include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/opencv.hpp>
+#include <deque>
 
 #include "tb_interfaces/msg/lane_mask.hpp"
 #include "tb_interfaces/msg/detection_array.hpp"
@@ -69,6 +70,12 @@ private:
     // side_hint: draw_boxes가 정한 붙은 선 (+1 오른쪽, -1 왼쪽, 0 모름 → 로봇 기준 좌우)
     bool brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, int side_hint, BrickR &out) const;
     static cv::Point2d robot_to_world(const cv::Point2d &r, const lane_path::Pose2D &p);
+    static cv::Point2d world_to_robot(const cv::Point2d &w, const lane_path::Pose2D &p);
+    // 자세 기록: 영상·탐지 stamp 때의 자세로 벽돌 위치를 맞춤 (탐지가 늦게·드물게 와도 벽돌이 로봇을 안 따라오게)
+    std::deque<std::pair<int64_t, lane_path::Pose2D>> pose_hist_;
+    void push_pose(const rclcpp::Time &t);
+    lane_path::Pose2D pose_at(const rclcpp::Time &t) const;
+    lane_path::Pose2D cur_pose_, det_pose_; // 이번 마스크 stamp / 마지막 탐지 stamp 때 자세
     obstacles::Quad held_quads_one(int k) const; // 기억 중인 벽돌 k를 지금 위치로 옮긴 것 (잇기·표시용)
     int con_bridge_mm_ = 600;              // path.con_bridge_mm: 같은 쪽 벽돌 사이가 이보다 가까우면 이어 막음 (0 끔)
     int con_bridge_margin_mm_ = 50;        // path.con_bridge_margin_mm: 이은 벽의 길 쪽 여유
