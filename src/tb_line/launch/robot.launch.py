@@ -11,7 +11,7 @@ import os
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess, OpaqueFunction,
-                            RegisterEventHandler, TimerAction)
+                            RegisterEventHandler, SetEnvironmentVariable, TimerAction)
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessStart
 from launch.substitutions import LaunchConfiguration
@@ -91,6 +91,11 @@ def generate_launch_description():
     default_engine = share_or_empty('tb_signs', 'models', 'sign.engine')
     return LaunchDescription(
         [
+            # Fast DDS 기본은 동기 발행: publish() 안에서 소켓 전송까지 끝냄.
+            # WiFi 너머 노트북(GUI)으로 보내는 영상이 막히면 카메라·차선 노드가 그 자리에서 멈춤
+            # → 비동기: publish()는 큐에 넣고 바로 반환, 전송은 Fast DDS 스레드가 함
+            SetEnvironmentVariable("RMW_FASTRTPS_PUBLICATION_MODE",
+                                   os.environ.get("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS")),
             DeclareLaunchArgument("signs", default_value="true"),
             DeclareLaunchArgument("engine", default_value=default_engine),
             DeclareLaunchArgument("drive", default_value="true"),

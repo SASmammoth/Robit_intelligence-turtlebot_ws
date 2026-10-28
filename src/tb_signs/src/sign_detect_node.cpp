@@ -53,7 +53,7 @@ public:
     });
 
     det_pub_ = create_publisher<DetectionArray>("/signs/detections", 10);
-    dbg_pub_ = create_publisher<CompressedImage>("/signs/debug/compressed", rclcpp::SensorDataQoS());
+    dbg_pub_ = create_publisher<CompressedImage>("/signs/debug/compressed", rclcpp::SensorDataQoS().keep_last(1));
     // depth 1 + best_effort: 추론이 밀리면 오래된 프레임은 버림
     sub_ = create_subscription<CompressedImage>(
         "/camera/image_raw/compressed", rclcpp::SensorDataQoS().keep_last(1),

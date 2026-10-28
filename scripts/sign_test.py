@@ -3,6 +3,7 @@ import ast, os, time
 import cv2, numpy as np, onnxruntime as ort
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data  # 카메라가 best effort로 발행
 from sensor_msgs.msg import CompressedImage
 
 class SignTest(Node):
@@ -17,7 +18,7 @@ class SignTest(Node):
         self.names = ast.literal_eval(meta['names']) if 'names' in meta else {}
         self.get_logger().info(f'input {self.inp.shape}, classes {self.names}')
         self.pub = self.create_publisher(CompressedImage, '/sign/debug/compressed', 1)
-        self.create_subscription(CompressedImage, '/camera/image_raw/compressed', self.cb, 1)
+        self.create_subscription(CompressedImage, '/camera/image_raw/compressed', self.cb, qos_profile_sensor_data)
         self.first = True
 
     def letterbox(self, img):

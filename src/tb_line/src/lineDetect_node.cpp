@@ -26,9 +26,9 @@ LineDetectNode::LineDetectNode() : Node("lineDetect_node")
 
     mask_pub_ = create_publisher<tb_interfaces::msg::LaneMask>("/lane/mask", 10);
 
-    debug_mask_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/mask/compressed", 10);
-    debug_bev_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/bev/compressed", 10);
-    debug_roi_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/roi/compressed", 10);
+    debug_mask_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/mask/compressed", rclcpp::SensorDataQoS().keep_last(1));
+    debug_bev_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/bev/compressed", rclcpp::SensorDataQoS().keep_last(1));
+    debug_roi_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/roi/compressed", rclcpp::SensorDataQoS().keep_last(1));
 
     // ====== HSV
     hsv_ranges_[idx(Target::WhiteLine)] = {cv::Scalar(75, 0, 200), cv::Scalar(179, 160, 255)};

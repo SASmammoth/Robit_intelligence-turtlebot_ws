@@ -44,7 +44,11 @@ CameraNode::CameraNode() : Node("camera_node")
 void CameraNode::init_transport()
 {
   it_ = std::make_shared<image_transport::ImageTransport>(shared_from_this());
-  publisher_ = it_->advertise("camera/image_raw", 1);
+  // best effort, 마지막 1장만: 못 받은 프레임은 다시 보내지 않음 (WiFi 너머 GUI가 느려도 카메라가 안 기다림)
+  // 구독 쪽도 best effort여야 연결됨 (lineDetect, YOLO, GUI 모두 SensorDataQoS)
+  rmw_qos_profile_t qos = rmw_qos_profile_sensor_data;
+  qos.depth = 1;
+  publisher_ = it_->advertise("camera/image_raw", qos);
 }
 
 void CameraNode::timer_callback()

@@ -88,7 +88,7 @@ PathNode::PathNode() : Node("path_node")
     // ====== 출력
     path_pub_ = create_publisher<nav_msgs::msg::Path>("/lane/path", 10);
     src_pub_ = create_publisher<std_msgs::msg::String>("/lane/path_source", 10);
-    debug_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/skel/compressed", 10);
+    debug_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/skel/compressed", rclcpp::SensorDataQoS().keep_last(1));
     con_pub_ = create_publisher<std_msgs::msg::Bool>("/lane/construction", 10);
     con_info_pub_ = create_publisher<std_msgs::msg::String>("/lane/construction_info", 10);
 

@@ -44,7 +44,7 @@ public:
                     path.c_str(), engine_.in_w(), engine_.in_h(), out_d1_, out_d2_, nc);
 
         det_pub_ = create_publisher<tb_interfaces::msg::DetectionArray>("/signs/detections", 10);
-        debug_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/signs/debug/compressed", 10);
+        debug_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/signs/debug/compressed", rclcpp::SensorDataQoS().keep_last(1));
 
         // 항상 최신 프레임만 처리 (추론이 카메라보다 느려도 밀리지 않게)
         image_sub_ = create_subscription<sensor_msgs::msg::Image>(
