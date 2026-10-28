@@ -61,6 +61,10 @@ private:
   // 위 영상 칸 ↔ 아래 탭(파라미터 등) 사이 경계를 마우스로 끌어 높이 조절 (위치는 다음 실행에도 유지)
   void setupMainSplitter();
   QSplitter *main_split_ = nullptr;
+  // "영상 숨기기": 위 영상 칸(상태 상자 포함)을 숨겨 아래 탭이 창 전체를 씀. View 탭에서는 항상 보임
+  void updateVideoVisibility();
+  QWidget *video_area_ = nullptr;
+  QPushButton *btn_hide_video_ = nullptr;
   QMap<QString, QList<QLabel *>> streams_;               // "usb", "mask", "bev", "roi", "skel" → 라벨들
   void queueParam(const QString &name, int v); // 50ms 묶음 전송
 

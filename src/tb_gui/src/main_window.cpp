@@ -386,6 +386,7 @@ void MainWindow::setupMainSplitter()
   auto *top = new QWidget;
   ui->gridLayout_7->setParent(nullptr); // 레이아웃은 부모가 없어야 다른 위젯에 붙일 수 있음
   top->setLayout(ui->gridLayout_7);
+  video_area_ = top;
 
   main_split_ = new QSplitter(Qt::Vertical, ui->centralwidget);
   main_split_->addWidget(top);
@@ -404,6 +405,29 @@ void MainWindow::setupMainSplitter()
     main_split_->restoreState(state);
   connect(main_split_, &QSplitter::splitterMoved, this, [this](int, int)
           { QSettings("tb_gui", "tb_gui").setValue("main_split", main_split_->saveState()); });
+
+  // 아래 탭 이름 줄 오른쪽 끝: 영상 칸 숨기기/보이기 (켜 두면 다음 실행에도 유지)
+  btn_hide_video_ = new QPushButton("영상 숨기기", ui->tabWidget);
+  btn_hide_video_->setCheckable(true);
+  btn_hide_video_->setFocusPolicy(Qt::NoFocus); // WASD·방향 키 입력을 뺏지 않게
+  btn_hide_video_->setToolTip("위 영상 칸과 상태 상자를 숨기고 아래 탭(파라미터 등)을 창 전체로 씁니다.\n"
+                              "View 탭에서는 영상이 필요해서 항상 보입니다.");
+  ui->tabWidget->setCornerWidget(btn_hide_video_, Qt::TopRightCorner);
+  btn_hide_video_->setChecked(settings.value("hide_video", false).toBool());
+  connect(btn_hide_video_, &QPushButton::toggled, this, [this](bool on)
+          {
+    QSettings("tb_gui", "tb_gui").setValue("hide_video", on);
+    updateVideoVisibility(); });
+  updateVideoVisibility();
+}
+
+void MainWindow::updateVideoVisibility()
+{
+  if (!video_area_ || !btn_hide_video_)
+    return;
+  const bool hide = btn_hide_video_->isChecked() && !viewTabActive();
+  video_area_->setVisible(!hide); // 숨긴 영상 라벨은 그리지 않음 (showStream이 보이는 것만 그림)
+  btn_hide_video_->setText(btn_hide_video_->isChecked() ? "영상 보이기" : "영상 숨기기");
 }
 
 void MainWindow::makeTabsScrollable()
@@ -656,6 +680,7 @@ bool MainWindow::viewTabActive() const
 
 void MainWindow::applyViewTabSize()
 {
+  updateVideoVisibility(); // View 탭으로 오면 영상 칸을 다시 보임, 다른 탭으로 가면 숨김 설정대로
   // QTabWidget은 가장 큰 페이지 크기를 차지하므로, View 탭일 때는 높이를 직접 줄임
   if (viewTabActive())
     ui->tabWidget->setMaximumHeight(ui->tabWidget->tabBar()->sizeHint().height() + 34);
