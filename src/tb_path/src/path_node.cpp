@@ -134,6 +134,10 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_extend_mm", 400, 1000);      // 벽돌에 가려 끊긴 선을 이만큼 이음 (0이면 끔)
     declare_int("path.con_edge_mm", 60, 300);
     declare_int("path.con_dead_end_mm", 250, 1000);    // 끝이 벽에 막힌 가지가 이보다 짧으면 삭제 (0이면 끔)
+    declare_int("path.con_line_hug", 0, 1);            // 1: 벽돌 옆에서 경로를 반대쪽 선 쪽으로 붙임 (0: 빈 곳 한가운데, 예전과 같음)
+    declare_int("path.con_line_keep_mm", 140, 400);    //   로봇 중심 ~ 붙을 선 거리 (반폭 105 + 여유)
+    declare_int("path.con_line_zone_mm", 250, 600);    //   경로 옆 이 안에 벽돌이 있을 때만
+    declare_int("path.con_line_max_shift_mm", 120, 400); // 최대로 옮기는 폭
     declare_int("path.con_bridge_mm", 600, 1500);     // 같은 쪽 벽돌(앞 벽돌 뒷면~다음 앞면)이 이 안이면 사이를 막음 (0 끔)
     declare_int("path.con_bridge_margin_mm", 50, 300); // 이은 벽(보라)을 벽돌 안쪽 끝에서 길 쪽으로 더 막는 폭
     declare_int("path.con_bridge_dy_mm", 0, 500);      // 두 벽돌 안쪽 끝 y 차이가 이보다 크면 안 이음 (0 = 안 봄. 쪽은 붙은 선으로 정하므로 보통 0)
@@ -244,6 +248,10 @@ void PathNode::reload_params()
     con_hold_mm_ = get_parameter("path.con_hold_mm").as_int();
     con_keep_ = get_parameter("path.con_keep").as_int();
     con_bridge_mm_ = int(get_parameter("path.con_bridge_mm").as_int());
+    con_line_hug_ = get_parameter("path.con_line_hug").as_int() != 0;
+    con_line_keep_mm_ = int(get_parameter("path.con_line_keep_mm").as_int());
+    con_line_zone_mm_ = int(get_parameter("path.con_line_zone_mm").as_int());
+    con_line_max_shift_mm_ = int(get_parameter("path.con_line_max_shift_mm").as_int());
     con_bridge_margin_mm_ = int(get_parameter("path.con_bridge_margin_mm").as_int());
     con_bridge_dy_mm_ = int(get_parameter("path.con_bridge_dy_mm").as_int());
     con_bridge_from_back_ = get_parameter("path.con_bridge_from_back").as_int() != 0;
@@ -675,6 +683,19 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     // 공사 구간: 스켈레톤 경로는 벽돌 앞에서 ㄱ자로 꺾이므로 모서리를 둥글게 (기억에는 원래 경로가 남음)
     if (con && con_smooth_mm_ > 0)
         smooth_path(out.path, con_smooth_mm_ / 1000.0);
+
+    // 공사 구간: 벽돌 옆에서는 경로를 반대쪽 차선 쪽으로 붙임 (path.con_line_hug. 0이면 지금처럼 빈 곳 한가운데)
+    if (con && con_line_hug_)
+    {
+        cv::Mat bm = (wall != 0) & (lines == 0); // 벽돌 벽 + 이은 벽
+        if (!con_ext.empty())
+            bm &= (con_ext == 0);
+        obstacles::HugParams hp;
+        hp.keep = con_line_keep_mm_ / 1000.0;
+        hp.zone = con_line_zone_mm_ / 1000.0;
+        hp.max_shift = con_line_max_shift_mm_ / 1000.0;
+        obstacles::hug_line(out.path, lines, bm, geo_, hp);
+    }
 
     // 교차로 명령 중: 사각지대 때문에 경로가 모서리(BEV 아랫줄)에서 시작하면
     // 로봇 → 첫 점 직선을 붙여 fillet이 모서리를 원호로 깎을 수 있게 함

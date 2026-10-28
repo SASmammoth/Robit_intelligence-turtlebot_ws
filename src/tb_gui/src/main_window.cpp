@@ -1250,6 +1250,10 @@ void MainWindow::setupParamTab()
              {
                  {"path.con_smooth_mm", "경로 모서리 둥글게", " mm", 0, 300, 10},
                  {"path.con_dead_end_mm", "막다른 가지 지우기", " mm", 0, 1000, 10},
+                 {"path.con_line_hug", "벽돌 옆에서 차선 쪽으로 붙기 (1=켬)", "", 0, 1, 1},
+                 {"path.con_line_keep_mm", "붙기: 선까지 거리 (로봇 중심)", " mm", 0, 400, 5},
+                 {"path.con_line_zone_mm", "붙기: 이 안에 벽돌 있을 때만", " mm", 0, 600, 10},
+                 {"path.con_line_max_shift_mm", "붙기: 최대 옮김", " mm", 0, 400, 5},
                  {"path.con_override_frames", "새 경로 믿기까지", " 프레임", 0, 100, 1},
                  {"path.con_cross_override_frames", "선 너머 경로 믿기까지", " 프레임", 0, 100, 1},
                  {"path.con_straight_by_lane", "직진 가지를 차선 방향으로 (1=켬)", "", 0, 1, 1},

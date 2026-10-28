@@ -26,3 +26,8 @@
 
     cd src/tb_path && g++ -O2 -std=c++17 -Iinclude test/bridge_test.cpp src/laneSkeleton.cpp src/lanePath.cpp \
         src/obstacles.cpp $(pkg-config --cflags --libs opencv4) -o bridge_test && ./bridge_test
+
+`hug_test`: 벽돌 옆에서 차선 쪽으로 붙기 (`path.con_line_hug`). 선 쪽으로 옮기는지, 선에 keep보다 안 붙는지, 벽돌·선이 없으면 그대로인지
+
+    cd src/tb_path && g++ -O2 -std=c++17 -Iinclude test/hug_test.cpp src/laneSkeleton.cpp src/lanePath.cpp \
+        src/obstacles.cpp $(pkg-config --cflags --libs opencv4) -o hug_test && ./hug_test

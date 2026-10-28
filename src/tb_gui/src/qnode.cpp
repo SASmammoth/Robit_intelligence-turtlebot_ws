@@ -420,7 +420,7 @@ std::vector<std::string> QNode::pathParamNames()
           "path.brick_always", "path.brick_depth_mm", "path.brick_margin_mm", "path.brick_gap_mm", "path.det_max_age_ms", "path.mem_travel_mm",
           "path.max_dev_mm", "path.override_frames", "path.turn_drop_memory", "path.min_len_mm",
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm", "path.turn_radius_mm", "path.turn_min_deg",
-          "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_attach_mm", "path.con_extend_mm", "path.con_edge_mm", "path.con_dead_end_mm", "path.con_bridge_mm", "path.con_bridge_margin_mm", "path.con_bridge_dy_mm", "path.con_bridge_from_back", "path.con_keep", "path.con_keep_rear_mm", "path.con_hold_mm", "path.con_clear_mm",
+          "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_attach_mm", "path.con_extend_mm", "path.con_edge_mm", "path.con_dead_end_mm", "path.con_line_hug", "path.con_line_keep_mm", "path.con_line_zone_mm", "path.con_line_max_shift_mm", "path.con_bridge_mm", "path.con_bridge_margin_mm", "path.con_bridge_dy_mm", "path.con_bridge_from_back", "path.con_keep", "path.con_keep_rear_mm", "path.con_hold_mm", "path.con_clear_mm",
           "path.con_exit_mm", "path.con_no_brick_mm", "path.con_override_frames", "path.con_cross_override_frames", "path.con_straight_by_lane", "path.con_offscreen_side",
           "path.sl_margin_mm", "path.sl_min_w_px"};
 }

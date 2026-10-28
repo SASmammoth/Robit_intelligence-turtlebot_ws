@@ -360,4 +360,87 @@ std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap
     return out;
 }
 
+int hug_line(std::vector<cv::Point2d> &path, const cv::Mat &lines, const cv::Mat &bricks,
+             const lane_path::Geo &g, const HugParams &p)
+{
+    const size_t n = path.size();
+    if (n < 3 || lines.empty() || bricks.empty())
+        return 0;
+    const cv::Rect canvas(0, 0, lines.cols, lines.rows);
+    // 0: 없음, 1: 선, 2: 벽돌, -1: 화면 밖
+    auto at = [&](const cv::Point2d &q)
+    {
+        const cv::Point2d b = lane_path::robot_to_bev(q, g);
+        const cv::Point c(cvRound(b.x), cvRound(b.y));
+        if (!canvas.contains(c))
+            return -1;
+        if (bricks.at<uchar>(c))
+            return 2;
+        if (lines.at<uchar>(c))
+            return 1;
+        return 0;
+    };
+    std::vector<double> sh(n, 0.0);
+    std::vector<cv::Point2d> nrm(n);
+    const double step = 0.005;
+    for (size_t i = 0; i < n; ++i)
+    {
+        cv::Point2d t = path[std::min(i + 1, n - 1)] - path[i > 0 ? i - 1 : 0];
+        const double L = std::hypot(t.x, t.y);
+        if (L < 1e-6)
+            continue;
+        t *= 1.0 / L;
+        nrm[i] = {-t.y, t.x}; // 왼쪽
+        if (at(path[i]) != 0)
+            continue; // 화면 밖(사각지대 포함) 또는 이미 벽·선 위
+        double d_brick[2] = {1e9, 1e9}, d_line[2] = {1e9, 1e9}; // [0] 왼쪽, [1] 오른쪽
+        for (int s = 0; s < 2; ++s)
+        {
+            const double sg = s == 0 ? 1.0 : -1.0;
+            for (double d = step; d <= p.reach; d += step)
+            {
+                const int v = at(path[i] + nrm[i] * (sg * d));
+                if (v == -1)
+                    break;
+                if (v == 2) { d_brick[s] = d; break; }
+                if (v == 1) { d_line[s] = d; break; }
+            }
+        }
+        for (int s = 0; s < 2; ++s)
+        {
+            const int o = 1 - s; // s 쪽에 벽돌, o 쪽에 선
+            if (d_brick[s] > p.zone || d_brick[o] < 1e8 || d_line[o] > 1e8)
+                continue;
+            const double move = std::min(p.max_shift, d_line[o] - p.keep);
+            if (move > 0.0)
+                sh[i] = (o == 0 ? 1.0 : -1.0) * move;
+        }
+    }
+    // 부드럽게 (앞뒤 ±5점 평균, 2cm 간격이면 ±10cm) + 시작 부분 줄이기
+    std::vector<double> sm(n, 0.0);
+    for (size_t i = 0; i < n; ++i)
+    {
+        double sum = 0.0;
+        int cnt = 0;
+        for (size_t j = (i >= 5 ? i - 5 : 0); j <= std::min(n - 1, i + 5); ++j)
+            sum += sh[j], ++cnt;
+        sm[i] = sum / cnt;
+    }
+    int moved = 0;
+    double s_len = 0.0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        if (i > 0)
+            s_len += cv::norm(path[i] - path[i - 1]);
+        const double w = p.taper > 1e-6 ? std::min(1.0, s_len / p.taper) : 1.0;
+        const double d = sm[i] * w;
+        if (std::abs(d) > 1e-4)
+        {
+            path[i] += nrm[i] * d;
+            ++moved;
+        }
+    }
+    return moved;
+}
+
 } // namespace obstacles

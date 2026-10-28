@@ -3,6 +3,7 @@
 // 박스 아랫변 = 물체가 바닥에 닿은 곳이라 BEV 변환이 맞는 유일한 부분.
 // 그 아랫변을 BEV로 옮기고, 로봇에서 멀어지는 방향으로 depth_px 만큼 채운 사각형을 벽으로 씀
 #include <opencv2/core.hpp>
+#include "tb_path/lanePath.hpp"
 #include <array>
 #include <vector>
 
@@ -66,5 +67,22 @@ void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
 struct SideBrick { double x0, x1, yin; bool right; };
 std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap, double min_gap = 0.05,
                                    double max_dy = 0.15, double margin = 0.0, double far = 0.6, bool from_back = false);
+
+// 공사 구간: 벽돌 옆을 지날 때 경로를 벽돌에서 떼어 반대쪽 차선 쪽으로 붙임 (path.con_line_hug)
+// 스켈레톤 경로는 벽돌과 선 사이 빈 곳의 한가운데라, 벽돌 박스가 실제보다 크거나 늦게 그려지면 벽돌에 가까워짐.
+// 경로 점마다 좌우 수직 방향으로 BEV를 훑어, 한쪽 zone 안에 벽돌이 있고 반대쪽에 선이 보이면
+// 그 선에서 keep만큼 떨어진 곳까지(최대 max_shift) 선 쪽으로 옮김. 선이 안 보이면 안 옮김.
+// 옮긴 양은 앞뒤로 부드럽게 하고, 경로 시작 taper 구간은 0에서부터 늘림 (로봇 바로 앞이 꺾이지 않게)
+//   lines: 차선 마스크(BEV), bricks: 벽돌 벽만 그린 마스크(BEV). 반환: 옮긴 점 수
+struct HugParams
+{
+    double keep = 0.14;      // 로봇 중심 ~ 선 거리 [m] (반폭 10.5cm + 여유)
+    double zone = 0.25;      // 이 안에 벽돌이 있을 때만 [m]
+    double max_shift = 0.12; // 한 번에 옮기는 최대 [m]
+    double reach = 0.45;     // 좌우로 훑는 최대 거리 [m]
+    double taper = 0.10;     // 경로 시작부터 이 길이 동안 옮김을 0 → 1로 [m]
+};
+int hug_line(std::vector<cv::Point2d> &path, const cv::Mat &lines, const cv::Mat &bricks,
+             const lane_path::Geo &g, const HugParams &p);
 
 } // namespace obstacles

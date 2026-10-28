@@ -77,6 +77,8 @@ private:
     lane_path::Pose2D pose_at(const rclcpp::Time &t) const;
     lane_path::Pose2D cur_pose_, det_pose_; // 이번 마스크 stamp / 마지막 탐지 stamp 때 자세
     obstacles::Quad held_quads_one(int k) const; // 기억 중인 벽돌 k를 지금 위치로 옮긴 것 (잇기·표시용)
+    bool con_line_hug_ = false;            // path.con_line_hug: 벽돌 옆에서 반대쪽 선 쪽으로 붙기
+    int con_line_keep_mm_ = 140, con_line_zone_mm_ = 250, con_line_max_shift_mm_ = 120;
     int con_bridge_mm_ = 600;              // path.con_bridge_mm: 같은 쪽 벽돌 사이가 이보다 가까우면 이어 막음 (0 끔)
     int con_bridge_margin_mm_ = 50;        // path.con_bridge_margin_mm: 이은 벽의 길 쪽 여유
     int con_bridge_dy_mm_ = 0;           // path.con_bridge_dy_mm: 안쪽 끝 차이가 이보다 크면 안 이음
