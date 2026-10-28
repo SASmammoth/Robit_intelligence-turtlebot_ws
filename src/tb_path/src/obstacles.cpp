@@ -305,4 +305,37 @@ void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
     }
 }
 
+std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap, double min_gap,
+                                   double max_dy, double margin, double far)
+{
+    std::vector<Quad> out;
+    if (max_gap <= 0.0)
+        return out;
+    std::sort(bricks.begin(), bricks.end(), [](const SideBrick &a, const SideBrick &b) { return a.x0 < b.x0; });
+    for (const bool right : {true, false})
+    {
+        const SideBrick *prev = nullptr;
+        for (const auto &b : bricks)
+        {
+            if (b.right != right)
+                continue;
+            if (prev)
+            {
+                const double gap = b.x0 - prev->x1;
+                if (gap > min_gap && gap <= max_gap && std::abs(b.yin - prev->yin) <= max_dy)
+                {
+                    // 길 쪽 끝: 두 벽돌 중 더 길 쪽으로 나온 것 + 여유. 선 쪽은 far만큼 (화면 밖까지)
+                    const double yin = right ? std::max(prev->yin, b.yin) + margin : std::min(prev->yin, b.yin) - margin;
+                    const double yout = right ? yin - far : yin + far;
+                    out.push_back({cv::Point2d(prev->x0, yin), cv::Point2d(b.x0 + 0.02, yin),
+                                   cv::Point2d(b.x0 + 0.02, yout), cv::Point2d(prev->x0, yout)});
+                }
+            }
+            if (!prev || b.x1 > prev->x1)
+                prev = &b; // 겹친 것(같은 벽돌)은 더 뒤까지 간 쪽을 기준으로
+        }
+    }
+    return out;
+}
+
 } // namespace obstacles

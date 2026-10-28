@@ -490,6 +490,22 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
     return out;
 }
 
+std::vector<cv::Point2d> Tracker::memory_robot(const Pose2D &pose) const
+{
+    std::vector<cv::Point2d> out;
+    out.reserve(mem_.size());
+    for (const auto &w : mem_) out.push_back(to_robot(w, pose));
+    return out;
+}
+
+std::vector<cv::Point2d> Tracker::trail_robot(const Pose2D &pose) const
+{
+    std::vector<cv::Point2d> out;
+    out.reserve(trail_.size());
+    for (const auto &w : trail_) out.push_back(to_robot(w, pose));
+    return out;
+}
+
 bool Tracker::predict_seed(const Pose2D &pose, const Geo &g, cv::Point &bev_px) const
 {
     if (mem_.size() < 2)

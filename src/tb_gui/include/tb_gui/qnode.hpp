@@ -17,11 +17,13 @@
 #include <opencv2/opencv.hpp>
 #include "tb_interfaces/msg/detection_array.hpp"
 #include "tb_interfaces/msg/drive_cmd.hpp"
+#include "tb_interfaces/msg/path_world.hpp"
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <rcl_interfaces/msg/log.hpp>
 #endif
 #include <QThread>
+#include "world_data.hpp"
 #include <QImage>
 #include <QPolygonF>
 #include <QPointF>
@@ -136,6 +138,7 @@ private:
 
   // 경로 보기 (/lane/path, /drive/target)
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+  rclcpp::Subscription<tb_interfaces::msg::PathWorld>::SharedPtr world_sub_; // /lane/world (주행+ 탭)
   rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr target_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr uart_cmd_sub_; // TB_Uart_RX (모터로 실제 보낸 명령)
 
@@ -207,6 +210,7 @@ Q_SIGNALS:
   // 주행 (tb_drive)
   void driveStateReceived(const QString &text);
   void pathReceived(const QPolygonF &pts);   // /lane/path (base_link, m)
+  void worldReceived(const WorldData &w);    // /lane/world (선·벽돌·기억, base_link m)
   void targetReceived(const QPointF &p);     // /drive/target (base_link, m)
   void uartCommandSeen(const QString &text); // TB_Uart_RX (drive, WASD 등 누가 보냈든)
 

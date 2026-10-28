@@ -100,6 +100,7 @@ QNode::QNode()
   char **argv = NULL;
   rclcpp::init(argc, argv);
   node = rclcpp::Node::make_shared("tb_gui");
+  qRegisterMetaType<WorldData>("WorldData"); // ROS 스레드 → GUI 스레드 시그널로 넘기려면 필요
 
   // ====== 영상 구독 (토픽 → 시그널)
   auto sub = [this](const std::string &topic, void (QNode::*sig)(const QImage &))
@@ -211,6 +212,45 @@ QNode::QNode()
         for (const auto &ps : m->poses)
           pts << QPointF(ps.pose.position.x, ps.pose.position.y);
         Q_EMIT pathReceived(pts); });
+  // ====== 주행+ 탭: path_node가 경로를 만들 때 쓴 선·벽돌·기억 (구독하면 path_node가 발행 시작)
+  world_sub_ = node->create_subscription<tb_interfaces::msg::PathWorld>(
+      "/lane/world", rclcpp::SensorDataQoS().keep_last(1), [this](const tb_interfaces::msg::PathWorld::ConstSharedPtr m)
+      {
+        markRx("/lane/world", &m->header.stamp);
+        WorldData w;
+        auto pts = [](const std::vector<geometry_msgs::msg::Point> &in, QVector<QPointF> &out)
+        {
+          out.reserve(int(in.size()));
+          for (const auto &p : in)
+            out << QPointF(p.x, p.y);
+        };
+        auto polys = [](const std::vector<geometry_msgs::msg::Polygon> &in, QVector<QPolygonF> &out)
+        {
+          for (const auto &pg : in)
+          {
+            QPolygonF q;
+            for (const auto &p : pg.points)
+              q << QPointF(p.x, p.y);
+            out << q;
+          }
+        };
+        pts(m->white, w.white);
+        pts(m->yellow, w.yellow);
+        pts(m->red, w.red);
+        pts(m->ext, w.ext);
+        polys(m->bricks, w.bricks);
+        polys(m->held, w.held);
+        polys(m->bridges, w.bridges);
+        polys(m->keep, w.keep);
+        for (const auto &p : m->memory)
+          w.memory << QPointF(p.x, p.y);
+        for (const auto &p : m->trail)
+          w.trail << QPointF(p.x, p.y);
+        w.stop_x = m->stop_x;
+        w.stop_cut_x = m->stop_cut_x;
+        w.construction = m->construction;
+        w.turn = m->turn;
+        Q_EMIT worldReceived(w); });
   target_sub_ = node->create_subscription<geometry_msgs::msg::PointStamped>(
       "/drive/target", 10, [this](const geometry_msgs::msg::PointStamped::ConstSharedPtr m)
       { Q_EMIT targetReceived(QPointF(m->point.x, m->point.y)); });
@@ -353,7 +393,7 @@ std::vector<std::string> QNode::pathParamNames()
           "path.brick_always", "path.brick_depth_mm", "path.brick_margin_mm", "path.brick_gap_mm", "path.det_max_age_ms", "path.mem_travel_mm",
           "path.max_dev_mm", "path.override_frames", "path.turn_drop_memory", "path.min_len_mm",
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm", "path.turn_radius_mm", "path.turn_min_deg",
-          "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_attach_mm", "path.con_extend_mm", "path.con_edge_mm", "path.con_dead_end_mm", "path.con_keep", "path.con_keep_rear_mm", "path.con_hold_mm", "path.con_clear_mm",
+          "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_attach_mm", "path.con_extend_mm", "path.con_edge_mm", "path.con_dead_end_mm", "path.con_bridge_mm", "path.con_keep", "path.con_keep_rear_mm", "path.con_hold_mm", "path.con_clear_mm",
           "path.con_exit_mm", "path.con_no_brick_mm", "path.con_override_frames", "path.con_cross_override_frames", "path.con_straight_by_lane", "path.con_offscreen_side",
           "path.sl_margin_mm", "path.sl_min_w_px"};
 }

@@ -15,6 +15,7 @@
 
 #include "tb_interfaces/msg/lane_mask.hpp"
 #include "tb_interfaces/msg/detection_array.hpp"
+#include "tb_interfaces/msg/path_world.hpp"
 #include "tb_path/laneSkeleton.hpp"
 #include "tb_path/lanePath.hpp"
 #include "tb_path/obstacles.hpp"
@@ -63,17 +64,23 @@ private:
     // 공사 구간: 화면 아랫줄을 막 벗어나는 벽돌을 쪽마다 하나 기억 (로봇 좌표, 이동 거리만큼 뒤로 옮김)
     struct ConHold { bool on = false; obstacles::Quad q; double travel0 = 0.0; };
     ConHold con_hold_[2];                  // [0] 오른쪽, [1] 왼쪽
+    // 벽돌 하나의 로봇 좌표 (앞면 x, 왼쪽 끝 yl, 오른쪽 끝 yr, 로봇 오른쪽에 있는지)
+    struct BrickR { double x0, yl, yr; bool right; };
+    bool brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, BrickR &out) const;
+    obstacles::Quad held_quads_one(int k) const; // 기억 중인 벽돌 k를 지금 위치로 옮긴 것 (잇기·표시용)
+    int con_bridge_mm_ = 600;              // path.con_bridge_mm: 같은 쪽 벽돌 사이가 이보다 가까우면 이어 막음 (0 끔)
+    std::vector<obstacles::Quad> con_bridges_; // 이번 프레임에 이어 막은 곳 (표시용)
     double con_travel_ = 0.0;              // 공사 구간에서 지금까지 이동 거리
     lane_path::Pose2D con_last_pose_;
     bool con_have_pose_ = false;
     std::vector<obstacles::Quad> con_near_; // 이번 프레임에 경로를 떼어 놓은 벽돌 (로봇 좌표, 디버그)
-    int con_keep_ = 1, con_keep_rear_mm_ = 100;
+    int con_keep_ = 0, con_keep_rear_mm_ = 100;
     int con_hold_mm_ = 40, con_clear_mm_ = 30, con_dead_end_mm_ = 250;
     int con_no_brick_mm_ = 2000; // 진입 후 벽돌을 한 번도 못 보고 이만큼 가면 끝 (잘못 들어온 것)
     int con_cross_override_frames_ = 15; // 공사 구간: 차선 너머 새 경로는 이만큼 연속으로 보여야 믿음
     int override_frames_ = 10, con_override_frames_ = 1; // 일반 / 공사 구간 path.override_frames
     bool con_straight_by_lane_ = true;
-    bool con_offscreen_side_ = true;     // path.con_offscreen_side
+    bool con_offscreen_side_ = false;     // path.con_offscreen_side
     lane_path::Pose2D con_start_pose_; // 공사 모드 시작 위치
     std::string con_reason_ = "-";     // 마지막 시작·끝 이유 (표시용)
     void end_construction(const std::string &why);
@@ -131,6 +138,7 @@ private:
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr src_pub_;
     rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr debug_pub_;
+    rclcpp::Publisher<tb_interfaces::msg::PathWorld>::SharedPtr world_pub_; // /lane/world (GUI 주행+ 탭, 구독할 때만 만듦)
 
     rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr post_cb_handle_;
 };

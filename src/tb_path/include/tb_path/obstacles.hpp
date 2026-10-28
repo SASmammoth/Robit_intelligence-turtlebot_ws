@@ -50,4 +50,16 @@ using Quad = std::array<cv::Point2d, 4>;
 void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
                 double front, double rear, double half, double clear, double hold, bool soft = false);
 
+// 같은 쪽(같은 선)에 붙은 벽돌끼리 사이를 막음 (공사 구간, r-r-l처럼 같은 쪽이 연달아 올 때)
+// 앞 벽돌이 화면 아래로 빠지면 두 벽돌 사이 선 옆 빈 곳이 "길"로 보여 스켈레톤이 그리로 들어감.
+// 기억 중인 지난 벽돌 + 지금 보이는 벽돌을 넣으면, 쪽마다 x 순서로 이웃한 두 벽돌 사이를
+// 붙은 선 쪽으로 막는 사각형(로봇 좌표)을 돌려줌.
+//   x0, x1: 벽돌 앞면·뒷면 x [m], yin: 지나갈 길 쪽 끝 y [m] (오른쪽 벽돌은 왼쪽 끝, 왼쪽 벽돌은 오른쪽 끝)
+//   min_gap 이하로 겹치면 같은 벽돌(기억과 화면이 같은 것), max_gap 넘게 떨어지면 따로 피함
+//   max_dy: 두 벽돌 안쪽 끝 y 차이가 이보다 크면 다른 선에 붙은 것으로 보고 안 이음 (쪽 판단 오류 방지)
+//   margin: 안쪽 끝에서 길 쪽으로 더 막는 폭, far: 선 쪽으로 막는 폭 (화면 밖까지)
+struct SideBrick { double x0, x1, yin; bool right; };
+std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap, double min_gap = 0.05,
+                                   double max_dy = 0.15, double margin = 0.0, double far = 0.6);
+
 } // namespace obstacles

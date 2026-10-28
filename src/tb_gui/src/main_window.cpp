@@ -1179,9 +1179,10 @@ void MainWindow::setupParamTab()
                  {"path.con_straight_by_lane", "직진 가지를 차선 방향으로 (1=켬)", "", 0, 1, 1},
                  {"path.con_offscreen_side", "화면 끝 벽돌은 화면 밖 선에 붙음 (1=켬)", "", 0, 1, 1},
              }}),
-      group({"공사: 지난 벽돌 피하기",
+      group({"공사: 지난 벽돌 (화면 아래로 빠진 벽돌 기억)",
              {
-                 {"path.con_keep", "지난 벽돌 (0끔 1약 2강)", "", 0, 2, 1},
+                 {"path.con_bridge_mm", "같은 쪽 벽돌 잇기 거리 (0=끔)", " mm", 0, 1500, 50},
+                 {"path.con_keep", "경로 밀기 (0끔 1약 2강)", "", 0, 2, 1},
                  {"path.con_keep_rear_mm", "축 뒤 길이", " mm", 0, 300, 10},
                  {"path.con_hold_mm", "더 피하기", " mm", 0, 500, 10},
                  {"path.con_clear_mm", "옆 여유", " mm", 0, 200, 5},
@@ -1700,6 +1701,24 @@ void MainWindow::setupDisplayTabs()
   dg->setRowStretch(1, 2);
   display_tabs_->addTab(drive_page, "주행");
 
+  // ====== 주행+: 경로 보기에 path_node가 쓴 선·벽돌·기억(/lane/world)을 겹쳐 크게
+  auto *world_page = new QWidget;
+  auto *wg = new QGridLayout(world_page);
+  wg->setContentsMargins(2, 2, 2, 2);
+  wg->setSpacing(5);
+  {
+    PathView *v = makePathView();
+    v->setWorldMode(true);
+    connect(qnode, &QNode::worldReceived, v, &PathView::setWorld);
+    v->setMinimumSize(200, 1);
+    wg->addWidget(cell(v, "Path + 선·벽돌·기억 (/lane/world)"), 0, 1, 2, 1);
+  }
+  wg->addWidget(image("usb", "USB (YOLO)"), 0, 0);
+  wg->addWidget(image("skel", "Skeleton"), 1, 0);
+  wg->setColumnStretch(0, 2);
+  wg->setColumnStretch(1, 3);
+  display_tabs_->addTab(world_page, "주행+");
+
   // ====== 튜닝: 2 x 3
   auto *tune_page = new QWidget;
   auto *tg = new QGridLayout(tune_page);
@@ -2153,6 +2172,7 @@ void MainWindow::updateDebug()
       {"/lane/debug/skel/compressed", "skel img"},
       {"/lane/debug/mask/compressed", "mask img"},
       {"/lane/path", "lane/path"},
+      {"/lane/world", "lane/world"},
       {"/drive/state", "drive/state"},
       {"/rosout brain_node", "log brain"},
       {"/rosout path_node", "log path"},

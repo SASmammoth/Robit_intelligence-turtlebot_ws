@@ -18,6 +18,7 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <deque>
+#include "world_data.hpp"
 
 class PathView : public QWidget
 {
@@ -32,6 +33,9 @@ public:
   void setUartCommand(const QString &text); // TB_Uart_RX ("velocity L R"만 씀)
   void setIntParam(const QString &name, int v);       // bev.*, geo.* (/lineDetect_node)
   void setDoubleParam(const QString &name, double v); // drive.uart.wheel_sep_m, pivot_sep_m (/drive_node)
+  // 주행+ 탭: /lane/world(선·벽돌·기억)를 경로 밑에 같이 그리고, 로봇 뒤까지 넓게 보여 줌
+  void setWorldMode(bool on);
+  void setWorld(const WorldData &w);
 
 protected:
   void paintEvent(QPaintEvent *) override;
@@ -42,6 +46,7 @@ private:
   void drawArc(QPainter &p, double kappa, double s0, double s1, const QPen &pen) const; // 원점에서 x축에 접하는 호
   void drawWheels(QPainter &p, qint64 now);
   void drawBev(QPainter &p);
+  void drawWorld(QPainter &p, qint64 now);
   void rebuildBev();                          // 파라미터가 바뀌면 BEV 네모·보이는 영역 다시 계산
   double wheelSep(double v, double w) const;  // drive_node::publish_uart와 같은 바퀴 간격 섞기
 
@@ -83,6 +88,10 @@ private:
   QPointF origin_;                          // 로봇 원점의 픽셀 위치
 
   QTimer repaint_timer_;
+
+  bool world_mode_ = false;
+  WorldData world_;
+  qint64 world_ms_ = -1;
 };
 
 #endif // tb_gui_PATH_VIEW_HPP_

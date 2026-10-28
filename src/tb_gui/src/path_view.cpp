@@ -3,6 +3,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegularExpression>
+#include <algorithm>
 #include <cmath>
 #include <opencv2/imgproc.hpp>
 
@@ -197,11 +198,125 @@ void PathView::drawWheels(QPainter &p, qint64 now)
   }
 }
 
+void PathView::setWorldMode(bool on)
+{
+  world_mode_ = on;
+  x_min_ = on ? -0.45 : -0.20; // 기억한 벽돌·지나온 경로가 로봇 옆·뒤에 있으므로
+  update();
+}
+
+void PathView::setWorld(const WorldData &w)
+{
+  world_ = w;
+  world_ms_ = clock_.elapsed();
+}
+
+// 선·벽돌·기억 (path_node /lane/world). 0.5초 넘게 안 오면 흐리게
+void PathView::drawWorld(QPainter &p, qint64 now)
+{
+  if (world_ms_ < 0)
+  {
+    p.setPen(QColor(150, 150, 150));
+    p.setFont(QFont(font().family(), 8));
+    p.drawText(QPointF(8, height() - 8), "/lane/world 없음 (path_node가 예전 버전?)");
+    return;
+  }
+  const bool old = now - world_ms_ > 500;
+  const int a = old ? 70 : 255;
+  auto dots = [&](const QVector<QPointF> &pts, QColor c, double r)
+  {
+    c.setAlpha(a);
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    for (const auto &q : pts)
+      p.drawEllipse(toPx(q), r, r);
+  };
+  auto polys = [&](const QVector<QPolygonF> &ps, QColor fill, QColor line, Qt::PenStyle st)
+  {
+    fill.setAlpha(old ? fill.alpha() / 3 : fill.alpha());
+    line.setAlpha(a);
+    p.setBrush(fill);
+    p.setPen(QPen(line, 1.5, st));
+    for (const auto &pg : ps)
+    {
+      QPolygonF px;
+      for (const auto &q : pg)
+        px << toPx(q);
+      p.drawPolygon(px);
+    }
+  };
+  auto line = [&](const QPolygonF &pts, QColor c, double wdt, Qt::PenStyle st)
+  {
+    if (pts.size() < 2)
+      return;
+    c.setAlpha(old ? 70 : c.alpha());
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(c, wdt, st, Qt::RoundCap));
+    QPolygonF px;
+    for (const auto &q : pts)
+      px << toPx(q);
+    p.drawPolyline(px);
+  };
+
+  // 면: 이은 곳(보라) → 벽돌 벽(빨강) → 기억한 벽돌(주황 점선) → 경로를 떼어 놓은 벽돌(노랑)
+  polys(world_.bridges, QColor(190, 70, 210, 90), QColor(210, 110, 230), Qt::SolidLine);
+  polys(world_.bricks, QColor(220, 40, 40, 110), QColor(240, 80, 80), Qt::SolidLine);
+  polys(world_.held, QColor(255, 140, 0, 60), QColor(255, 160, 40), Qt::DashLine);
+  polys(world_.keep, QColor(0, 0, 0, 0), QColor(255, 230, 80), Qt::DotLine);
+
+  // 선
+  const double r = std::max(1.2, 0.006 * scale_); // 선 두께 2cm 정도로 보이게
+  dots(world_.white, QColor(235, 235, 235), r);
+  dots(world_.yellow, QColor(255, 200, 0), r);
+  dots(world_.red, QColor(255, 60, 60), r);
+  dots(world_.ext, QColor(150, 150, 150), r * 0.8);
+
+  // 기억 경로 (보라 점선), 지나온 경로 (회색 점선)
+  line(world_.trail, QColor(140, 140, 140, 200), 1.2, Qt::DotLine);
+  line(world_.memory, QColor(175, 140, 255, 220), 1.8, Qt::DashLine);
+
+  // 정지선
+  if (world_.stop_x > -0.5)
+  {
+    p.setPen(QPen(QColor(255, 60, 60, a), 2));
+    p.drawLine(toPx({world_.stop_x, 0.15}), toPx({world_.stop_x, -0.15}));
+  }
+  if (world_.stop_cut_x > 0.0)
+  {
+    p.setPen(QPen(QColor(255, 60, 60, a), 1, Qt::DashLine));
+    p.drawLine(toPx({world_.stop_cut_x, 0.25}), toPx({world_.stop_cut_x, -0.25}));
+  }
+
+  // 범례
+  p.setFont(QFont(font().family(), 8));
+  struct Item { QColor c; const char *t; };
+  const Item items[] = {{QColor(240, 80, 80), "벽돌"}, {QColor(255, 160, 40), "기억 벽돌"},
+                        {QColor(210, 110, 230), "잇기"}, {QColor(175, 140, 255), "기억 경로"},
+                        {QColor(140, 140, 140), "지나온 길"}};
+  double x = 8;
+  const double y = height() - 8;
+  for (const auto &it : items)
+  {
+    p.setPen(Qt::NoPen);
+    p.setBrush(it.c);
+    p.drawRect(QRectF(x, y - 8, 9, 9));
+    p.setPen(QColor(190, 190, 190));
+    p.drawText(QPointF(x + 12, y), it.t);
+    x += 14 + p.fontMetrics().horizontalAdvance(it.t) + 8;
+  }
+  static const char *turn_txt[] = {"직진", "좌", "우"};
+  const QString st = QString("%1%2%3").arg(turn_txt[std::clamp(world_.turn, 0, 2)])
+                         .arg(world_.construction ? "  공사" : "")
+                         .arg(old ? "  (오래됨)" : "");
+  p.setPen(world_.construction ? QColor(255, 170, 60) : QColor(190, 190, 190));
+  p.drawText(QPointF(width() - 8 - p.fontMetrics().horizontalAdvance(st), y), st);
+}
+
 void PathView::updateScale()
 {
-  // BEV가 다 보이게 범위를 넓힘 (기본 앞 60cm, 좌우 35cm)
+  // BEV가 다 보이게 범위를 넓힘 (기본 앞 60cm, 좌우 35cm. 주행+는 좌우 45cm)
   x_max_ = 0.60;
-  y_half_ = 0.35;
+  y_half_ = world_mode_ ? 0.45 : 0.35;
   for (const auto &q : bev_rect_)
   {
     x_max_ = std::max(x_max_, q.x() + 0.03);
@@ -250,6 +365,10 @@ void PathView::paintEvent(QPaintEvent *)
 
   // ====== BEV 범위
   drawBev(p);
+
+  // ====== 주행+: 선·벽돌·기억
+  if (world_mode_)
+    drawWorld(p, now);
 
   // ====== 지난 경로 (흐리게)
   for (size_t i = 0; i < history_.size(); ++i)

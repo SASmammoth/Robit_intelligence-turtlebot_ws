@@ -77,6 +77,10 @@ public:
     // 선 너머 영역을 도로로 잡음. 로봇이 실제로 따라오던 경로의 연장선에서 찾으면 안 넘어감
     bool predict_seed(const Pose2D &pose, const Geo &g, cv::Point &bev_px) const;
 
+    // 표시용: 기억 경로·지나온 경로를 지금 자세 기준 로봇 좌표로 (GUI /lane/world)
+    std::vector<cv::Point2d> memory_robot(const Pose2D &pose) const;
+    std::vector<cv::Point2d> trail_robot(const Pose2D &pose) const;
+
 private:
     std::vector<cv::Point2d> mem_;  // 기억한 경로 (월드 좌표)
     Pose2D mem_pose_;               // 기억을 마지막으로 갱신한 자세

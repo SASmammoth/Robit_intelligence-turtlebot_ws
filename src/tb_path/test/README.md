@@ -21,3 +21,8 @@
 
 `con_side_test`: 화면 밖 선에 붙은 벽돌 + 흰 선만 보일 때 (`BYLANE=1 ./con_side_test 0 0.36`)
 
+
+`bridge_test`: 같은 쪽 벽돌 잇기 (`path.con_bridge_mm`). r-r 배치에서 앞 벽돌이 화면 아래로 빠졌을 때 1·2번 사이로 안 들어가는지, r-l은 그대로인지
+
+    cd src/tb_path && g++ -O2 -std=c++17 -Iinclude test/bridge_test.cpp src/laneSkeleton.cpp src/lanePath.cpp \
+        src/obstacles.cpp $(pkg-config --cflags --libs opencv4) -o bridge_test && ./bridge_test
