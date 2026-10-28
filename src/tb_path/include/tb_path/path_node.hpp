@@ -36,6 +36,8 @@ private:
     lane_skel::Params skel_p_;
     cv::Point last_seed_{-1, -1};
     int dash_len_ = 40;
+    // 흰 점선 잇기 (skel.wdash_*): 짧은 흰 조각끼리 같은 줄이면 이어서 실선으로
+    int wdash_max_mm_ = 150, wdash_gap_mm_ = 150, wdash_angle_deg_ = 30, wdash_offset_mm_ = 40;
 
     // 경로
     lane_path::Tracker tracker_;

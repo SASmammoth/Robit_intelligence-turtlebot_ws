@@ -325,6 +325,79 @@ void remove_dashes(cv::Mat &mask, int max_len)
     }
 }
 
+int bridge_dashes(cv::Mat &mask, double mpx, double mpy, double max_piece_m, double max_gap_m,
+                  double max_angle_deg, double max_offset_m, int thick_px)
+{
+    if (max_piece_m <= 0.0 || max_gap_m <= 0.0 || mpx <= 0.0 || mpy <= 0.0)
+        return 0;
+
+    // 조각 = 짧은 덩어리. 가로·세로 축척이 달라서 길이·각도는 미터 좌표로 잼
+    struct Piece { cv::Point2d c, dir, end[2]; };
+    std::vector<Piece> ps;
+    std::vector<std::vector<cv::Point>> cs;
+    cv::findContours(mask.clone(), cs, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+    for (const auto &cn : cs) {
+        std::vector<cv::Point2f> m;
+        m.reserve(cn.size());
+        for (const auto &q : cn)
+            m.emplace_back(float(q.x * mpx), float(q.y * mpy));
+        const cv::RotatedRect r = cv::minAreaRect(m);
+        cv::Point2f k[4];
+        r.points(k);
+        const cv::Point2d e1 = k[1] - k[0], e2 = k[2] - k[1];
+        const double l1 = cv::norm(e1), l2 = cv::norm(e2), len = std::max(l1, l2);
+        if (len > max_piece_m || len < 0.2 * max_piece_m) // 긴 선(실선)과 잡티는 제외
+            continue;
+        Piece p;
+        p.dir = (l1 >= l2 ? e1 * (1.0 / l1) : e2 * (1.0 / l2));
+        p.c = cv::Point2d(r.center.x, r.center.y);
+        p.end[0] = p.c - p.dir * (len / 2.0);
+        p.end[1] = p.c + p.dir * (len / 2.0);
+        ps.push_back(p);
+    }
+
+    const double cos_max = std::cos(max_angle_deg * CV_PI / 180.0);
+    auto lateral = [](const Piece &a, const cv::Point2d &q) {      // a의 축에서 옆으로 떨어진 거리
+        const cv::Point2d d = q - a.c;
+        return std::abs(d.x * a.dir.y - d.y * a.dir.x);
+    };
+    auto to_px = [&](const cv::Point2d &q) { return cv::Point(cvRound(q.x / mpx), cvRound(q.y / mpy)); };
+
+    int n = 0;
+    for (size_t i = 0; i < ps.size(); ++i)
+        for (int ei = 0; ei < 2; ++ei) {
+            // 이 끝에서 가장 가까운, 같은 줄 위의 다른 조각 끝 하나만 이음
+            double best = max_gap_m;
+            cv::Point2d bq;
+            bool found = false;
+            for (size_t j = 0; j < ps.size(); ++j) {
+                if (j == i || std::abs(ps[i].dir.dot(ps[j].dir)) < cos_max)
+                    continue;
+                for (int ej = 0; ej < 2; ++ej) {
+                    const cv::Point2d p = ps[i].end[ei], q = ps[j].end[ej];
+                    const double d = cv::norm(q - p);
+                    if (d < 1e-4 || d > best)
+                        continue;
+                    const cv::Point2d v = (q - p) * (1.0 / d);
+                    // 이 끝에서 바깥쪽(조각 중심 반대)으로 뻗어야 하고, 잇는 선이 두 조각과 같은 방향
+                    if (v.dot(p - ps[i].c) <= 0.0 || std::abs(v.dot(ps[i].dir)) < cos_max ||
+                        std::abs(v.dot(ps[j].dir)) < cos_max)
+                        continue;
+                    if (lateral(ps[i], ps[j].c) > max_offset_m || lateral(ps[j], ps[i].c) > max_offset_m)
+                        continue;
+                    best = d;
+                    bq = q;
+                    found = true;
+                }
+            }
+            if (found) {
+                cv::line(mask, to_px(ps[i].end[ei]), to_px(bq), 255, std::max(1, thick_px));
+                ++n;
+            }
+        }
+    return n;
+}
+
 Result build(const cv::Mat &lane, const cv::Mat &valid, const Params &p, const cv::Point *seed_hint,
              const cv::Point *anchor_hint)
 {

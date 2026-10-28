@@ -927,6 +927,10 @@ void MainWindow::setupParamTab()
       {"스켈레톤 (path_node)",
        {
            {"skel.max_lane_thick", "차선 최대 두께", " px", 0, 200, 1},
+           {"skel.wdash_max_mm", "흰 점선 조각 최대 길이 (0=잇기 끔)", " mm", 0, 500, 5},
+           {"skel.wdash_gap_mm", "흰 점선 이을 최대 빈칸", " mm", 0, 500, 5},
+           {"skel.wdash_angle_deg", "흰 점선 같은 줄 각도", " °", 0, 90, 1},
+           {"skel.wdash_offset_mm", "흰 점선 같은 줄 옆 어긋남", " mm", 0, 200, 5},
        }},
       {"벽돌 (path_node)",
        {

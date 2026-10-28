@@ -318,6 +318,7 @@ std::vector<std::string> QNode::lineParamNames()
 std::vector<std::string> QNode::pathParamNames()
 {
   return {"skel.seal_len", "skel.prune_len", "skel.dash_len", "skel.max_lane_thick",
+          "skel.wdash_max_mm", "skel.wdash_gap_mm", "skel.wdash_angle_deg", "skel.wdash_offset_mm",
           "path.brick_depth_mm", "path.brick_margin_mm", "path.brick_gap_mm", "path.det_max_age_ms", "path.mem_travel_mm",
           "path.max_dev_mm", "path.override_frames", "path.turn_drop_memory", "path.min_len_mm",
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm", "path.turn_radius_mm", "path.turn_min_deg",

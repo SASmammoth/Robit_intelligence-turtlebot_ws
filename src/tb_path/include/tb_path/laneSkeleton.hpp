@@ -30,6 +30,14 @@ cv::Mat make_valid_mask(const cv::Mat &M, const cv::Size &src, const cv::Size &d
 // 길이가 max_len 미만인 조각(점선 한 칸)을 마스크에서 제거
 void remove_dashes(cv::Mat &mask, int max_len);
 
+// 점선 잇기: 길이가 max_piece_m 이하인 조각끼리, 같은 줄 위에 있고 끝점 사이가 max_gap_m 이하면
+// 끝점을 thick_px 굵기 선으로 이어 실선으로 만듦. mpx, mpy = BEV 1px당 가로·세로 거리 [m]
+//   같은 줄: 두 조각 방향 차이와 잇는 선의 방향 차이가 max_angle_deg 이하,
+//           한 조각 중심이 다른 조각 축에서 옆으로 max_offset_m 이하
+// 반환: 이은 선 개수
+int bridge_dashes(cv::Mat &mask, double mpx, double mpy, double max_piece_m, double max_gap_m,
+                  double max_angle_deg, double max_offset_m, int thick_px);
+
 // lane: BEV 차선 마스크(흰색|노란색), valid: make_valid_mask 결과
 // seed_hint: 직전 프레임 Result::seed (없으면 nullptr → 화면 하단 중앙에서 찾음)
 // anchor_hint: 경로 시작점을 고를 기준 (BEV 좌표, 없으면 화면 하단 중앙 = 로봇 정면).

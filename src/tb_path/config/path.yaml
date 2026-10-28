@@ -4,6 +4,10 @@ path_node:
       seal_len: 30          # 끊긴 차선 끝 연장 (BEV px)
       prune_len: 20         # 잔가지 삭제 길이 (BEV px)
       dash_len: 40          # ★ 노란 점선 한 칸 길이 / m_per_px_y
+      wdash_max_mm: 150     # 흰 점선 잇기: 이보다 짧은 흰 조각 = 점선 한 칸 (조각 10cm + 여유). 0이면 끔
+      wdash_gap_mm: 150     # 조각 끝 사이가 이 안이면 이음 (빈칸 10cm + 여유)
+      wdash_angle_deg: 30   # 같은 줄로 볼 방향 차이
+      wdash_offset_mm: 40   # 같은 줄로 볼 옆 어긋남 (차선 사이 26cm보다 충분히 작게)
       max_lane_thick: 20    # ★ 차선 두께 / m_per_px_x 보다 여유 있게
 
     path:

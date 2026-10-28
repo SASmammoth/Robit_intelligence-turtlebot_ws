@@ -96,6 +96,10 @@ PathNode::PathNode() : Node("path_node")
     declare_int("skel.seal_len", 30, 100);
     declare_int("skel.prune_len", 20, 100);
     declare_int("skel.dash_len", 40, 160);
+    declare_int("skel.wdash_max_mm", 150, 500);   // 흰 점선 잇기: 이보다 짧은 흰 조각을 점선으로 봄 (0이면 끔)
+    declare_int("skel.wdash_gap_mm", 150, 500);   // 조각 끝 사이가 이 안이면 이음
+    declare_int("skel.wdash_angle_deg", 30, 90);  // 두 조각·잇는 선의 방향 차이 허용
+    declare_int("skel.wdash_offset_mm", 40, 200); // 한 조각 중심이 다른 조각 축에서 옆으로 벗어나도 되는 거리
     declare_int("path.brick_depth_mm", 60, 500);
     declare_int("path.brick_margin_mm", 30, 300);
     declare_int("path.brick_gap_mm", 120, 300);   // 벽돌 끝과 차선 사이 이보다 좁은 틈은 막음 (0이면 안 막음)
@@ -192,6 +196,10 @@ void PathNode::reload_params()
     skel_p_.seal_len = get_parameter("skel.seal_len").as_int();
     skel_p_.prune_len = get_parameter("skel.prune_len").as_int();
     dash_len_ = get_parameter("skel.dash_len").as_int();
+    wdash_max_mm_ = get_parameter("skel.wdash_max_mm").as_int();
+    wdash_gap_mm_ = get_parameter("skel.wdash_gap_mm").as_int();
+    wdash_angle_deg_ = get_parameter("skel.wdash_angle_deg").as_int();
+    wdash_offset_mm_ = get_parameter("skel.wdash_offset_mm").as_int();
     brick_depth_mm_ = get_parameter("path.brick_depth_mm").as_int();
     brick_margin_mm_ = get_parameter("path.brick_margin_mm").as_int();
     brick_gap_mm_ = get_parameter("path.brick_gap_mm").as_int();
@@ -347,7 +355,12 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     skel_p_.lane_w = geo_.lane_w_px;
 
     // ====== 라벨 → 마스크
-    const cv::Mat white = (label == LABEL_WHITE);
+    cv::Mat white = (label == LABEL_WHITE);
+    // 흰 점선 → 실선 (조각 10cm·빈칸 10cm 구간). 벽·색 규칙 모두 이어진 선으로 봄
+    if (wdash_max_mm_ > 0)
+        lane_skel::bridge_dashes(white, geo_.m_per_px_x, geo_.m_per_px_y, wdash_max_mm_ / 1000.0,
+                                 wdash_gap_mm_ / 1000.0, wdash_angle_deg_, wdash_offset_mm_ / 1000.0,
+                                 std::max(3, int(std::lround(0.018 / std::max(1e-4, geo_.m_per_px_x)))));
     const cv::Mat yellow = (label == LABEL_YELLOW);
     const cv::Mat valid = (label != LABEL_BLIND);
 
