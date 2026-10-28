@@ -426,10 +426,13 @@ void DriveNode::on_timer()
     // ====== 상태 (10Hz)
     if (tick_ % std::max(1, control_hz_ / 10) == 0)
     {
-        char buf[240];
-        std::snprintf(buf, sizeof(buf), "%s src=%s v=%.3f w=%.2f ld=%.2f end=%.2f cap=%.3f dev=%.0f prof=%s%s%s%s",
+        // age: 지금 모터 명령을 만든 경로가 카메라에서 찍힌 지 몇 ms 됐는지 (영상 → 모터 명령 지연)
+        const double ps = follower_.path_stamp();
+        const int age_ms = ps >= 0.0 ? static_cast<int>(std::lround((t - ps) * 1000.0)) : -1;
+        char buf[256];
+        std::snprintf(buf, sizeof(buf), "%s src=%s v=%.3f w=%.2f ld=%.2f end=%.2f cap=%.3f dev=%.0f age=%d prof=%s%s%s%s",
                       mode_txt.c_str(), path_src_.c_str(), lim_.v, lim_.w, o.tg.ld, o.tg.end_dist,
-                      o.v_cap, o.dev * 180.0 / M_PI,
+                      o.v_cap, o.dev * 180.0 / M_PI, age_ms,
                       construction_ ? "con" : turning_ ? "cross" : "curve",
                       o.held ? " HOLD" : "", *why ? " stop:" : "", why);
         std_msgs::msg::String s;

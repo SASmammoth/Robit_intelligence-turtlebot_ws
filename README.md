@@ -26,7 +26,7 @@ ros2 run tb_gui tb_gui                               # GUI (별도 실행)
 camera_node ─/camera/image_raw─▶ lineDetect_node ─/lane/mask─▶ path_node ─/lane/path─▶ drive_node ─TB_Uart_RX─▶ tb_uart_node ─▶ STM32 / 모터
                                                                   ▲                          │
                                                                   └──────── /cmd_vel ◀───────┘
-                                                         (odom이 없어서 cmd_vel을 적분해 위치를 추정)
+                                                         (tb_uart_node의 /odom이 있으면 그걸, 없으면 cmd_vel 적분으로 위치 추정)
 ```
 
 ```mermaid
@@ -112,7 +112,7 @@ flowchart LR
 | 구독 | `/mission/parking` | `std_msgs/Bool` | 주차 모드: 노란 점선을 벽에서 뺌 |
 | 구독 | `/mission/construction` | `std_msgs/Bool` | true = 공사 구간 진입, false = 끝 (tb_brain 또는 GUI C키) |
 | 구독 | `/cmd_vel` | `geometry_msgs/Twist` | `/odom`이 없을 때 적분해서 위치 추정 |
-| 구독 | `/odom` | `nav_msgs/Odometry` | **현재 발행하는 노드 없음** (있으면 우선 사용) |
+| 구독 | `/odom` | `nav_msgs/Odometry` | tb_uart_node가 발행 (있으면 우선 사용) |
 | 발행 | `/lane/path` | `nav_msgs/Path` | `base_link` 기준 (x 앞, y 왼쪽, m) |
 | 발행 | `/lane/path_source` | `std_msgs/String` | `live` / `memory` / `color_rule` / `lost` |
 | 발행 | `/lane/construction` | `std_msgs/Bool` | 현재 공사 구간 여부 |
@@ -135,9 +135,13 @@ flowchart LR
 | 방향 | 토픽 | 타입 | 내용 |
 |---|---|---|---|
 | 구독 | `TB_Uart_RX` | `String` | `start`, `quit`, `velocity L R`, `filter`, `direction`, `psd ...`, `get ...` |
-| 발행 | `TB_Uart_TX` | `String` | `velocity L R`, `psd F L R`, `stm32 start/quit`, `error ...` |
+| 발행 | `TB_Uart_TX` | `String` | `velocity L R`(`odom.text_period_ms` 간격으로 줄임), `psd F L R`, `stm32 start/quit`, `error ...` |
+| 발행 | `/odom` | `nav_msgs/Odometry` | 다이나믹셀 velocity 피드백 적분. 기본 10ms 피드백 → 100Hz |
+| 구독 | `/odom/reset` | `std_msgs/Empty` | 위치를 0으로 (보정할 때만, 주행 중엔 X) |
 
 `/dev/ttyUSB*`를 자동으로 찾습니다 (`channel` 파라미터로 고정 가능). 명령은 `start`를 먼저 보내야 받습니다.
+
+odom: STM32가 작동 중인데 velocity 피드백이 안 오면 `velocity period <odom.period_ms>`를 알아서 보냅니다. 다른 노드가 더 느린 주기(예: brain 주차의 33ms)를 요청해도 `odom.period_ms`보다 느려지지 않습니다. 피드백은 모터 방향 그대로 오므로 `direction` 값을 곱해 "전진 = 양수"로 맞춥니다. 바퀴 값(`odom.wheel_radius_m`, `odom.wheel_sep_m`, `odom.pivot_sep_m`, `odom.rpm_per_unit`)은 tb_drive `drive.uart.*`와 같게 둡니다. `log_data:=true`면 velocity·psd packet 로그를 다시 찍습니다 (기본은 안 찍음).
 
 ### tb_gui
 | 방향 | 토픽 | 쓰임 |
@@ -182,7 +186,7 @@ flowchart LR
 | `/drive/target` | `PointStamped` | drive_node | (없음) |
 | `TB_Uart_RX` | `String` | drive_node, tb_gui | tb_uart_node |
 | `TB_Uart_TX` | `String` | tb_uart_node | tb_gui |
-| `/odom` | `Odometry` | (없음) | path_node |
+| `/odom` | `Odometry` | tb_uart_node | path_node |
 | `/psd/front` | `Range` | (없음) | drive_node |
 
 > `TB_Uart_RX`, `TB_Uart_TX`는 앞에 `/`가 없는 상대 이름입니다. 네임스페이스 없이 띄우면 `/TB_Uart_RX`가 됩니다.
@@ -241,7 +245,7 @@ flowchart LR
 ## 7. rqt_graph에 안 보이는 연결
 
 - **파라미터 서비스**: tb_gui가 `AsyncParametersClient`로 `/lineDetect_node`, `/path_node`, `/drive_node`의 파라미터를 직접 바꾸고, parameter event로 변경을 받습니다. `drive.enable`(주행 켜기)도 이 방식입니다.
-- **발행자 없는 토픽**: `/odom`, `/psd/front` (rqt에서 "Dead sinks" 숨김이 켜져 있으면 안 보임)
+- **발행자 없는 토픽**: `/psd/front` (rqt에서 "Dead sinks" 숨김이 켜져 있으면 안 보임)
 - **구독자 있을 때만 발행**: `/drive/target`, `/lane/debug/skel/compressed`
 
 ---

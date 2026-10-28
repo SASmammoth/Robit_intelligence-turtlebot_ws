@@ -2,6 +2,9 @@
 
 #include <unistd.h>
 
+#include <algorithm>
+#include <cmath>
+
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -45,6 +48,28 @@ bool to_int(const std::string &s, int &v)
 TbUartNode::TbUartNode() : Node("tb_uart_node")
 {
   channel_ = declare_parameter<int>("channel", -1);   // -1: 자동 탐색
+
+  // ====== odom: STM32 velocity 피드백(다이나믹셀 실제 속도)을 적분해서 /odom 발행
+  // 값은 시작할 때만 읽음. 바퀴 값은 tb_drive drive.uart.* 와 같게
+  log_data_        = declare_parameter<bool>("log_data", false);
+  odom_enable_     = declare_parameter<bool>("odom.enable", true);
+  odom_period_ms_  = std::clamp<int>(declare_parameter<int>("odom.period_ms", 10), 1, 1000);
+  text_period_ms_  = std::max<int>(0, declare_parameter<int>("odom.text_period_ms", 33));
+  odom_.wheel_radius = declare_parameter<double>("odom.wheel_radius_m", 0.0475);
+  odom_.wheel_sep    = declare_parameter<double>("odom.wheel_sep_m", 0.1933);
+  odom_.pivot_sep    = declare_parameter<double>("odom.pivot_sep_m", 0.1933);
+  odom_.rpm_per_unit = declare_parameter<double>("odom.rpm_per_unit", 0.229);
+  odom_.max_gap      = declare_parameter<int>("odom.max_gap_ms", 100) / 1000.0;
+  rt_.set_quiet_data(!log_data_);
+
+  if (odom_enable_) {
+    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    // 위치를 0으로 (거리 보정할 때용. 주행 중에 보내면 path_node가 기억한 경로가 튐)
+    odom_reset_sub_ = create_subscription<std_msgs::msg::Empty>(
+      "/odom/reset", 10, [this](const std_msgs::msg::Empty::SharedPtr) { odom_reset_req_ = true; });
+    odom_timer_ = create_wall_timer(std::chrono::milliseconds(200), [this]() { odom_watch(); });
+    RCLCPP_INFO(get_logger(), "odom on: velocity feedback %d ms, /odom", odom_period_ms_);
+  }
 
   pub_ = create_publisher<std_msgs::msg::String>(TOPIC_STATUS, 10);
   sub_ = create_subscription<std_msgs::msg::String>(
@@ -148,7 +173,8 @@ void TbUartNode::publish_text(const std::string &text)
   std_msgs::msg::String m;
   m.data = text;
   pub_->publish(m);
-  RCLCPP_INFO(get_logger(), "[TOPIC TX] '%s'", text.c_str());
+  if (log_data_ || (text.rfind("velocity", 0) != 0 && text.rfind("psd", 0) != 0))
+    RCLCPP_INFO(get_logger(), "[TOPIC TX] '%s'", text.c_str());
 }
 
 void TbUartNode::publish_error(const std::string &msg)
@@ -160,7 +186,9 @@ void TbUartNode::publish_error(const std::string &msg)
 void TbUartNode::on_command(const std_msgs::msg::String::SharedPtr msg)
 {
   const std::string &s = msg->data;
-  RCLCPP_INFO(get_logger(), "[TOPIC RX] '%s'", s.c_str());
+  // drive가 30Hz로 보내는 "velocity L R"는 log_data일 때만 찍음
+  if (log_data_ || s.rfind("velocity ", 0) != 0 || s.rfind("velocity period", 0) == 0)
+    RCLCPP_INFO(get_logger(), "[TOPIC RX] '%s'", s.c_str());
 
   const std::vector<std::string> t = split(s);
   if (t.empty()) {
@@ -232,9 +260,15 @@ void TbUartNode::on_command(const std_msgs::msg::String::SharedPtr msg)
   // ---------- velocity ... ----------
   if (t[0] == "velocity") {
     // velocity period <ms>
+    // odom이 켜져 있으면 odom.period_ms보다 느리게(또는 0으로 끄게) 하지 않음
     if (n == 3 && t[1] == "period" && to_int(t[2], a)) {
       if (a < 0 || a > 65535) { publish_error("period out of range: " + std::to_string(a)); return; }
-      rt_.send_velocity_period(static_cast<uint16_t>(a));
+      user_vel_period_ = a;
+      const uint16_t p = effective_vel_period(a);
+      if (p != a)
+        RCLCPP_INFO(get_logger(), "velocity period %d → %u ms (odom 사용 중)", a, static_cast<unsigned>(p));
+      rt_.send_velocity_period(p);
+      last_period_sent_ns_ = std::chrono::steady_clock::now().time_since_epoch().count();
       return;
     }
 
@@ -364,10 +398,72 @@ void TbUartNode::rx_loop()
   }
 }
 
+uint16_t TbUartNode::effective_vel_period(int requested) const
+{
+  if (!odom_enable_) return static_cast<uint16_t>(requested);
+  if (requested <= 0) return static_cast<uint16_t>(odom_period_ms_);
+  return static_cast<uint16_t>(std::min(requested, odom_period_ms_));
+}
+
+// 200ms마다. STM32가 작동 중인데 velocity 피드백이 안 오면 주기 설정을 (1초에 한 번까지) 다시 보냄
+// STM32가 재시작되거나 처음 start 했을 때도 이걸로 켜짐
+void TbUartNode::odom_watch()
+{
+  if (!initialized_ || !running_state_) return;
+  const int64_t now_ns = std::chrono::steady_clock::now().time_since_epoch().count();
+  const int64_t silent_ns = now_ns - last_fb_ns_.load();
+  const int64_t limit_ns = std::max<int64_t>(300, 10LL * odom_period_ms_) * 1000000LL;
+  if (silent_ns < limit_ns) return;
+  if (now_ns - last_period_sent_ns_ < 1000000000LL) return;
+  rt_.send_velocity_period(effective_vel_period(user_vel_period_));
+  last_period_sent_ns_ = now_ns;
+  RCLCPP_INFO(get_logger(), "velocity feedback 없음 → velocity period %u ms 요청",
+              static_cast<unsigned>(effective_vel_period(user_vel_period_)));
+}
+
 void TbUartNode::on_velocity(const int16_t v[2])
 {
-  std::lock_guard<std::mutex> lk(mtx_);
-  publish_text("velocity " + std::to_string(v[idL_]) + " " + std::to_string(v[idR_]));
+  const rclcpp::Time t = now();
+  last_fb_ns_ = std::chrono::steady_clock::now().time_since_epoch().count();
+  int l, r, dl, dr;
+  {
+    std::lock_guard<std::mutex> lk(mtx_);
+    l = v[idL_];
+    r = v[idR_];
+    dl = dirL_;
+    dr = dirR_;
+  }
+
+  if (odom_enable_) {
+    if (odom_reset_req_.exchange(false)) {
+      odom_.reset_pose();
+      RCLCPP_INFO(get_logger(), "odom reset");
+    }
+    // 피드백은 모터 방향 그대로 → 송신 때 곱한 direction(±1)을 다시 곱하면 "전진 = 양수"
+    odom_.update(l * dl, r * dr, t.seconds());
+    publish_odom(t);
+  }
+
+  // 문자열은 brain 주차·GUI용. 피드백이 빨라도 text_period_ms 간격으로만
+  if (!odom_enable_ || (t - last_text_t_).nanoseconds() >= text_period_ms_ * 1000000LL) {
+    last_text_t_ = t;
+    publish_text("velocity " + std::to_string(l) + " " + std::to_string(r));
+  }
+}
+
+void TbUartNode::publish_odom(const rclcpp::Time &t)
+{
+  nav_msgs::msg::Odometry m;
+  m.header.stamp = t;   // UART로 받은 시각 (STM32가 읽은 시각보다 1~2ms 늦음)
+  m.header.frame_id = "odom";
+  m.child_frame_id = "base_link";
+  m.pose.pose.position.x = odom_.x;
+  m.pose.pose.position.y = odom_.y;
+  m.pose.pose.orientation.z = std::sin(0.5 * odom_.th);
+  m.pose.pose.orientation.w = std::cos(0.5 * odom_.th);
+  m.twist.twist.linear.x = odom_.v;
+  m.twist.twist.angular.z = odom_.w;
+  odom_pub_->publish(m);
 }
 
 void TbUartNode::on_psd(const uint16_t p[3])
@@ -402,6 +498,7 @@ void TbUartNode::on_psd_one(int index, uint16_t value)
 void TbUartNode::on_program(bool start)
 {
   running_state_ = start;
+  if (start) last_fb_ns_ = 0;   // 다음 odom_watch에서 바로 주기 요청
   RCLCPP_INFO(get_logger(), "STM32 state: %s", start ? "running" : "stopped");
   publish_text(start ? "stm32 start" : "stm32 quit");
 }

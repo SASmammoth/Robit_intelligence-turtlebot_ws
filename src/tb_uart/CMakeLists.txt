@@ -8,6 +8,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 
 add_executable(tb_uart_node
   src/main.cpp
@@ -19,7 +20,7 @@ target_include_directories(tb_uart_node PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
 target_compile_features(tb_uart_node PUBLIC cxx_std_17)
-ament_target_dependencies(tb_uart_node rclcpp std_msgs)
+ament_target_dependencies(tb_uart_node rclcpp std_msgs nav_msgs)
 
 install(TARGETS tb_uart_node DESTINATION lib/${PROJECT_NAME})
 

@@ -21,4 +21,11 @@ private:
     std::shared_ptr<image_transport::ImageTransport> it_;
     image_transport::Publisher publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
+
+    bool stamp_from_driver_ = false;
+    double stats_period_s_ = 5.0;
+
+    // 지연 통계 [ms]
+    int st_n_ = 0, st_drv_n_ = 0;
+    double st_t0_ = -1.0, st_wait_ = 0.0, st_pub_ = 0.0, st_pub_max_ = 0.0, st_drv_ = 0.0, st_drv_max_ = 0.0;
 };

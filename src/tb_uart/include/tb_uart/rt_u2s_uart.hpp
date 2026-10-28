@@ -63,8 +63,11 @@ public:
   void set_log_callback(LogCallback cb) { log_cb_ = std::move(cb); }
   void set_velocity_one_callback(VelocityOneCallback cb) { vel_one_cb_ = std::move(cb); }
   void set_psd_one_callback(PsdOneCallback cb) { psd_one_cb_ = std::move(cb); }
-    void set_error_callback(ErrorCallback cb) { err_cb_ = std::move(cb); }
-  
+  void set_error_callback(ErrorCallback cb) { err_cb_ = std::move(cb); }
+
+  // true면 velocity·psd 데이터 packet(송신·수신)의 로그를 안 남김 (고속 피드백 때 콘솔 폭주 방지)
+  void set_quiet_data(bool q) { quiet_data_ = q; }
+
 
 private:
   enum class State { H1, H2, ID, DATA };
@@ -77,6 +80,9 @@ private:
   VelocityOneCallback vel_one_cb_;
   PsdOneCallback psd_one_cb_;
   ErrorCallback err_cb_;
+
+  bool quiet_data_{false};
+  static bool is_data_id(uint8_t id);
 
   UbuntuUart uart_;
   int channel_{0};

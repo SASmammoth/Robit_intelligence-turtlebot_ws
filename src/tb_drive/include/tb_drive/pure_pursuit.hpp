@@ -123,6 +123,7 @@ public:
     void record(double t, double v, double w) { hist_.push(t, v, w); }
     // v_now: 지금 속도 (lookahead 길이 계산용), limit: 속도 상한
     Out follow(double t, double v_now, double limit) const;
+    double path_stamp() const { return cur_stamp_; } // 지금 경로의 카메라 stamp [s], 없으면 -1
 
 private:
     MotionHistory hist_;

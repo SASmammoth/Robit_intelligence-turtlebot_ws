@@ -62,11 +62,13 @@ def launch_setup(context):
     driver = Node(package='tb_drive', executable='drive_node', name='drive_node', output='screen',
                   parameters=param_files(drive_yaml, params),
                   condition=IfCondition(drive))
+    # odom.* 값을 바꾸려면 params 파일에 /tb_uart_node 섹션을 넣으면 됨
     uart = Node(
         package="tb_uart",
         executable="tb_uart_node",
         name="tb_uart_node",
         output="screen",
+        parameters=param_files('', params),
     )
 
     return [

@@ -131,6 +131,17 @@ const char *id_name(uint8_t id)
 
 }  // namespace
 
+bool RtU2sUart::is_data_id(uint8_t id)
+{
+  switch (id) {
+    case ID_VEL_ALL: case ID_VEL0: case ID_VEL1:
+    case ID_PSD_ALL: case ID_PSD0: case ID_PSD1: case ID_PSD2:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // ---------- 초기화 ----------
 bool RtU2sUart::rt_u2s_init(int channel, unsigned int baudrate)
 {
@@ -159,6 +170,7 @@ bool RtU2sUart::send_packet(uint8_t id, const uint8_t *data, int len)
   const int total = 3 + len;
 
   const bool ok = (uart_.transmit(channel_, buf, total) == total);
+  if (ok && quiet_data_ && is_data_id(id)) return ok;
   log(std::string("[UART TX] ") + (ok ? "" : "FAILED ") + id_name(id) +
       " : " + to_hex(buf, total));
   return ok;
@@ -320,6 +332,28 @@ void RtU2sUart::feed(uint8_t b)
 
 void RtU2sUart::handle_packet()
 {
+  if (quiet_data_ && is_data_id(id_)) {   // 로그 없이 콜백만
+    switch (id_) {
+      case ID_VEL_ALL: {
+        const int16_t v[2] = {get_i16(&data_[0]), get_i16(&data_[2])};
+        if (vel_cb_) vel_cb_(v);
+        return;
+      }
+      case ID_PSD_ALL: {
+        const uint16_t p[3] = {get_u16(&data_[0]), get_u16(&data_[2]), get_u16(&data_[4])};
+        if (psd_cb_) psd_cb_(p);
+        return;
+      }
+      case ID_VEL0:
+      case ID_VEL1:
+        if (vel_one_cb_) vel_one_cb_(id_ == ID_VEL0 ? 0 : 1, get_i16(&data_[0]));
+        return;
+      default:   // ID_PSD0~2
+        if (psd_one_cb_) psd_one_cb_(id_ - ID_PSD0, get_u16(&data_[0]));
+        return;
+    }
+  }
+
   log(std::string("[UART RX] ") + id_name(id_) + " : " + to_hex(raw_, 3 + len_));
 
   switch (id_) {
