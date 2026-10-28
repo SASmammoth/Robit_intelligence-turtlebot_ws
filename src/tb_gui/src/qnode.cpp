@@ -86,6 +86,7 @@ static const char *LINE_NODE = "/lineDetect_node";
 static const char *PATH_NODE = "/path_node";
 static const char *DRIVE_NODE = "/drive_node";
 static const char *BRAIN_NODE = "/brain_node";
+static const char *SIGNS_NODE = "/signs_node"; // tb_signs sign_detect_node (robot.launch.py의 이름)
 
 // 파일 저장/불러오기에서 빼는 파라미터 (불러오자마자 로봇이 움직이면 안 됨)
 static bool isUnsavedParam(const std::string &name)
@@ -229,13 +230,15 @@ QNode::QNode()
   path_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, PATH_NODE);
   drive_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, DRIVE_NODE);
   brain_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, BRAIN_NODE);
+  signs_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, SIGNS_NODE);
 
   // 세 노드의 파라미터 변경을 실시간으로 받음
   param_event_handler_ = std::make_shared<rclcpp::ParameterEventHandler>(node);
   param_event_cb_handle_ = param_event_handler_->add_parameter_event_callback(
       [this](const rcl_interfaces::msg::ParameterEvent &event)
       {
-        if (event.node != LINE_NODE && event.node != PATH_NODE && event.node != DRIVE_NODE && event.node != BRAIN_NODE)
+        if (event.node != LINE_NODE && event.node != PATH_NODE && event.node != DRIVE_NODE && event.node != BRAIN_NODE &&
+            event.node != SIGNS_NODE)
           return;
         for (const auto *list : {&event.new_parameters, &event.changed_parameters})
           for (const auto &p : *list)
@@ -283,6 +286,30 @@ bool QNode::isDriveParam(const QString &n)
 bool QNode::isBrainParam(const QString &n)
 {
   return n.startsWith("sign.") || n.startsWith("mission.");
+}
+
+// YOLO 노드는 접두어 없는 이름을 써서 목록으로 판단
+bool QNode::isSignsParam(const QString &n)
+{
+  return n == "conf" || n == "nms" || n == "max_hz" || n == "publish_debug";
+}
+
+std::vector<std::string> QNode::signsParamNames()
+{
+  return {"max_hz", "conf", "nms", "publish_debug"};
+}
+
+rclcpp::AsyncParametersClient::SharedPtr QNode::clientFor(const QString &n) const
+{
+  if (isSignsParam(n))
+    return signs_client_;
+  if (isDriveParam(n))
+    return drive_client_;
+  if (isPathParam(n))
+    return path_client_;
+  if (isBrainParam(n))
+    return brain_client_;
+  return line_client_;
 }
 
 // tb_brain 표지판 필터 (brain_node.cpp의 FILTER_LABELS와 같은 순서)
@@ -445,6 +472,7 @@ void QNode::refreshParams()
   each(drive_client_, driveParamNames(true));
   each(drive_client_, driveDoubleNames());
   each(brain_client_, brainParamNames()); // brain은 늦게 뜨거나 안 띄울 수도 있어 여기서만 읽음
+  each(signs_client_, signsParamNames()); // YOLO도 signs:=false로 안 띄울 수 있음
 }
 
 bool QNode::recentlySet(const std::string &name)
@@ -456,18 +484,32 @@ bool QNode::recentlySet(const std::string &name)
 
 bool QNode::setBoolParam(const QString &name, bool on)
 {
-  if (!isDriveParam(name))
+  if (!isDriveParam(name) && !isSignsParam(name))
     return false;
-  if (!drive_client_->service_is_ready())
+  auto client = clientFor(name);
+  if (!client->service_is_ready())
   {
-    RCLCPP_WARN(node->get_logger(), "%s 설정 실패: /drive_node 연결 안 됨", name.toStdString().c_str());
+    RCLCPP_WARN(node->get_logger(), "%s 설정 실패: %s 연결 안 됨", name.toStdString().c_str(),
+                isSignsParam(name) ? SIGNS_NODE : DRIVE_NODE);
     return false;
   }
   {
     std::lock_guard<std::mutex> lk(bool_set_mtx_);
     bool_set_time_[name.toStdString()] = std::chrono::steady_clock::now();
   }
-  drive_client_->set_parameters({rclcpp::Parameter(name.toStdString(), on)});
+  client->set_parameters({rclcpp::Parameter(name.toStdString(), on)});
+  return true;
+}
+
+bool QNode::setDoubleParam(const QString &name, double v)
+{
+  auto client = clientFor(name);
+  if (!client->service_is_ready())
+  {
+    Q_EMIT paramMessage(QString("%1 연결 안 됨: %2 적용 안 됨").arg(isSignsParam(name) ? SIGNS_NODE : "노드", name));
+    return false;
+  }
+  sendParams(client, isSignsParam(name) ? SIGNS_NODE : "node", {rclcpp::Parameter(name.toStdString(), v)});
   return true;
 }
 
@@ -475,7 +517,8 @@ QStringList QNode::paramNodesReady()
 {
   QStringList ready;
   for (const auto &[name, client] : {std::pair{LINE_NODE, line_client_}, std::pair{PATH_NODE, path_client_},
-                                     std::pair{DRIVE_NODE, drive_client_}, std::pair{BRAIN_NODE, brain_client_}})
+                                     std::pair{DRIVE_NODE, drive_client_}, std::pair{BRAIN_NODE, brain_client_},
+                                     std::pair{SIGNS_NODE, signs_client_}})
     if (client && client->service_is_ready())
       ready << QString(name).mid(1);
   return ready;
@@ -537,7 +580,8 @@ void QNode::saveParams(const QString &path)
   for (const auto &t : {Target{LINE_NODE, line_client_, lineParamNames()},
                         Target{PATH_NODE, path_client_, pathParamNames()},
                         Target{DRIVE_NODE, drive_client_, driveParamNames(false)},
-                        Target{BRAIN_NODE, brain_client_, brainParamNames()}})
+                        Target{BRAIN_NODE, brain_client_, brainParamNames()},
+                        Target{SIGNS_NODE, signs_client_, signsParamNames()}})
     if (t.client->service_is_ready())
       targets.push_back(t);
 
@@ -583,6 +627,17 @@ void QNode::saveParams(const QString &path)
           f << "    " << p.get_name() << ": " << p.as_int() << "\n";
         else if (p.get_type() == rclcpp::ParameterType::PARAMETER_BOOL)
           f << "    " << p.get_name() << ": " << (p.as_bool() ? "true" : "false") << "\n";
+        else if (p.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE)
+        {
+          // 소수점이 꼭 있어야 다시 읽을 때 실수로 들어감 (15 → 정수로 읽혀 노드가 거절)
+          std::ostringstream os;
+          os.precision(6);
+          os << std::showpoint << p.as_double();
+          std::string v = os.str();
+          while (v.size() > 2 && v.back() == '0' && v[v.size() - 2] != '.')
+            v.pop_back();
+          f << "    " << p.get_name() << ": " << v << "\n";
+        }
         else
           continue;
         ++count;
@@ -628,7 +683,7 @@ void QNode::loadParams(const QString &path)
   }
 
   // "/노드:" 줄로 대상 노드를 정하고, "이름: 값" 줄을 모음 (값은 정수 또는 true/false)
-  std::vector<rclcpp::Parameter> line, pth, drv, brn;
+  std::vector<rclcpp::Parameter> line, pth, drv, brn, sgn;
   std::vector<rclcpp::Parameter> *cur = nullptr;
   std::string s;
   while (std::getline(f, s))
@@ -643,6 +698,7 @@ void QNode::loadParams(const QString &path)
             : (t.rfind(PATH_NODE, 0) == 0)  ? &pth
             : (t.rfind(DRIVE_NODE, 0) == 0) ? &drv
             : (t.rfind(BRAIN_NODE, 0) == 0) ? &brn
+            : (t.rfind(SIGNS_NODE, 0) == 0) ? &sgn
                                             : nullptr;
       continue;
     }
@@ -663,7 +719,10 @@ void QNode::loadParams(const QString &path)
     }
     try
     {
-      cur->emplace_back(name, static_cast<int64_t>(std::stoll(val)));
+      if (val.find_first_of(".eE") != std::string::npos)   // 실수 (YOLO conf, max_hz 등)
+        cur->emplace_back(name, std::stod(val));
+      else
+        cur->emplace_back(name, static_cast<int64_t>(std::stoll(val)));
     }
     catch (...)
     {
@@ -683,6 +742,7 @@ void QNode::loadParams(const QString &path)
   send(path_client_, pth);
   send(drive_client_, drv);
   send(brain_client_, brn);
+  send(signs_client_, sgn);
   Q_EMIT paramFileStatus(QString("불러옴: %1 (%2개 적용)").arg(path).arg(sent));
 }
 

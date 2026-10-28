@@ -438,8 +438,8 @@ void MainWindow::makeTabsScrollable()
   for (int i = 0; i < tw->count(); ++i)
   {
     QWidget *page = tw->widget(i);
-    if (qobject_cast<QScrollArea *>(page))
-      continue; // Params 탭처럼 이미 스크롤
+    if (qobject_cast<QScrollArea *>(page) || qobject_cast<QTabWidget *>(page))
+      continue; // Params 탭처럼 이미 스크롤 (하위 탭 페이지가 각자 스크롤)
     const QString title = tw->tabText(i);
     const QIcon icon = tw->tabIcon(i);
     tw->removeTab(i);
@@ -890,20 +890,18 @@ bool MainWindow::handleViewKey(QKeyEvent *ke, bool press)
 
 // ───────── 파라미터 스핀박스 공통 ─────────
 
-// (이름 라벨, 스핀박스) 한 쌍을 grid의 idx번째 칸에 넣고 노드와 연결
-void MainWindow::addParamSpin(QGridLayout *grid, QWidget *parent, int idx, int cols, const ParamSpinDef &d)
+// ───────── 파라미터 칸 공통 ─────────
+
+// 스핀박스 하나 만들고 노드와 연결 (위치는 부르는 쪽이 정함)
+QSpinBox *MainWindow::createParamSpin(QWidget *parent, const ParamSpinDef &d)
 {
   const QString name = d.name;
-  auto *label = new QLabel(d.text, parent);
-  label->setToolTip(name);
   auto *sp = new QSpinBox(parent);
   sp->setRange(d.min, d.max);
   sp->setSingleStep(d.step);
   sp->setSuffix(d.suffix);
   sp->setKeyboardTracking(false);
   sp->setToolTip(name);
-  grid->addWidget(label, idx / cols, (idx % cols) * 2);
-  grid->addWidget(sp, idx / cols, (idx % cols) * 2 + 1);
   global_widgets_[name] = {nullptr, nullptr, sp}; // paramLoaded → applyGlobalParam 로 동기화
   // 숫자를 쳤는데 아직 안 보낸 상태(Enter·다른 곳 클릭 전)면 노란색으로 표시
   // (입력 중인 칸은 노드 값으로 덮어쓰지 않고, 보낸 뒤에는 포커스가 남아 있어도 노드 값을 따라감)
@@ -922,166 +920,345 @@ void MainWindow::addParamSpin(QGridLayout *grid, QWidget *parent, int idx, int c
     done();
     queueParam(name, v); });
   connect(sp, &QSpinBox::editingFinished, this, done);
+  return sp;
 }
 
-// ───────── Params 탭 (실측 거리, 경로 계산) ─────────
-// Tab 1에 이미 있는 값(HSV, BEV 사다리꼴, morph, bev.lane_w_px, skel.seal/prune/dash)은 넣지 않음
+// (이름 라벨, 스핀박스) 한 쌍을 grid의 idx번째 칸에 넣고 노드와 연결
+void MainWindow::addParamSpin(QGridLayout *grid, QWidget *parent, int idx, int cols, const ParamSpinDef &d)
+{
+  auto *label = new QLabel(d.text, parent);
+  label->setToolTip(d.name);
+  grid->addWidget(label, idx / cols, (idx % cols) * 2);
+  grid->addWidget(createParamSpin(parent, d), idx / cols, (idx % cols) * 2 + 1);
+}
+
+// 실수 파라미터 (YOLO conf·nms·max_hz). 노드에 바로 보냄 (정수 칸처럼 50ms 묶음 없음)
+void MainWindow::addParamDouble(QGridLayout *grid, QWidget *parent, int idx, int cols, const ParamDoubleDef &d)
+{
+  const QString name = d.name;
+  auto *label = new QLabel(d.text, parent);
+  label->setToolTip(name);
+  auto *sp = new QDoubleSpinBox(parent);
+  sp->setDecimals(d.decimals);
+  sp->setRange(d.min, d.max);
+  sp->setSingleStep(d.step);
+  sp->setSuffix(d.suffix);
+  sp->setKeyboardTracking(false);
+  sp->setToolTip(name);
+  sp->setProperty("editing", false);
+  grid->addWidget(label, idx / cols, (idx % cols) * 2);
+  grid->addWidget(sp, idx / cols, (idx % cols) * 2 + 1);
+  double_widgets_[name] = sp;
+  connect(sp, &QDoubleSpinBox::textChanged, this, [sp](const QString &)
+          {
+    sp->setProperty("editing", true);
+    sp->setStyleSheet("QDoubleSpinBox { background: #fff3a0; color: black; }"); });
+  connect(sp, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this, name, sp](double v)
+          {
+    sp->setProperty("editing", false);
+    sp->setStyleSheet("");
+    qnode->setDoubleParam(name, v); });
+  connect(sp, &QDoubleSpinBox::editingFinished, this, [sp]
+          {
+    sp->setProperty("editing", false);
+    sp->setStyleSheet(""); });
+}
+
+// 묶음 상자: 제목 + (설명 한 줄) + 칸들을 cols쌍씩 한 줄
+QGroupBox *MainWindow::makeParamGroup(QWidget *parent, const ParamGroup &g)
+{
+  auto *box = new QGroupBox(g.title, parent);
+  auto *grid = new QGridLayout(box);
+  int row0 = 0;
+  if (g.note && *g.note)
+  {
+    auto *note = new QLabel(g.note, box);
+    note->setWordWrap(true);
+    note->setStyleSheet("color: gray;");
+    grid->addWidget(note, 0, 0, 1, g.cols * 2);
+    row0 = 1;
+  }
+  auto *inner = new QGridLayout;
+  int i = 0;
+  for (const auto &d : g.defs)
+    addParamSpin(inner, box, i++, g.cols, d);
+  inner->setColumnStretch(g.cols * 2, 1);
+  grid->addLayout(inner, row0, 0, 1, g.cols * 2);
+  return box;
+}
+
+// 묶음들을 세로로 쌓은 스크롤 페이지
+QWidget *MainWindow::makeParamPage(const std::vector<QWidget *> &boxes, const QString &hint)
+{
+  auto *page = new QWidget;
+  auto *vbox = new QVBoxLayout(page);
+  for (QWidget *b : boxes)
+  {
+    b->setParent(page);
+    vbox->addWidget(b);
+  }
+  if (!hint.isEmpty())
+  {
+    auto *h = new QLabel(hint, page);
+    h->setWordWrap(true);
+    h->setStyleSheet("color: gray;");
+    vbox->addWidget(h);
+  }
+  vbox->addStretch(1);
+  auto *scroll = new QScrollArea;
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  scroll->setWidget(page);
+  return scroll;
+}
+
+// 표지판별 필터: 행 = 표지판, 열 = 최소 높이·너비·면적·연속 프레임
+QGroupBox *MainWindow::makeSignFilterTable(QWidget *parent)
+{
+  auto *box = new QGroupBox("표지판별 필터 (brain_node) — 원본 640×480 기준. 0 = 그 조건 안 봄", parent);
+  auto *g = new QGridLayout(box);
+  const char *cols[] = {"최소 높이", "최소 너비", "최소 면적 (w×h)", "연속 프레임 (0=공통)"};
+  for (int c = 0; c < 4; ++c)
+  {
+    auto *h = new QLabel(QString("<b>%1</b>").arg(cols[c]), box);
+    h->setAlignment(Qt::AlignCenter);
+    g->addWidget(h, 0, c + 1);
+  }
+  struct Row
+  {
+    const char *key, *text;
+  };
+  // 트랙 순서 (신호등 → 차단바 → 좌/우 → 공사 → 주차)
+  const Row rows[] = {{"tl_green", "초록불"},        {"barrier_closed", "차단바 닫힘"}, {"barrier_open", "차단바 열림"},
+                      {"left", "좌회전"},           {"right", "우회전"},             {"construction", "공사"},
+                      {"parking", "주차"}};
+  int r = 1;
+  for (const Row &row : rows)
+  {
+    g->addWidget(new QLabel(row.text, box), r, 0);
+    const std::string k = std::string("sign.") + row.key;
+    // createParamSpin이 이름을 바로 QString으로 복사하므로 지역 문자열로 충분
+    const std::string n[4] = {k + ".min_h_px", k + ".min_w_px", k + ".min_area_px", k + ".confirm_frames"};
+    const ParamSpinDef ds[4] = {{n[0].c_str(), "", " px", 0, 480, 5},
+                                {n[1].c_str(), "", " px", 0, 640, 5},
+                                {n[2].c_str(), "", " px²", 0, 307200, 500},
+                                {n[3].c_str(), "", "", 0, 30, 1}};
+    for (int c = 0; c < 4; ++c)
+      g->addWidget(createParamSpin(box, ds[c]), r, c + 1);
+    ++r;
+  }
+  g->setColumnStretch(5, 1);
+  return box;
+}
+
+// YOLO (signs_node): 실수 3개 + 디버그 영상 체크
+QGroupBox *MainWindow::makeYoloBox(QWidget *parent)
+{
+  auto *box = new QGroupBox("YOLO 검출 (signs_node)", parent);
+  auto *g = new QGridLayout(box);
+  const ParamDoubleDef defs[] = {
+      {"max_hz", "초당 최대 추론 (0=프레임마다)", " Hz", 0.0, 30.0, 1.0, 1},
+      {"conf", "검출 최소 점수", "", 0.0, 1.0, 0.05, 2},
+      {"nms", "겹친 박스 합치기 (NMS IoU)", "", 0.0, 1.0, 0.05, 2},
+  };
+  int i = 0;
+  for (const auto &d : defs)
+    addParamDouble(g, box, i++, 3, d);
+  check_yolo_debug_ = new QCheckBox("디버그 영상 발행 (publish_debug, 보는 사람 있을 때만 그림)", box);
+  check_yolo_debug_->setToolTip("publish_debug");
+  g->addWidget(check_yolo_debug_, 1, 0, 1, 6);
+  bool_widgets_["publish_debug"] = check_yolo_debug_; // boolParamLoaded로 동기화
+  connect(check_yolo_debug_, &QCheckBox::toggled, this, [this](bool on)
+          {
+    if (!qnode->setBoolParam("publish_debug", on))
+    {
+      QSignalBlocker block(check_yolo_debug_);
+      check_yolo_debug_->setChecked(!on);
+      statusBar()->showMessage("signs_node 연결 안 됨 (signs:=false로 띄웠거나 아직 안 뜸)", 5000);
+    } });
+  auto *note = new QLabel("max_hz를 낮추면 GPU·CPU 사용이 줄고, 표지판 인정(연속 프레임)은 그만큼 늦어집니다. "
+                          "brain의 '최소 점수'는 YOLO 검출 최소 점수 뒤에 한 번 더 거르는 값입니다.",
+                          box);
+  note->setWordWrap(true);
+  note->setStyleSheet("color: gray;");
+  g->addWidget(note, 2, 0, 1, 6);
+  g->setColumnStretch(6, 1);
+  return box;
+}
+
+// ───────── Params 탭: 노드·주제별 하위 탭 ─────────
+// Tab 1(차선 색·BEV)에 이미 있는 값(HSV, BEV 사다리꼴, morph, bev.lane_w_px, skel.seal/prune/dash)은 넣지 않음
 // (한 파라미터에 위젯이 둘이면 동기화가 꼬임)
 
 void MainWindow::setupParamTab()
 {
-  struct Group
-  {
-    const char *title;
-    std::vector<ParamSpinDef> defs;
-    int cols = 3; // (이름, 스핀박스) 묶음 몇 개씩 한 줄
-  };
-  const std::vector<Group> groups = {
-      {"실측 거리 (lineDetect_node) ★ 자로 잰 값",
-       {
-           {"geo.lane_w_mm", "차선 안쪽 간격", " mm", 1, 1000, 1},
-           {"geo.bev_bottom_mm", "BEV 아랫줄 거리", " mm", 0, 2000, 1},
-           {"geo.bev_depth_mm", "BEV 세로 길이", " mm", 1, 3000, 1},
-       }},
-      {"스켈레톤 (path_node)",
-       {
-           {"skel.max_lane_thick", "차선 최대 두께", " px", 0, 200, 1},
-           {"skel.wdash_max_mm", "흰 점선 조각 최대 길이 (0=잇기 끔)", " mm", 0, 500, 5},
-           {"skel.wdash_gap_mm", "흰 점선 이을 최대 빈칸", " mm", 0, 500, 5},
-           {"skel.wdash_angle_deg", "흰 점선 같은 줄 각도", " °", 0, 90, 1},
-           {"skel.wdash_offset_mm", "흰 점선 같은 줄 옆 어긋남", " mm", 0, 200, 5},
-       }},
-      {"벽돌 (path_node)",
-       {
-           {"path.brick_always", "공사 모드 밖에서도 벽돌 피함 (0=공사 모드만)", "", 0, 1, 1},
-           {"path.brick_margin_mm", "좌우 여유", " mm", 0, 300, 5},
-           {"path.brick_depth_mm", "앞뒤 길이", " mm", 0, 500, 5},
-           {"path.brick_gap_mm", "선까지 틈 막기", " mm", 0, 300, 10},
-           {"path.det_max_age_ms", "탐지 유효", " ms", 0, 2000, 50},
-       }},
-      {"경로 기억·판단 (path_node)",
-       {
-           {"path.mem_travel_mm", "기억 최대 이동", " mm", 0, 3000, 50},
-           {"path.max_dev_mm", "기억과 차이 허용", " mm", 0, 500, 5},
-           {"path.override_frames", "새 경로 믿기까지", " 프레임", 0, 100, 1},
-           {"path.turn_drop_memory", "좌/우 명령 들어오면 기억 버림 (1=켬)", "", 0, 1, 1},
-           {"path.min_len_mm", "최소 경로 길이", " mm", 0, 1000, 10},
-           {"path.branch_look_mm", "분기 미리보기", " mm", 0, 300, 5},
-           {"path.blind_max_mm", "사각지대 통과 최대", " mm", 0, 1000, 10},
-           {"path.fill_blind", "사각지대 채움 (0끔/1직진만/2항상)", "", 0, 2, 1},
-           {"path.fill_join_mm", "채움 연결 허용", " mm", 0, 200, 5},
-           {"path.turn_radius_mm", "교차로 회전 반지름 (0=끔)", " mm", 0, 500, 10},
-           {"path.turn_min_deg", "둥글게 할 꺾임", " °", 0, 180, 5},
-       }},
-      {"정지선 (path_node) — /mission/stop_line 켜져 있을 때만 (brain: 차단바 끝나면 켬, 초기화·brain 정지로 끔)",
-       {
-           {"path.sl_margin_mm", "경로 끝 = 빨간선 - (바퀴 축 기준)", " mm", 0, 500, 5},
-           {"path.sl_min_w_px", "한 줄 빨강 최소 폭 (BEV)", " px", 0, 320, 5},
-       }},
-      {"공사 구간 (path_node) — 표지판 또는 View 탭 C키",
-       {
-           {"path.con_brick_depth_mm", "벽돌 벽 앞뒤", " mm", 0, 500, 10},
-           {"path.con_brick_margin_mm", "벽돌 벽 좌우 여유", " mm", 0, 300, 5},
-           {"path.con_brick_w_mm", "벽돌 실제 가로", " mm", 0, 600, 10},
-           {"path.con_smooth_mm", "경로 모서리 둥글게", " mm", 0, 300, 10},
-           {"path.con_attach_mm", "붙은 쪽 선까지 막기", " mm", 0, 600, 10},
-           {"path.con_extend_mm", "가려진 선 잇기", " mm", 0, 1000, 10},
-           {"path.con_edge_mm", "화면 끝까지 막기", " mm", 0, 300, 10},
-           {"path.con_dead_end_mm", "막다른 가지 지우기", " mm", 0, 1000, 10},
-           {"path.con_keep", "지난 벽돌 (0끔 1약 2강)", "", 0, 2, 1},
-           {"path.con_keep_rear_mm", "지난 벽돌 축 뒤 길이", " mm", 0, 300, 10},
-           {"path.con_hold_mm", "지난 벽돌 더 피하기", " mm", 0, 500, 10},
-           {"path.con_clear_mm", "지난 벽돌 옆 여유", " mm", 0, 200, 5},
-           {"path.con_exit_mm", "벽돌 본 뒤 안 보이고 이만큼 가면 끝 (0=끔)", " mm", 0, 3000, 50},
-           {"path.con_no_brick_mm", "벽돌 못 보고 이만큼 가면 끝 (0=끔)", " mm", 0, 10000, 100},
-           {"path.con_override_frames", "공사: 새 경로 믿기까지", " 프레임", 0, 100, 1},
-           {"path.con_cross_override_frames", "공사: 선 너머 경로 믿기까지", " 프레임", 0, 100, 1},
-           {"path.con_straight_by_lane", "공사: 직진 가지를 차선 방향으로 (1=켬)", "", 0, 1, 1},
-           {"path.con_offscreen_side", "공사: 화면 끝 벽돌은 화면 밖 선에 붙음 (1=켬)", "", 0, 1, 1},
-       }},
-      {"미션 동작 (brain_node) — 공사 끝 모드 1·2를 쓰면 위 path_node의 '벽돌 본 뒤…끝', '벽돌 못 보고…끝'을 0으로",
-       {
-           {"mission.turn_ms", "좌/우 표지판 → turn 유지", " ms", 0, 30000, 500},
-           {"mission.rearm_ms", "같은 표지판 다시 받기까지", " ms", 0, 30000, 250},
-           {"mission.con_end_mode", "공사 끝: 0 벽돌(path) 1 시간 2 주차표지판", "", 0, 2, 1},
-           {"mission.con_hold_ms", "공사 유지 시간 (모드 1)", " ms", 0, 120000, 500},
-           {"mission.con_once", "공사 한 번만 (주차 표지판까지 재진입 막기)", "", 0, 1, 1},
-           {"mission.parking_pause", "주차: 후진 뒤 정지 시간", " s", 0, 60, 1},
-           {"mission.parking.time_enter", "주차: 표지판 → 좌회전 유지", " s", 0, 60, 1},
-           {"mission.parking.time_break_ms", "주차: PSD 기준 넘은 뒤 더 가고 pause", " ms", 0, 10000, 50},
-           {"mission.parking.time_exit", "주차: 끝 → 좌회전 유지", " s", 0, 60, 1},
-           {"mission.parking.turn_deg", "주차: 제자리 회전 각도", " °", 0, 360, 5},
-           {"mission.parking.psd_L", "주차: PSD 왼쪽 기준", "", 0, 65535, 50},
-           {"mission.parking.psd_R", "주차: PSD 오른쪽 기준", "", 0, 65535, 50},
-           {"mission.parking.psd_F", "주차: PSD 앞 기준 (들어갈 때 회전)", "", 0, 65535, 50},
-           {"mission.parking.turn_vel", "주차: 회전 속도 (원시값)", "", 0, 1000, 5},
-           {"mission.parking.move_vel", "주차: 전후진 속도 (원시값)", "", 1, 1000, 5},
-           {"mission.parking.dist_mm", "주차: 후진·직진 거리", " mm", 0, 2000, 10},
-           {"mission.barrier_release_ms", "차단바 안 보이면 정지 풀기 (0=끔)", " ms", 0, 30000, 250},
-           {"mission.start_follow", "시작하자마자 출발 (1=초록불 안 기다림)", "", 0, 1, 1},
-           {"mission.stop_line", "차단바 끝나면 정지선 앞 정지 (1=켬)", "", 0, 1, 1},
-       },
-       2},
-      {"표지판 검출 필터 (brain_node) — 원본 640x480 기준, 0 = 끔. 높이·너비·면적을 모두 넘어야 동작",
-       {
-           {"sign.barrier_closed.min_h_px", "차단바 닫힘 최소 높이", " px", 0, 480, 5},
-           {"sign.barrier_closed.min_w_px", "차단바 닫힘 최소 너비", " px", 0, 640, 5},
-           {"sign.barrier_closed.min_area_px", "차단바 닫힘 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.barrier_closed.confirm_frames", "차단바 닫힘 연속 프레임 (0=공통)", "", 0, 30, 1},
-           {"sign.barrier_open.min_h_px", "차단바 열림 최소 높이", " px", 0, 480, 5},
-           {"sign.barrier_open.min_w_px", "차단바 열림 최소 너비", " px", 0, 640, 5},
-           {"sign.barrier_open.min_area_px", "차단바 열림 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.barrier_open.confirm_frames", "차단바 열림 연속 프레임 (0=공통)", "", 0, 30, 1},
-           {"sign.construction.min_h_px", "공사 최소 높이", " px", 0, 480, 5},
-           {"sign.construction.min_w_px", "공사 최소 너비", " px", 0, 640, 5},
-           {"sign.construction.min_area_px", "공사 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.construction.confirm_frames", "공사 연속 프레임 (0=공통)", "", 0, 30, 1},
-           {"sign.left.min_h_px", "좌회전 최소 높이", " px", 0, 480, 5},
-           {"sign.left.min_w_px", "좌회전 최소 너비", " px", 0, 640, 5},
-           {"sign.left.min_area_px", "좌회전 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.left.confirm_frames", "좌회전 연속 프레임 (0=공통)", "", 0, 30, 1},
-           {"sign.right.min_h_px", "우회전 최소 높이", " px", 0, 480, 5},
-           {"sign.right.min_w_px", "우회전 최소 너비", " px", 0, 640, 5},
-           {"sign.right.min_area_px", "우회전 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.right.confirm_frames", "우회전 연속 프레임 (0=공통)", "", 0, 30, 1},
-           {"sign.parking.min_h_px", "주차 최소 높이", " px", 0, 480, 5},
-           {"sign.parking.min_w_px", "주차 최소 너비", " px", 0, 640, 5},
-           {"sign.parking.min_area_px", "주차 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.parking.confirm_frames", "주차 연속 프레임 (0=공통)", "", 0, 30, 1},
-           {"sign.tl_green.min_h_px", "초록불 최소 높이", " px", 0, 480, 5},
-           {"sign.tl_green.min_w_px", "초록불 최소 너비", " px", 0, 640, 5},
-           {"sign.tl_green.min_area_px", "초록불 최소 면적 (w×h)", " px²", 0, 307200, 500},
-           {"sign.tl_green.confirm_frames", "초록불 연속 프레임 (0=공통)", "", 0, 30, 1},
-           {"sign.confirm_frames", "연속 프레임 (한 프레임 오검출 거르기)", "", 1, 30, 1},
-           {"sign.min_score_pct", "최소 점수", " %", 0, 100, 5},
-       },
-       3},
-  };
+  // 아래 탭 이름 (makeTabsScrollable이 이름을 옮겨 담기 전에)
+  ui->tabWidget->setTabText(ui->tabWidget->indexOf(ui->tab), "차선 색·BEV");
+  ui->tabWidget->setTabText(ui->tabWidget->indexOf(ui->tab_2), "센서·WASD");
+  ui->tabWidget->setTabText(ui->tabWidget->indexOf(ui->tab_3), "주행 (drive)");
 
-  auto *page = new QWidget;
-  auto *vbox = new QVBoxLayout(page);
-  for (const auto &g : groups)
-  {
-    auto *box = new QGroupBox(g.title, page);
-    auto *grid = new QGridLayout(box);
-    int i = 0;
-    for (const auto &d : g.defs)
-      addParamSpin(grid, box, i++, g.cols, d);
-    grid->setColumnStretch(g.cols * 2, 1);
-    vbox->addWidget(box);
-  }
-  auto *hint = new QLabel("이름에 마우스를 올리면 ROS 파라미터 이름이 보입니다. "
-                          "값은 바로 노드에 적용되고, 유지하려면 Save로 파일에 저장하세요.",
-                          page);
-  hint->setWordWrap(true);
-  hint->setStyleSheet("color: gray;");
-  vbox->addWidget(hint);
-  vbox->addStretch(1);
+  auto *tabs = new QTabWidget;
+  tabs->setDocumentMode(true);
+  auto group = [this](const ParamGroup &g) -> QWidget * { return makeParamGroup(nullptr, g); };
 
-  auto *scroll = new QScrollArea;
-  scroll->setWidgetResizable(true);
-  scroll->setWidget(page);
-  ui->tabWidget->addTab(scroll, "Params");
+  // ====== 1. 차선·경로 (lineDetect, path_node)
+  tabs->addTab(makeParamPage({
+      group({"실측 거리 (lineDetect_node) ★ 자로 잰 값",
+             {
+                 {"geo.lane_w_mm", "차선 안쪽 간격", " mm", 1, 1000, 1},
+                 {"geo.bev_bottom_mm", "BEV 아랫줄 거리", " mm", 0, 2000, 1},
+                 {"geo.bev_depth_mm", "BEV 세로 길이", " mm", 1, 3000, 1},
+             }}),
+      group({"스켈레톤 (path_node)",
+             {
+                 {"skel.max_lane_thick", "차선 최대 두께", " px", 0, 200, 1},
+             },
+             3, "끊긴 선 잇기·잔가지·노란 점선 길이는 '차선 색·BEV' 탭"}),
+      group({"흰 점선 잇기 (path_node) — /mission/white_dash 켜져 있을 때만 (brain: 주차 시작 ~ 벽돌 옆 정지)",
+             {
+                 {"skel.wdash_max_mm", "조각 최대 길이 (0=끔)", " mm", 0, 500, 5},
+                 {"skel.wdash_gap_mm", "이을 최대 빈칸", " mm", 0, 500, 5},
+                 {"skel.wdash_angle_deg", "같은 줄 각도", " °", 0, 90, 1},
+                 {"skel.wdash_offset_mm", "같은 줄 옆 어긋남", " mm", 0, 200, 5},
+             },
+             2}),
+      group({"경로 기억 (path_node) — 화면이 애매할 때 직전 경로로 버티기",
+             {
+                 {"path.max_dev_mm", "기억과 차이 허용", " mm", 0, 500, 5},
+                 {"path.override_frames", "새 경로 믿기까지", " 프레임", 0, 100, 1},
+                 {"path.mem_travel_mm", "기억만으로 최대 이동", " mm", 0, 3000, 50},
+                 {"path.min_len_mm", "최소 경로 길이", " mm", 0, 1000, 10},
+                 {"path.turn_drop_memory", "좌/우 명령 들어오면 기억 버림 (1=켬)", "", 0, 1, 1},
+             }}),
+      group({"사각지대 (path_node) — 로봇 ~ BEV 아랫줄",
+             {
+                 {"path.fill_blind", "지나온 경로로 채움 (0끔/1직진만/2항상)", "", 0, 2, 1},
+                 {"path.fill_join_mm", "채움 연결 허용", " mm", 0, 200, 5},
+                 {"path.blind_max_mm", "사각지대 통과 최대", " mm", 0, 1000, 10},
+             }}),
+      group({"교차로 (path_node)",
+             {
+                 {"path.turn_radius_mm", "회전 반지름 (0=끔)", " mm", 0, 500, 10},
+                 {"path.turn_min_deg", "둥글게 할 꺾임", " °", 0, 180, 5},
+                 {"path.branch_look_mm", "분기 미리보기", " mm", 0, 300, 5},
+             }}),
+      group({"정지선 (path_node) — /mission/stop_line 켜져 있을 때만 (brain: 차단바 끝나면 켬)",
+             {
+                 {"path.sl_margin_mm", "경로 끝 = 빨간선 - (바퀴 축 기준)", " mm", 0, 500, 5},
+                 {"path.sl_min_w_px", "한 줄 빨강 최소 폭 (BEV)", " px", 0, 320, 5},
+             },
+             2}),
+  }, "이름에 마우스를 올리면 ROS 파라미터 이름이 보입니다. 값은 바로 노드에 적용되고, 유지하려면 Save로 파일에 저장하세요."),
+               "차선·경로");
+
+  // ====== 2. 벽돌·공사 구간 (path_node + brain 종료 판단)
+  tabs->addTab(makeParamPage({
+      group({"벽돌 공통 (path_node)",
+             {
+                 {"path.brick_always", "공사 모드 밖에서도 벽돌 피함 (0=공사 모드만)", "", 0, 1, 1},
+                 {"path.det_max_age_ms", "탐지 유효", " ms", 0, 2000, 50},
+                 {"path.brick_margin_mm", "좌우 여유 (공사 밖)", " mm", 0, 300, 5},
+                 {"path.brick_depth_mm", "앞뒤 길이 (공사 밖)", " mm", 0, 500, 5},
+                 {"path.brick_gap_mm", "선까지 틈 막기", " mm", 0, 300, 10},
+             }}),
+      group({"공사: 벽돌 벽 크기",
+             {
+                 {"path.con_brick_depth_mm", "앞뒤", " mm", 0, 500, 10},
+                 {"path.con_brick_margin_mm", "좌우 여유", " mm", 0, 300, 5},
+                 {"path.con_brick_w_mm", "벽돌 실제 가로", " mm", 0, 600, 10},
+                 {"path.con_attach_mm", "붙은 쪽 선까지 막기", " mm", 0, 600, 10},
+                 {"path.con_edge_mm", "화면 끝까지 막기", " mm", 0, 300, 10},
+                 {"path.con_extend_mm", "가려진 선 잇기", " mm", 0, 1000, 10},
+             }}),
+      group({"공사: 경로",
+             {
+                 {"path.con_smooth_mm", "경로 모서리 둥글게", " mm", 0, 300, 10},
+                 {"path.con_dead_end_mm", "막다른 가지 지우기", " mm", 0, 1000, 10},
+                 {"path.con_override_frames", "새 경로 믿기까지", " 프레임", 0, 100, 1},
+                 {"path.con_cross_override_frames", "선 너머 경로 믿기까지", " 프레임", 0, 100, 1},
+                 {"path.con_straight_by_lane", "직진 가지를 차선 방향으로 (1=켬)", "", 0, 1, 1},
+                 {"path.con_offscreen_side", "화면 끝 벽돌은 화면 밖 선에 붙음 (1=켬)", "", 0, 1, 1},
+             }}),
+      group({"공사: 지난 벽돌 피하기",
+             {
+                 {"path.con_keep", "지난 벽돌 (0끔 1약 2강)", "", 0, 2, 1},
+                 {"path.con_keep_rear_mm", "축 뒤 길이", " mm", 0, 300, 10},
+                 {"path.con_hold_mm", "더 피하기", " mm", 0, 500, 10},
+                 {"path.con_clear_mm", "옆 여유", " mm", 0, 200, 5},
+             },
+             2}),
+      group({"공사: 끝내기",
+             {
+                 {"mission.con_end_mode", "끝 판단: 0 벽돌(path) 1 시간 2 주차표지판", "", 0, 2, 1},
+                 {"mission.con_hold_ms", "유지 시간 (모드 1)", " ms", 0, 120000, 500},
+                 {"mission.con_once", "한 번만 (주차 표지판까지 재진입 막기)", "", 0, 1, 1},
+                 {"path.con_exit_mm", "벽돌 안 보이고 이만큼 가면 끝 (0=끔, 모드 0)", " mm", 0, 3000, 50},
+                 {"path.con_no_brick_mm", "벽돌 못 보고 이만큼 가면 끝 (0=끔, 모드 0)", " mm", 0, 10000, 100},
+             },
+             2, "모드 1·2를 쓰면 '벽돌 안 보이고…'·'벽돌 못 보고…'(path_node)를 0으로 — 안 그러면 path_node가 먼저 끝냄"}),
+  }, "주행 속도·회전 세기 같은 공사 구간 주행 프로필은 '주행 (drive)' 탭의 '공사 구간' 묶음."),
+               "벽돌·공사");
+
+  // ====== 3. 표지판·YOLO (signs_node + brain 필터)
+  tabs->addTab(makeParamPage({
+      makeYoloBox(nullptr),
+      group({"표지판 공통 (brain_node)",
+             {
+                 {"sign.confirm_frames", "연속 프레임 (한 프레임 오검출 거르기)", "", 1, 30, 1},
+                 {"sign.min_score_pct", "최소 점수", " %", 0, 100, 5},
+                 {"mission.rearm_ms", "같은 표지판 다시 받기까지", " ms", 0, 30000, 250},
+             }}),
+      makeSignFilterTable(nullptr),
+  }, "높이·너비·면적을 모두 넘어야 그 표지판으로 동작합니다 (멀리 보인 작은 박스 거르기). "
+     "GUI '탐지' 목록의 박스 크기를 보고 맞추세요."),
+               "표지판·YOLO");
+
+  // ====== 4. 미션 (brain): 트랙 순서
+  tabs->addTab(makeParamPage({
+      group({"출발·차단바·정지선",
+             {
+                 {"mission.start_follow", "시작하자마자 출발 (1=초록불 안 기다림)", "", 0, 1, 1},
+                 {"mission.barrier_release_ms", "차단바 안 보이면 정지 풀기 (0=끔)", " ms", 0, 30000, 250},
+                 {"mission.stop_line", "차단바 끝나면 정지선 앞 정지 (1=켬)", "", 0, 1, 1},
+             }}),
+      group({"좌/우 표지판",
+             {
+                 {"mission.turn_ms", "turn 유지 시간", " ms", 0, 30000, 500},
+             }}),
+      group({"주차 — 진행 순서대로",
+             {
+                 {"mission.parking.time_enter", "① 표지판 → 좌회전 유지", " s", 0, 60, 1},
+                 {"mission.parking.psd_L", "② PSD 왼쪽 기준 (벽돌 왼쪽)", "", 0, 65535, 50},
+                 {"mission.parking.psd_R", "② PSD 오른쪽 기준 (벽돌 오른쪽)", "", 0, 65535, 50},
+                 {"mission.parking.time_break_ms", "③ 기준 넘은 뒤 더 가고 정지", " ms", 0, 10000, 50},
+                 {"mission.parking.turn_vel", "④⑥ 제자리 회전 속도 (원시값)", "", 0, 1000, 5},
+                 {"mission.parking.turn_deg", "④⑥ 제자리 회전 각도", " °", 0, 360, 5},
+                 {"mission.parking.move_vel", "⑤ 전후진 속도 (원시값)", "", 1, 1000, 5},
+                 {"mission.parking.dist_mm", "⑤ 후진·직진 거리", " mm", 0, 2000, 10},
+                 {"mission.parking_pause", "⑤ 후진 뒤 정지 시간", " s", 0, 60, 1},
+                 {"mission.parking.time_exit", "⑦ 끝 → 좌회전 유지", " s", 0, 60, 1},
+                 {"mission.parking.psd_F", "PSD 앞 기준 (지금 코드에서는 안 씀)", "", 0, 65535, 50},
+             },
+             2}),
+  }, "공사 구간 시작·끝 판단은 '벽돌·공사' 탭, 표지판 인정 조건은 '표지판·YOLO' 탭."),
+               "미션 (brain)");
+
+  // 마지막으로 본 하위 탭 기억
+  QSettings settings("tb_gui", "tb_gui");
+  tabs->setCurrentIndex(settings.value("param_subtab", 0).toInt());
+  connect(tabs, &QTabWidget::currentChanged, this, [](int i)
+          { QSettings("tb_gui", "tb_gui").setValue("param_subtab", i); });
+
+  ui->tabWidget->addTab(tabs, "Params");
+
+  // 실수 파라미터 (YOLO) 노드 값 → 화면
+  connect(qnode, &QNode::doubleParamLoaded, this, [this](const QString &name, double v)
+          {
+    QDoubleSpinBox *sp = double_widgets_.value(name, nullptr);
+    if (!sp || sp->property("editing").toBool()) // 입력 중인 칸은 덮어쓰지 않음
+      return;
+    QSignalBlocker block(sp);
+    sp->setValue(v); });
 }
 
 // ───────── 파라미터 파일 ─────────
@@ -1108,59 +1285,102 @@ void MainWindow::saveParamsTo(const QString &path)
 
 void MainWindow::setupDriveTab()
 {
-  // 파라미터 스핀박스: 이름, 표시 이름, 단위, 범위 (tb_drive의 declare_int 범위와 같게)
-  static const ParamSpinDef defs[] = {
-      {"drive.v_max_mm_s", "최고 속도", " mm/s", 0, 1000, 10},
-      {"drive.v_curve_mm_s", "코너 속도 (0=끔)", " mm/s", 0, 1000, 10},
-      {"drive.curve_start_deg", "코너 감속 시작 각도", " °", 0, 180, 5},
-      {"drive.curve_full_deg", "코너 속도 도달 각도", " °", 1, 180, 5},
-      {"drive.v_min_mm_s", "최저 속도", " mm/s", 0, 500, 5},
-      {"drive.w_max_deg_s", "최대 회전", " °/s", 0, 720, 5},
-      {"drive.accel_mm_s2", "가속", " mm/s²", 10, 5000, 50},
-      {"drive.decel_mm_s2", "감속", " mm/s²", 10, 5000, 50},
-      {"drive.w_accel_deg_s2", "회전 가속", " °/s²", 10, 5000, 30},
-      {"drive.ld_min_mm", "lookahead 최소", " mm", 30, 1000, 10},
-      {"drive.ld_max_mm", "lookahead 최대", " mm", 30, 1500, 10},
-      {"drive.ld_time_ms", "lookahead 시간", " ms", 0, 5000, 100},
-      {"drive.ld_sharp_mm", "급한 곳 lookahead", " mm", 0, 1000, 10},
-      {"drive.sharp_turn_deg", "교차로: 급한 곳 판단 각도", " °", 1, 180, 5},
-      {"drive.sharp_hold_ms", "급한 곳 유지 시간", " ms", 0, 5000, 100},
-      {"drive.sharp_hold_mm", "급한 곳 유지 거리 (0=시간)", " mm", 0, 2000, 10},
-      {"drive.sharp_curve_start_deg", "일반 곡선: 급한 곳 시작 각도", " °", 0, 180, 5},
-      {"drive.sharp_curve_full_deg", "일반 곡선: 급한 곳 최대 각도", " °", 1, 180, 5},
-      {"drive.curve_x_offset_mm", "일반 곡선 거리 보정", " mm", -200, 200, 5},
-      {"drive.curv_slow_mm", "커브 감속", " mm", 0, 1000, 10},
-      {"drive.stop_dist_mm", "경로 끝 정지", " mm", 0, 300, 5},
-      {"drive.hold_ms", "경로 유지", " ms", 0, 3000, 50},
-      {"drive.path_timeout_ms", "경로 유효", " ms", 50, 3000, 50},
-      {"drive.cmd_timeout_ms", "명령 유효", " ms", 50, 3000, 50},
-      {"drive.weak_src_pct", "약한 경로 속도", " %", 0, 100, 5},
-      {"drive.turn_gain_pct", "일반 회전 세기", " %", 50, 300, 5},
-      {"drive.cross_v_mm_s", "교차로(좌/우 명령) 속도 (0=끔)", " mm/s", 0, 1000, 10},
-      {"drive.cross_turn_gain_pct", "교차로 회전 세기", " %", 50, 300, 5},
-      {"drive.cross_ld_min_mm", "교차로 ld_min (0=일반 값)", " mm", 0, 1000, 10},
-      {"drive.con_v_mm_s", "공사 구간 속도", " mm/s", 0, 1000, 10},
-      {"drive.con_ld_min_mm", "공사 ld_min", " mm", 0, 1000, 10},
-      {"drive.con_ld_sharp_mm", "공사 ld_sharp (0=끔)", " mm", 0, 1000, 10},
-      {"drive.con_turn_gain_pct", "공사 회전 세기", " %", 50, 300, 5},
-      {"drive.con_pivot_enter_deg", "공사 피봇 시작", " °", 0, 180, 5},
-      {"drive.con_pivot_keep_deg", "공사 피봇 맡김", " °", 0, 180, 5},
-      {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},
-      {"drive.control_hz", "제어 주기", " Hz", 5, 100, 5},
-      {"drive.pivot_enter_deg", "피봇 시작 각도", " °", 0, 180, 5},
-      {"drive.pivot_exit_deg", "피봇 종료 각도", " °", 0, 90, 1},
-      {"drive.pivot_w_deg_s", "피봇 회전 속도", " °/s", 0, 360, 5},
-      {"drive.pivot_fallback_deg", "피봇 안전장치 각도", " °", 0, 180, 5},
-      {"drive.corner_min_x_mm", "코너 검출 시작 거리", " mm", 0, 1000, 10},
-      {"drive.pivot_keep_deg", "피봇 남길 각도", " °", 0, 180, 5},
-      {"drive.pivot_confirm", "피봇 확인 횟수", " 회", 1, 30, 1},
+  // 파라미터 묶음: 이름, 표시 이름, 단위, 범위 (tb_drive의 declare_int 범위와 같게)
+  // 순서 = 속도가 정해지는 순서 (상한 → 코너 → 가감속) 다음 조향, 구간별 프로필, 안전장치
+  const std::vector<ParamGroup> groups = {
+      {"속도",
+       {
+           {"drive.v_max_mm_s", "최고 속도", " mm/s", 0, 1000, 10},
+           {"drive.v_curve_mm_s", "코너 속도 (0=끔)", " mm/s", 0, 1000, 10},
+           {"drive.curve_start_deg", "코너 감속 시작 각도", " °", 0, 180, 5},
+           {"drive.curve_full_deg", "코너 속도 도달 각도", " °", 1, 180, 5},
+           {"drive.curv_slow_mm", "곡률 감속", " mm", 0, 1000, 10},
+           {"drive.w_max_deg_s", "최대 회전 (부족하면 속도↓)", " °/s", 0, 720, 5},
+           {"drive.v_min_mm_s", "최저 속도", " mm/s", 0, 500, 5},
+       },
+       1, "코너 속도 ≈ v_curve / (1 + curv_slow × 곡률)"},
+      {"가감속",
+       {
+           {"drive.accel_mm_s2", "가속", " mm/s²", 10, 5000, 50},
+           {"drive.decel_mm_s2", "감속 (코너 앞 제동거리)", " mm/s²", 10, 5000, 50},
+           {"drive.w_accel_deg_s2", "회전 가속", " °/s²", 10, 5000, 30},
+       },
+       1},
+      {"lookahead·조향 (일반)",
+       {
+           {"drive.ld_time_ms", "lookahead = 속도 × 이 시간", " ms", 0, 5000, 100},
+           {"drive.ld_min_mm", "lookahead 최소", " mm", 30, 1000, 10},
+           {"drive.ld_max_mm", "lookahead 최대", " mm", 30, 1500, 10},
+           {"drive.turn_gain_pct", "회전 세기", " %", 50, 300, 5},
+           {"drive.curve_x_offset_mm", "곡선 거리 보정 (+ 늦게 꺾음)", " mm", -200, 200, 5},
+       },
+       1},
+      {"급한 곳 (lookahead 줄이기)",
+       {
+           {"drive.ld_sharp_mm", "급한 곳 lookahead", " mm", 0, 1000, 10},
+           {"drive.sharp_curve_start_deg", "일반: 시작 각도", " °", 0, 180, 5},
+           {"drive.sharp_curve_full_deg", "일반: 최대 각도", " °", 1, 180, 5},
+           {"drive.sharp_turn_deg", "교차로: 최대 각도 (0°부터)", " °", 1, 180, 5},
+           {"drive.sharp_hold_mm", "유지 거리 (0=시간)", " mm", 0, 2000, 10},
+           {"drive.sharp_hold_ms", "유지 시간", " ms", 0, 5000, 100},
+       },
+       1, "앞 350mm 경로 방향이 로봇 정면과 틀어진 최대 각도로 판단"},
+      {"교차로 프로필 (/mission/turn ≠ 0)",
+       {
+           {"drive.cross_v_mm_s", "속도 상한 (0=끔)", " mm/s", 0, 1000, 10},
+           {"drive.cross_turn_gain_pct", "회전 세기", " %", 50, 300, 5},
+           {"drive.cross_ld_min_mm", "ld_min (0=일반 값)", " mm", 0, 1000, 10},
+       },
+       1},
+      {"공사 구간 프로필",
+       {
+           {"drive.con_v_mm_s", "속도 상한", " mm/s", 0, 1000, 10},
+           {"drive.con_turn_gain_pct", "회전 세기", " %", 50, 300, 5},
+           {"drive.con_ld_min_mm", "ld_min", " mm", 0, 1000, 10},
+           {"drive.con_ld_sharp_mm", "ld_sharp (0=끔)", " mm", 0, 1000, 10},
+           {"drive.con_pivot_enter_deg", "피봇 시작", " °", 0, 180, 5},
+           {"drive.con_pivot_keep_deg", "피봇 맡김", " °", 0, 180, 5},
+       },
+       1},
+      {"경로 끊김·안전",
+       {
+           {"drive.path_timeout_ms", "경로 유효", " ms", 50, 3000, 50},
+           {"drive.hold_ms", "끊긴 뒤 마지막 경로 유지", " ms", 0, 3000, 50},
+           {"drive.weak_src_pct", "약한 경로(memory 등) 속도", " %", 0, 100, 5},
+           {"drive.stop_dist_mm", "경로 끝 정지", " mm", 0, 300, 5},
+           {"drive.cmd_timeout_ms", "brain 명령 유효", " ms", 50, 3000, 50},
+           {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},
+           {"drive.control_hz", "제어 주기", " Hz", 5, 100, 5},
+       },
+       1},
+      {"피봇 (제자리 회전)",
+       {
+           {"drive.pivot_enter_deg", "시작 각도 (180=끔)", " °", 0, 180, 5},
+           {"drive.pivot_keep_deg", "남길 각도", " °", 0, 180, 5},
+           {"drive.pivot_exit_deg", "종료 각도", " °", 0, 90, 1},
+           {"drive.pivot_w_deg_s", "회전 속도", " °/s", 0, 360, 5},
+           {"drive.pivot_confirm", "확인 횟수", " 회", 1, 30, 1},
+           {"drive.pivot_fallback_deg", "안전장치 각도", " °", 0, 180, 5},
+           {"drive.corner_min_x_mm", "코너 검출 시작 거리", " mm", 0, 1000, 10},
+       },
+       1},
   };
-  constexpr int COLS = 3; // (이름, 스핀박스) 묶음 3개씩 한 줄
+  constexpr int GROUP_COLS = 3; // 묶음 3개씩 한 줄
 
+  auto *wrap = new QWidget(ui->groupDriveParams);
+  auto *grid = new QGridLayout(wrap);
+  grid->setContentsMargins(0, 0, 0, 0);
   int i = 0;
-  for (const auto &d : defs)
-    addParamSpin(ui->gridDriveParams, ui->groupDriveParams, i++, COLS, d);
-  ui->gridDriveParams->setRowStretch((i + COLS - 1) / COLS, 1);
+  for (const auto &g : groups)
+  {
+    QGroupBox *box = makeParamGroup(wrap, g);
+    grid->addWidget(box, i / GROUP_COLS, i % GROUP_COLS, Qt::AlignTop);
+    ++i;
+  }
+  for (int c = 0; c < GROUP_COLS; ++c)
+    grid->setColumnStretch(c, 1);
+  ui->gridDriveParams->addWidget(wrap, 0, 0);
+  ui->gridDriveParams->setRowStretch(1, 1);
 
   // bool 파라미터 체크박스
   bool_widgets_ = {{"drive.require_cmd", ui->checkRequireCmd},

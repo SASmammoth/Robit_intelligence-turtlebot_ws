@@ -43,7 +43,8 @@ public:
 
   // ====== 파라미터 (이름으로 /lineDetect_node, /path_node, /drive_node 중 보낼 곳을 고름)
   void setParams(const QMap<QString, int> &params);
-  bool setBoolParam(const QString &name, bool on); // drive.enable 등 (/drive_node). 연결 안 됐으면 false
+  bool setBoolParam(const QString &name, bool on); // drive.enable 등 (/drive_node), publish_debug (/signs_node). 연결 안 됐으면 false
+  bool setDoubleParam(const QString &name, double v); // YOLO conf·nms·max_hz (/signs_node). 연결 안 됐으면 false
   bool requestParams();                 // 세 노드 모두 요청했으면 true
   void refreshParams();                 // 연결된 노드의 현재 값을 다시 읽음 (주기적으로 호출 → 화면이 항상 노드 값)
   void saveParams(const QString &path); // 연결된 노드의 현재 값 → YAML (drive.enable 제외)
@@ -87,6 +88,8 @@ private:
   static bool isPathParam(const QString &name);
   static bool isDriveParam(const QString &name);
   static bool isBrainParam(const QString &name); // sign.*, mission.* → /brain_node (표지판 필터, 미션 동작)
+  static bool isSignsParam(const QString &name); // conf, nms, max_hz, publish_debug → /signs_node (YOLO)
+  static std::vector<std::string> signsParamNames();
   static std::vector<std::string> brainParamNames();
   static std::vector<std::string> lineParamNames();
   static std::vector<std::string> pathParamNames();
@@ -137,7 +140,8 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr uart_cmd_sub_; // TB_Uart_RX (모터로 실제 보낸 명령)
 
   // 파라미터
-  rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_, drive_client_, brain_client_;
+  rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_, drive_client_, brain_client_, signs_client_;
+  rclcpp::AsyncParametersClient::SharedPtr clientFor(const QString &name) const; // 이름 → 보낼 노드
   // setBoolParam으로 보낸 시각. 그 직후 주기 읽기(refreshParams)가 보내기 전 값을 돌려주면
   // 화면이 되돌아감(자동→정지 표시인데 로봇은 주행) → 잠깐 동안은 읽은 bool 값을 무시
   std::map<std::string, std::chrono::steady_clock::time_point> bool_set_time_;

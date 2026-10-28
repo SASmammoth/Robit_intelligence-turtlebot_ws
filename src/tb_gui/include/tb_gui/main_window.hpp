@@ -22,6 +22,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QGridLayout>
+#include <QGroupBox>
 #include <QTabWidget>
 #include <QSplitter>
 #include <QMap>
@@ -162,7 +163,28 @@ private:
     const char *name, *text, *suffix;
     int min, max, step;
   };
+  struct ParamDoubleDef
+  {
+    const char *name, *text, *suffix;
+    double min, max, step;
+    int decimals;
+  };
+  struct ParamGroup
+  {
+    const char *title;
+    std::vector<ParamSpinDef> defs;
+    int cols = 3;               // (이름, 스핀박스) 묶음 몇 개씩 한 줄
+    const char *note = nullptr; // 제목 밑 회색 설명 한 줄
+  };
+  QSpinBox *createParamSpin(QWidget *parent, const ParamSpinDef &d); // 만들고 노드와 연결 (배치는 부르는 쪽)
   void addParamSpin(QGridLayout *grid, QWidget *parent, int idx, int cols, const ParamSpinDef &d);
+  void addParamDouble(QGridLayout *grid, QWidget *parent, int idx, int cols, const ParamDoubleDef &d);
+  QGroupBox *makeParamGroup(QWidget *parent, const ParamGroup &g);
+  QWidget *makeParamPage(const std::vector<QWidget *> &boxes, const QString &hint);
+  QGroupBox *makeSignFilterTable(QWidget *parent); // 표지판 × (높이·너비·면적·연속 프레임)
+  QGroupBox *makeYoloBox(QWidget *parent);         // signs_node: max_hz, conf, nms, publish_debug
+  QMap<QString, QDoubleSpinBox *> double_widgets_;
+  QCheckBox *check_yolo_debug_ = nullptr;
   void setupParamTab();
 
   // 주행 (WASD)
