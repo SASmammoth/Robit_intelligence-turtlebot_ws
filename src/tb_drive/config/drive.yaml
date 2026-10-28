@@ -46,6 +46,7 @@ drive_node:
       hold_ms: 600           # 경로가 비면 마지막 경로를 추측항법으로 이만큼 더 따라감
       cmd_timeout_ms: 500    # /drive/cmd 유효 시간
       weak_src_pct: 60       # path_source가 memory/color_rule이면 속도를 이 %로
+      weak_delay_ms: 0       # 약한 경로가 이만큼 이어질 때만 감속 (0 = 바로). live·memory가 프레임마다 번갈아 나올 때 출렁임 방지
       # ── 회전 세기 (pure pursuit 곡률 배율 %, 100 = 예전과 같음. 올리면 같은 경로에서 더 작게 돎: 120 → 반경 0.83배)
       turn_gain_pct: 100       # 일반 주행
       # ── 교차로 명령 중 (/mission/turn이 좌/우일 때. 공사 구간이면 공사 값이 우선)

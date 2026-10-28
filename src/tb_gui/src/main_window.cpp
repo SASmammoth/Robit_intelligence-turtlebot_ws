@@ -1439,6 +1439,7 @@ void MainWindow::setupDriveTab()
            {"drive.path_timeout_ms", "경로 유효", " ms", 50, 3000, 50},
            {"drive.hold_ms", "끊긴 뒤 마지막 경로 유지", " ms", 0, 3000, 50},
            {"drive.weak_src_pct", "약한 경로(memory 등) 속도", " %", 0, 100, 5},
+           {"drive.weak_delay_ms", "약한 경로가 이만큼 이어지면 감속", " ms", 0, 2000, 50},
            {"drive.stop_dist_mm", "경로 끝 정지", " mm", 0, 300, 5},
            {"drive.cmd_timeout_ms", "brain 명령 유효", " ms", 50, 3000, 50},
            {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},

@@ -78,6 +78,9 @@ private:
     int control_hz_ = 0;
     double cmd_timeout_ = 0.5;
     double weak_scale_ = 0.6;
+    double weak_delay_ = 0.0;                  // drive.weak_delay_ms [s]
+    bool weak_src_ = false;                    // 지금 경로가 memory/color_rule인지
+    rclcpp::Time weak_since_{0, 0, RCL_ROS_TIME}; // 약한 경로가 시작된 시각
     // 공사 구간 (/lane/construction): 경로는 일반과 같고 속도·lookahead·피봇만 바꿈
     bool construction_ = false;
     double con_v_ = 0.10;                   // 최고 속도 [m/s]

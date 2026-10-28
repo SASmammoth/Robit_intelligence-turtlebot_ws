@@ -48,6 +48,7 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.hold_ms", 600, 0, 3000);
     declare_int("drive.cmd_timeout_ms", 500, 50, 3000);
     declare_int("drive.weak_src_pct", 60, 0, 100);
+    declare_int("drive.weak_delay_ms", 0, 0, 2000);    // 약한 경로가 이만큼 이어져야 weak_src_pct로 감속 (0 = 바로, 예전과 같음)
     // 일반 주행 회전 세기 % (pure pursuit 곡률 배율. 120 = 같은 lookahead에서 반경 0.83배)
     declare_int("drive.turn_gain_pct", 100, 50, 300);
     // 교차로 명령(/mission/turn ≠ 0) 중: 최고 속도·회전 세기·최소 lookahead (공사 구간이면 공사 값이 우선)
@@ -105,7 +106,13 @@ DriveNode::DriveNode() : Node("drive_node")
             follower_.set_path(std::move(pts), rclcpp::Time(m->header.stamp, RCL_ROS_TIME).seconds()); });
 
     src_sub_ = create_subscription<std_msgs::msg::String>(
-        "/lane/path_source", 10, [this](const std_msgs::msg::String::ConstSharedPtr m) { path_src_ = m->data; });
+        "/lane/path_source", 10, [this](const std_msgs::msg::String::ConstSharedPtr m)
+        {
+            const bool weak = m->data == "memory" || m->data == "color_rule";
+            if (weak && !weak_src_)
+                weak_since_ = now(); // 약한 경로가 시작된 시각 (drive.weak_delay_ms)
+            weak_src_ = weak;
+            path_src_ = m->data; });
     con_sub_ = create_subscription<std_msgs::msg::Bool>(
         "/lane/construction", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
         {
@@ -271,6 +278,7 @@ void DriveNode::reload_params()
     follower_.hold_time = mm("drive.hold_ms");
     cmd_timeout_ = mm("drive.cmd_timeout_ms");
     weak_scale_ = get_parameter("drive.weak_src_pct").as_int() / 100.0;
+    weak_delay_ = mm("drive.weak_delay_ms"); // ms → s
     con_v_ = mm("drive.con_v_mm_s");
 
     auto &pv = pv_normal_;
@@ -361,7 +369,9 @@ void DriveNode::on_timer()
             double limit = follower_.p.v_max;
             if (cmd_fresh && cmd_->speed_limit > 0.0f)
                 limit = std::min<double>(limit, cmd_->speed_limit);
-            if (path_src_ == "memory" || path_src_ == "color_rule")
+            // 약한 경로(memory 등)가 weak_delay_ms 넘게 이어질 때만 감속 (live↔memory가 한두 프레임씩
+            // 번갈아 나오면 감속·가속이 반복돼 출렁임. 기억 경로는 odom 배율을 맞춘 뒤로 짧게는 정확함)
+            if (weak_src_ && (weak_delay_ <= 0.0 || (now_t - weak_since_).seconds() >= weak_delay_))
                 limit *= weak_scale_;
             if (construction_ && con_v_ > 0.0)
                 limit = std::min(limit, con_v_);
