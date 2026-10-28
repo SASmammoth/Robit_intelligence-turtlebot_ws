@@ -10,14 +10,16 @@
         },
         "env": {
             "ROS2_SETUP": "if [ -f /opt/ros/jazzy/setup.bash ]; then source /opt/ros/jazzy/setup.bash; else eval \"$(mamba shell hook --shell bash)\" && mamba activate ros2_env; fi",
-            "MERGE_CC": "jq -s 'add' build/*/compile_commands.json > build/compile_commands.json"
+            "MERGE_CC": "jq -s 'add' build/*/compile_commands.json > build/compile_commands.json",
+            // 패키지 안에서 동시에 도는 컴파일러 수 (Nano 메모리 보호). 노트북에서 빠르게 하려면 -j4 등으로
+            "MAKEFLAGS": "-j2"
         }
     },
     "tasks": [
         {
             "label": "colcon build",
             "type": "shell",
-            "command": "eval \"$ROS2_SETUP\" && colcon build --symlink-install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && eval \"$MERGE_CC\"",
+            "command": "eval \"$ROS2_SETUP\" && nice -n 10 colcon build --symlink-install --executor sequential --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && eval \"$MERGE_CC\"",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -29,7 +31,7 @@
         {
             "label": "colcon build (this package)",
             "type": "shell",
-            "command": "eval \"$ROS2_SETUP\" && colcon build --symlink-install --packages-select ${input:pkg} --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && eval \"$MERGE_CC\"",
+            "command": "eval \"$ROS2_SETUP\" && nice -n 10 colcon build --symlink-install --executor sequential --packages-select ${input:pkg} --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && eval \"$MERGE_CC\"",
             "problemMatcher": [
                 "$gcc"
             ]
@@ -41,11 +43,17 @@
             "type": "pickString",
             "description": "package name",
             "options": [
+                "tb_interfaces",
                 "tb_camera",
-                "tb_cv",
+                "tb_line",
+                "tb_path",
+                "tb_signs",
+                "tb_drive",
+                "tb_brain",
+                "tb_uart",
                 "tb_gui"
             ],
-            "default": "tb_camera"
+            "default": "tb_path"
         }
     ]
 }
