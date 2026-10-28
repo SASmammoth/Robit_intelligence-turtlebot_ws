@@ -11,6 +11,7 @@ path_node:
       max_lane_thick: 20    # ★ 차선 두께 / m_per_px_x 보다 여유 있게
 
     path:
+      brick_always: 0        # 0: 벽돌은 공사 모드에서만 경로에 반영, 1: 항상 (아래 brick_* 값이 공사 모드 밖에서 쓰임)
       brick_depth_mm: 100    # ★ 벽돌 앞뒤 길이
       brick_margin_mm: 50   # ★ 박스 좌우 여유
       brick_gap_mm: 120     # 벽돌 끝과 차선 사이 이보다 좁은 틈은 벽으로 막음 (곡선에서 수평 박스가 남기는 틈). 0=끔

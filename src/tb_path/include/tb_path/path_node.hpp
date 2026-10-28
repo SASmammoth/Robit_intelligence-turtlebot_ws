@@ -103,6 +103,7 @@ private:
     int brick_depth_mm_ = 60;           // 벽돌 앞뒤 길이
     int brick_margin_mm_ = 30;          // 박스 좌우 여유
     int brick_gap_mm_ = 120;            // 벽돌 끝~차선 틈이 이보다 좁으면 막음
+    bool brick_always_ = false;         // path.brick_always: false면 공사 모드에서만 벽돌을 벽으로
     int det_max_age_ms_ = 300;          // 이보다 오래된 탐지는 무시
 
     // 이동량: /odom 있으면 사용, 없으면 /cmd_vel 적분, 둘 다 없으면 정지로 봄
