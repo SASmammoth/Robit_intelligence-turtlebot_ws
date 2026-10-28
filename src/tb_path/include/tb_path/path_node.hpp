@@ -87,6 +87,10 @@ private:
     bool turn_drop_memory_ = true;      // path.turn_drop_memory
     bool parking_ = false;
 
+    // (파킹에서) 점선을 실선으로 잇는 코드
+    bool white_dash_ = false; // /mission/white_dash: true일 때만 흰 점선 잇기
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr white_dash_sub_;
+
     // 정지선 모드 (/mission/stop_line, tb_brain이 켬): 빨간 가로선(라벨 250) 앞에서 경로를 자름
     bool stop_line_ = false;
     bool sl_have_ = false;              // 켜진 뒤 정지선을 한 번이라도 찾았는지

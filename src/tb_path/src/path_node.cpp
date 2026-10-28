@@ -38,6 +38,13 @@ PathNode::PathNode() : Node("path_node")
                 RCLCPP_INFO(get_logger(), "parking: %d", m->data);
             parking_ = m->data; });
 
+    white_dash_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "/mission/white_dash", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+        {
+        if (m->data != white_dash_)
+            RCLCPP_INFO(get_logger(), "white_dash: %d", m->data);
+        white_dash_ = m->data; });
+
     // 정지선 모드 (tb_brain이 빨간불 등에서 켬). 켜져 있는 동안 빨간 가로선 앞에서 경로를 자름
     // true → false가 오면 끄고 기억한 정지선도 지움. 켤 때도 새로 찾음
     stop_line_sub_ = create_subscription<std_msgs::msg::Bool>(
@@ -166,6 +173,7 @@ void PathNode::reset_all()
     pose_ = lane_path::Pose2D{};
     turn_ = last_turn_ = 0;
     parking_ = false;
+    white_dash_ = false;
     stop_line_ = false;
     sl_have_ = false;
     last_det_.reset();
@@ -357,7 +365,7 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     // ====== 라벨 → 마스크
     cv::Mat white = (label == LABEL_WHITE);
     // 흰 점선 → 실선 (조각 10cm·빈칸 10cm 구간). 벽·색 규칙 모두 이어진 선으로 봄
-    if (wdash_max_mm_ > 0)
+    if (white_dash_ && wdash_max_mm_ > 0)
         lane_skel::bridge_dashes(white, geo_.m_per_px_x, geo_.m_per_px_y, wdash_max_mm_ / 1000.0,
                                  wdash_gap_mm_ / 1000.0, wdash_angle_deg_, wdash_offset_mm_ / 1000.0,
                                  std::max(3, int(std::lround(0.018 / std::max(1e-4, geo_.m_per_px_x)))));
@@ -677,8 +685,7 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             cv::polylines(view, px, true, cv::Scalar(0, 140, 255), 1);
         }
         static const char *turn_txt[] = {"straight", "left", "right"};
-        cv::putText(view, std::string(turn_txt[static_cast<int>(turn)]) + (parking_ ? " +park" : "") +
-                              (con_on() ? " +con" : "") + (stop_line_ ? (sl_have_ ? " +stop" : " +stop?") : ""),
+        cv::putText(view, std::string(turn_txt[static_cast<int>(turn)]) + (parking_ ? " +park" : "") + (white_dash_ ? " +wdash" : "") + (con_on() ? " +con" : "") + (stop_line_ ? (sl_have_ ? " +stop" : " +stop?") : ""),
                     {6, label.rows - 8}, cv::FONT_HERSHEY_SIMPLEX, 0.45, cv::Scalar(255, 255, 255), 1);
         publish_debug(view, msg->header);
     }
