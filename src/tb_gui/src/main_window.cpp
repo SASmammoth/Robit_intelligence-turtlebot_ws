@@ -482,6 +482,11 @@ void MainWindow::resetAll()
     ui->radioTurnStraight->setChecked(true); // toggled에서 /mission/turn 0
   if (ui->checkParking->isChecked())
     ui->checkParking->setChecked(false); // toggled에서 /mission/parking false
+  if (check_white_dash_ && check_white_dash_->isChecked())
+  {
+    QSignalBlocker block(check_white_dash_); // path_node는 reset에서 스스로 끔
+    check_white_dash_->setChecked(false);
+  }
   if (check_construction_->isChecked())
   {
     QSignalBlocker block(check_construction_);
@@ -566,7 +571,20 @@ void MainWindow::setupViewTab()
   const int park_idx = box->indexOf(ui->checkParking);
   box->insertWidget(park_idx + 1, check_construction_);
   box->insertWidget(park_idx + 2, check_barrier_);
-  for (QWidget *w : std::initializer_list<QWidget *>{check_construction_, check_barrier_, ui->checkParking,
+  check_white_dash_ = new QCheckBox("흰 점선 잇기", ui->groupStatus);
+  check_white_dash_->setToolTip("체크 = path_node가 짧은 흰 조각(점선)을 이어서 실선으로 봄 (/mission/white_dash).\n"
+                                "brain은 주차 시작부터 벽돌 옆에서 멈출 때까지 켬 (여기에도 그대로 보임).\n"
+                                "조각·빈칸 기준은 Params 탭 스켈레톤의 skel.wdash_*");
+  box->insertWidget(park_idx + 3, check_white_dash_);
+  connect(check_white_dash_, &QCheckBox::toggled, this, [this](bool on)
+          { qnode->publishWhiteDash(on); });
+  connect(qnode, &QNode::whiteDashReceived, this, [this](bool on)
+          {
+    if (check_white_dash_->isChecked() == on)
+      return;
+    QSignalBlocker block(check_white_dash_); // brain이 바꾼 값: 화면만 맞추고 다시 보내지 않음
+    check_white_dash_->setChecked(on); });
+  for (QWidget *w : std::initializer_list<QWidget *>{check_construction_, check_barrier_, check_white_dash_, ui->checkParking,
                                                      ui->radioTurnLeft, ui->radioTurnRight, ui->radioTurnStraight})
     w->setFocusPolicy(Qt::NoFocus);
 

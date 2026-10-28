@@ -61,6 +61,8 @@
 //   5. dist_mm 후진 → 0 0 → parking_pause초 대기 → dist_mm 직진 → 0 0
 //   6. 같은 방향 제자리 회전, turn_deg만큼 도는 시간 뒤 → 0 0
 //   7. pause 0, /mission/turn = 1을 time_exit초 동안
+//   흰 점선 잇기 (/mission/white_dash): 주차 시작(1) ~ 벽돌 옆에서 멈출 때(ApproachExtra → Stop) 켬
+//     켜진 동안 10Hz로 true를 계속 보내고, 끌 때 false를 한 번 보냄 (꺼져 있을 때는 안 보냄: GUI 수동 켜기와 안 싸움)
 //   PSD는 TB_Uart_TX "psd <0> <1> <2>" (tb_uart: F L R 순서). 주차 중에는 다른 표지판 무시
 //   거리는 TB_Uart_TX "velocity L R" 피드백(33ms)을 적분: 원시값 → m/s는 tb_drive publish_uart의 역
 //   (피드백에는 direction 부호가 안 곱해져 있으므로 |L|, |R| 평균. 방향은 보낸 명령으로 앎)
@@ -96,6 +98,7 @@ static constexpr const char *TOPIC_TURN = "/mission/turn";               // 발�
 static constexpr const char *TOPIC_CONSTRUCTION = "/mission/construction"; // 발행 (Bool)
 static constexpr const char *TOPIC_PAUSE = "/mission/pause";             // 발행 (Bool)
 static constexpr const char *TOPIC_STOP_LINE = "/mission/stop_line";     // 발행 (Bool: 정지선 앞에서 경로 자르기)
+static constexpr const char *TOPIC_WHITE_DASH = "/mission/white_dash";   // 발행 (Bool: path_node 흰 점선 잇기)
 static constexpr const char *TOPIC_DRIVE_CMD = "/drive/cmd";             // 발행 (DriveCmd)
 static constexpr const char *TOPIC_RUN = "/brain/run";                   // 구독 (String: "start" / "stop")
 static constexpr const char *TOPIC_INJECT = "/brain/inject";             // 구독 (String: 표지판 이름, 가짜 표지판)
@@ -180,6 +183,7 @@ public:
         construction_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_CONSTRUCTION, 10);
         pause_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_PAUSE, 10);
         stop_line_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_STOP_LINE, 10);
+        white_dash_pub_ = create_publisher<std_msgs::msg::Bool>(TOPIC_WHITE_DASH, 10);
         drive_cmd_pub_ = create_publisher<DriveCmd>(TOPIC_DRIVE_CMD, 10);
         uart_pub_ = create_publisher<std_msgs::msg::String>(TOPIC_UART_RX, 10);
 
@@ -237,6 +241,7 @@ private:
             // 다시 start 했을 때 이전 상태가 이어지지 않게
             if (stop_line_on_) // 멈추면 더 발행하지 않으므로 마지막으로 풀어 둠
                 publish_now(stop_line_pub_, false);
+            set_white_dash(false);
             clear_state();
             RCLCPP_INFO(get_logger(), "run: stop → run_state 0");
         }
@@ -257,6 +262,17 @@ private:
         con_latched_ = false;
         barrier_pause_ = false;
         stop_line_on_ = false;
+        white_dash_on_ = false;
+    }
+
+    // 흰 점선 잇기 켜기/끄기. 바뀔 때 한 번 바로 보냄 (run_state와 상관없이: 끄는 건 꼭 전달)
+    void set_white_dash(bool on)
+    {
+        if (on == white_dash_on_)
+            return;
+        white_dash_on_ = on;
+        publish_now(white_dash_pub_, on);
+        RCLCPP_INFO(get_logger(), "white_dash: %d", on);
     }
 
     // 주차 중단: 모터 0, pause 풀기 (run_state와 상관없이)
@@ -264,6 +280,7 @@ private:
     {
         send_velocity(0, 0);
         publish_now(pause_pub_, false);
+        set_white_dash(false);
         park_ = Park::Idle;
     }
 
@@ -280,6 +297,7 @@ private:
         publish_now(construction_pub_, false);
         publish_now(pause_pub_, false);
         publish_now(stop_line_pub_, false);
+        publish_now(white_dash_pub_, false);
         RCLCPP_INFO(get_logger(), "reset: 미션 상태 초기화 (run_state %d 유지)", run_state_);
         if (run_state_ == 1 && start_follow_)
         {
@@ -486,6 +504,7 @@ private:
             park_ = Park::Enter;
             park_t_ = now;
             set_turn(TURN_LEFT, now, park_time_enter_ * 1000);
+            set_white_dash(true); // 주차 칸으로 가는 동안 흰 점선을 실선으로
             break;
         case ID_LEFT:
             start_turn(TURN_LEFT, now, "left");
@@ -687,6 +706,8 @@ private:
     void park_next(Park p, const rclcpp::Time &t)
     {
         RCLCPP_INFO(get_logger(), "parking: %s → %s", park_name(park_), park_name(p));
+        if (p == Park::Stop || p == Park::Idle)
+            set_white_dash(false); // 벽돌 옆에서 멈춤 (또는 주차 끝): 흰 점선 잇기 끔
         park_ = p;
         park_t_ = t;
         park_dist_ = 0.0;
@@ -715,6 +736,8 @@ private:
             publish_follow();
         if (stop_line_mode_)
             publish_bool(stop_line_pub_, stop_line_on_); // path_node가 재시작돼도 맞게
+        if (white_dash_on_)
+            publish_bool(white_dash_pub_, true);
 
         const rclcpp::Time t = now();
         // 공사 구간: 시간으로 끝내기 (con_end_mode 1)
@@ -815,6 +838,7 @@ private:
     bool follow_ = false; // tl_green 본 뒤 FOLLOW 발행 중
     bool start_follow_ = false;
     bool stop_line_mode_ = true; // mission.stop_line
+    bool white_dash_on_ = false; // 흰 점선 잇기 (주차 시작 → 1, 벽돌 옆 정지·주차 중단·reset·run stop → 0)
     bool stop_line_on_ = false;  // 정지선 켜 둔 상태 (차단바 끝 → 1, run stop·reset → 0)
 
     uint8_t turn_value_ = TURN_NONE;
@@ -822,7 +846,7 @@ private:
     std::map<int, rclcpp::Time> last_seen_; // class_id → 마지막으로 본 시각
 
     rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr turn_pub_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_, pause_pub_, stop_line_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_, pause_pub_, stop_line_pub_, white_dash_pub_;
     rclcpp::Publisher<DriveCmd>::SharedPtr drive_cmd_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr uart_pub_;
     rclcpp::Subscription<DetectionArray>::SharedPtr det_sub_;

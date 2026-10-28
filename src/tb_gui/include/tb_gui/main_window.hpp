@@ -132,6 +132,7 @@ private:
   QWidget *view_tab_ = nullptr;
   QLabel *label_mode_ = nullptr, *label_keys_ = nullptr, *label_drive_brief_ = nullptr;
   QCheckBox *check_construction_ = nullptr, *check_barrier_ = nullptr;
+  QCheckBox *check_white_dash_ = nullptr; // /mission/white_dash (흰 점선 잇기, brain: 주차 시작 ~ 벽돌 옆 정지)
   QLabel *label_con_ = nullptr;        // 공사 모드 상태 배지 (/lane/construction_info)
   void showConstructionInfo(const QString &info);
   void exitConstruction();             // 공사 모드 끝내기 (버튼, X키)

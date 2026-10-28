@@ -51,6 +51,7 @@ public:
   // ====== 미션
   void publishTurn(int turn); // 0 직진, 1 좌, 2 우
   void publishParking(bool on);
+  void publishWhiteDash(bool on); // /mission/white_dash (path_node 흰 점선 잇기)
   void publishConstruction(bool on); // /mission/construction (공사 구간 모드 수동 켜기/끄기)
   void publishConstructionExit();    // /mission/construction_exit (지금 공사 모드 끝내기: 표지판 자동 진입도)
   void publishDriveStop();           // /drive/cmd STOP 한 번 (차단바 흉내: 10Hz 이상으로 계속 불러야 유지됨)
@@ -105,10 +106,12 @@ private:
   rclcpp::Subscription<tb_interfaces::msg::DetectionArray>::SharedPtr det_sub_;
   rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr turn_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr parking_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr white_dash_sub_;
 
   // 미션
   rclcpp::Publisher<std_msgs::msg::UInt8>::SharedPtr turn_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr parking_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr white_dash_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_pub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr construction_state_sub_; // path_node가 실제로 공사 구간 모드인지
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr construction_exit_pub_;
@@ -184,6 +187,7 @@ Q_SIGNALS:
   void detectionsReceived(const QString &text);
   void turnReceived(int turn);
   void parkingReceived(bool on);
+  void whiteDashReceived(bool on);
   void constructionStateReceived(bool on); // /lane/construction (path_node 상태: 표지판 자동 진입 포함)
   void constructionInfoReceived(const QString &text); // "ON 표지판 brick=1 dist=0.42 ..." / "off ..."
 

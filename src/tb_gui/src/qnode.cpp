@@ -160,9 +160,13 @@ QNode::QNode()
   parking_sub_ = node->create_subscription<std_msgs::msg::Bool>(
       "/mission/parking", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
       { Q_EMIT parkingReceived(m->data); });
+  white_dash_sub_ = node->create_subscription<std_msgs::msg::Bool>(
+      "/mission/white_dash", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+      { Q_EMIT whiteDashReceived(m->data); });
 
   turn_pub_ = node->create_publisher<std_msgs::msg::UInt8>("/mission/turn", 10);
   parking_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/parking", 10);
+  white_dash_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/white_dash", 10);
   construction_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/construction", 10);
   construction_state_sub_ = node->create_subscription<std_msgs::msg::Bool>(
       "/lane/construction", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
@@ -734,6 +738,13 @@ void QNode::publishParking(bool on)
   std_msgs::msg::Bool m;
   m.data = on;
   parking_pub_->publish(m);
+}
+
+void QNode::publishWhiteDash(bool on)
+{
+  std_msgs::msg::Bool m;
+  m.data = on;
+  white_dash_pub_->publish(m);
 }
 
 // ───────── UART ─────────
