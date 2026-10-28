@@ -31,6 +31,9 @@ public:
     conf_ = declare_parameter<double>("conf", 0.5);
     nms_ = declare_parameter<double>("nms", 0.5);
     debug_ = declare_parameter<bool>("publish_debug", true);
+    // 초당 최대 추론 횟수. 0이면 제한 없음 (카메라 30fps 그대로). 낮추면 GPU·CPU 사용이 그만큼 줄어듦
+    // brain의 sign.confirm_frames(연속 프레임 수)는 이 속도 기준이 되므로 같이 맞출 것
+    max_hz_ = declare_parameter<double>("max_hz", 0.0);
 
     loadNames(names);
     det_ = std::make_unique<tb_signs::TrtDetector>(engine);
@@ -46,6 +49,7 @@ public:
         if (p.get_name() == "conf") conf_ = p.as_double();
         else if (p.get_name() == "nms") nms_ = p.as_double();
         else if (p.get_name() == "publish_debug") debug_ = p.as_bool();
+        else if (p.get_name() == "max_hz") max_hz_ = p.as_double();
       }
       rcl_interfaces::msg::SetParametersResult r;
       r.successful = true;
@@ -88,6 +92,12 @@ private:
 
   void onImage(const CompressedImage &msg)
   {
+    // max_hz: 직전 추론에서 1/max_hz초가 안 지났으면 디코딩도 하지 않고 넘김
+    const rclcpp::Time now = this->now();
+    if (max_hz_ > 0.0 && last_run_.nanoseconds() > 0 && (now - last_run_).seconds() < 0.95 / max_hz_)
+      return;
+    last_run_ = now;
+
     cv::Mat img = cv::imdecode(msg.data, cv::IMREAD_COLOR);
     if (img.empty())
       return;
@@ -146,6 +156,8 @@ private:
   std::map<int, std::string> names_;
   double conf_, nms_;
   bool debug_;
+  double max_hz_ = 0.0;
+  rclcpp::Time last_run_{0, 0, RCL_ROS_TIME};
 
   rclcpp::Subscription<CompressedImage>::SharedPtr sub_;
   rclcpp::Publisher<DetectionArray>::SharedPtr det_pub_;

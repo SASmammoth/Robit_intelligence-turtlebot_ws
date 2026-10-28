@@ -1,6 +1,7 @@
 # 카메라 + 차선 + 경로 + 표지판 + 주행 전체 실행
 #   ros2 launch tb_line robot.launch.py                  # 전부
 #   ros2 launch tb_line robot.launch.py signs:=false     # YOLO 빼고
+#   ros2 launch tb_line robot.launch.py yolo_hz:=15      # YOLO 초당 15번만 (GPU·CPU 절약)
 #   ros2 launch tb_line robot.launch.py drive:=false     # 주행 노드 빼고 (차선·경로만 볼 때)
 #   ros2 launch tb_line robot.launch.py params:=~/tb_params.yaml   # GUI에서 저장한 값으로 시작
 #
@@ -16,6 +17,7 @@ from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessStart
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def share_or_empty(pkg, *rel):
@@ -58,7 +60,8 @@ def launch_setup(context):
     path = Node(package='tb_path', executable='path_node', name='path_node', output='screen',
                 parameters=param_files(path_yaml, params))
     yolo = Node(package='tb_signs', executable='sign_detect_node', name='signs_node', output='screen',
-                parameters=[{'engine_path': engine}],
+                parameters=[{'engine_path': engine,
+                             'max_hz': ParameterValue(LaunchConfiguration('yolo_hz'), value_type=float)}],
                 condition=IfCondition(signs))
     driver = Node(package='tb_drive', executable='drive_node', name='drive_node', output='screen',
                   parameters=param_files(drive_yaml, params),
@@ -103,6 +106,8 @@ def generate_launch_description():
                                    os.environ.get("RMW_FASTRTPS_PUBLICATION_MODE", "ASYNCHRONOUS")),
             DeclareLaunchArgument("signs", default_value="true"),
             DeclareLaunchArgument("engine", default_value=default_engine),
+            DeclareLaunchArgument("yolo_hz", default_value="0",
+                                  description="YOLO 초당 최대 추론 횟수 (0 = 카메라 프레임마다, 예: 15)"),
             DeclareLaunchArgument("drive", default_value="true"),
             DeclareLaunchArgument("brain", default_value="true"),
             DeclareLaunchArgument("params", default_value="",

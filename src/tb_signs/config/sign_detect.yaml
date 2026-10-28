@@ -6,3 +6,4 @@ sign_detect_node:
     conf: 0.5          # 검출 임계값
     nms: 0.5           # NMS IoU (end-to-end 출력이면 사용 안 함)
     publish_debug: true
+    max_hz: 0.0        # 초당 최대 추론 횟수 (0 = 카메라 프레임마다). 실제 실행은 robot.launch.py의 yolo_hz 인자
