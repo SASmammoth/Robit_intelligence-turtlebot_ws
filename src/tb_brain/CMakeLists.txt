@@ -8,11 +8,12 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(tb_interfaces REQUIRED)
 
 add_executable(brain_node src/brain_node.cpp)
 target_compile_features(brain_node PUBLIC cxx_std_17)
-ament_target_dependencies(brain_node rclcpp std_msgs tb_interfaces)
+ament_target_dependencies(brain_node rclcpp std_msgs nav_msgs tb_interfaces)
 
 install(TARGETS brain_node DESTINATION lib/${PROJECT_NAME})
 

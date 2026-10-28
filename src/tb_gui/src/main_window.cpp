@@ -1309,7 +1309,9 @@ void MainWindow::setupParamTab()
              }}),
       group({"좌/우 표지판",
              {
-                 {"mission.turn_ms", "turn 유지 시간", " ms", 0, 30000, 500},
+                 {"mission.turn_ms", "turn 유지 시간 (최대)", " ms", 0, 30000, 500},
+                 {"mission.turn_end_deg", "이만큼 돌면 turn 끝 (0=시간만)", " °", 0, 360, 5},
+                 {"mission.turn_end_mm", "다 돈 뒤 이만큼 더 가서 끝", " mm", 0, 2000, 10},
              }}),
       group({"주차 — 진행 순서대로",
              {

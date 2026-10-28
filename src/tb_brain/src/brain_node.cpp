@@ -86,6 +86,7 @@
 #include <std_msgs/msg/empty.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/u_int8.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 
 #include "tb_interfaces/msg/detection_array.hpp"
 #include "tb_interfaces/msg/drive_cmd.hpp"
@@ -143,7 +144,11 @@ public:
     BrainNode() : Node("brain_node")
     {
         // 미션 동작 (정수: GUI 스핀박스로 바꿈. ros2 param set /brain_node mission.turn_ms 4000 도 가능)
-        declare_int("mission.turn_ms", 4000, 0, 30000);         // 좌/우 표지판 → turn 유지 시간
+        declare_int("mission.turn_ms", 4000, 0, 30000);         // 좌/우 표지판 → turn 유지 시간 (최대)
+        // 좌/우 표지판 turn을 각도로 끝냄: 표지판 뒤 로봇이 이만큼 돌고 turn_end_mm 더 가면 0 (0 = 시간만, 예전과 같음)
+        //   시간만 쓰면 속도를 올렸을 때 교차로 뒤 S자·갈림까지 좌/우 명령이 남아 엉뚱한 가지로 감
+        declare_int("mission.turn_end_deg", 0, 0, 360);
+        declare_int("mission.turn_end_mm", 100, 0, 2000);
         declare_int("mission.rearm_ms", 2000, 0, 30000);        // 같은 표지판을 이만큼 안 보다가 다시 보면 새 표지판
         declare_int("mission.barrier_release_ms", 0, 0, 30000); // 차단바(닫힘)가 이만큼 안 보이면 pause 해제 (0: barrier_open만)
         declare_int("mission.con_end_mode", 0, 0, 2);           // 0 path_node 벽돌 기준, 1 시간, 2 주차 표지판까지
@@ -202,6 +207,23 @@ public:
         uart_sub_ = create_subscription<std_msgs::msg::String>(
             TOPIC_UART_TX, 10,
             [this](const std_msgs::msg::String::ConstSharedPtr m) { on_uart(m->data); });
+        // 회전각·이동 거리 (turn_end_deg): 연속 각도로 누적 (±180 넘어가도 이어지게)
+        odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
+            "/odom", 10, [this](const nav_msgs::msg::Odometry::ConstSharedPtr m)
+            {
+                const auto &q = m->pose.pose.orientation;
+                const double th = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+                const double x = m->pose.pose.position.x, y = m->pose.pose.position.y;
+                if (odom_have_)
+                {
+                    double d = th - odom_th_;
+                    while (d > M_PI) d -= 2 * M_PI;
+                    while (d < -M_PI) d += 2 * M_PI;
+                    yaw_acc_ += d;
+                    dist_acc_ += std::hypot(x - odom_x_, y - odom_y_);
+                }
+                odom_th_ = th, odom_x_ = x, odom_y_ = y;
+                odom_have_ = true; });
 
         // turn 유지/종료, drive cmd 유지 (10Hz)
         timer_ = create_wall_timer(std::chrono::milliseconds(100), [this] { on_timer(); });
@@ -387,6 +409,8 @@ private:
     {
         auto ms = [this](const char *n) { return int(get_parameter(n).as_int()); };
         turn_ms_ = ms("mission.turn_ms");
+        turn_end_deg_ = ms("mission.turn_end_deg");
+        turn_end_mm_ = ms("mission.turn_end_mm");
         rearm_ms_ = ms("mission.rearm_ms");
         barrier_release_ms_ = ms("mission.barrier_release_ms");
         con_end_mode_ = ms("mission.con_end_mode");
@@ -531,6 +555,10 @@ private:
             return;
         RCLCPP_INFO(get_logger(), "%s → turn %u for %dms", name, value, turn_ms_);
         set_turn(value, now, turn_ms_);
+        // 각도로 끝내기는 표지판 turn에만 (주차 등 set_turn을 직접 부르는 동작은 시간 그대로)
+        turn_by_angle_ = turn_end_deg_ > 0 && odom_have_;
+        turn_yaw0_ = yaw_acc_;
+        turn_angle_dist_ = -1.0;
     }
 
     // 회전 신호 중이어도 덮어씀 (끝내기는 on_timer)
@@ -538,6 +566,7 @@ private:
     {
         turn_value_ = value;
         turn_end_ = now + rclcpp::Duration::from_seconds(ms / 1000.0);
+        turn_by_angle_ = false; // 각도 끝내기는 start_turn(표지판)만 다시 켬
         publish_turn(value);
     }
 
@@ -756,9 +785,23 @@ private:
 
         if (turn_value_ == TURN_NONE)
             return;
-        if (t >= turn_end_)
+        bool angle_done = false;
+        if (turn_by_angle_)
         {
-            RCLCPP_INFO(get_logger(), "turn end → 0");
+            const double turned = std::abs(yaw_acc_ - turn_yaw0_) * 180.0 / M_PI;
+            if (turn_angle_dist_ < 0.0 && turned >= turn_end_deg_)
+                turn_angle_dist_ = dist_acc_; // 다 돈 지점
+            if (turn_angle_dist_ >= 0.0 && (dist_acc_ - turn_angle_dist_) * 1000.0 >= turn_end_mm_)
+            {
+                angle_done = true;
+                RCLCPP_INFO(get_logger(), "turn end → 0 (%.0f° 돌고 %dmm)", turned, turn_end_mm_);
+            }
+        }
+        if (angle_done || t >= turn_end_)
+        {
+            turn_by_angle_ = false;
+            if (!angle_done)
+                RCLCPP_INFO(get_logger(), "turn end → 0");
             turn_value_ = TURN_NONE;
             publish_turn(TURN_NONE);
         }
@@ -797,7 +840,13 @@ private:
         pub->publish(m);
     }
 
-    int turn_ms_ = 4000; // left/right 발행 시간
+    int turn_ms_ = 4000; // left/right 발행 시간 (최대)
+    int turn_end_deg_ = 0, turn_end_mm_ = 100; // 각도로 끝내기 (0 = 끔)
+    bool turn_by_angle_ = false;
+    double turn_yaw0_ = 0.0, turn_angle_dist_ = -1.0;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+    bool odom_have_ = false;
+    double odom_th_ = 0.0, odom_x_ = 0.0, odom_y_ = 0.0, yaw_acc_ = 0.0, dist_acc_ = 0.0;
     int rearm_ms_ = 2000;
     int barrier_release_ms_ = 0;
     int con_end_mode_ = 0, con_hold_ms_ = 10000;

@@ -382,7 +382,7 @@ rclcpp::AsyncParametersClient::SharedPtr QNode::clientFor(const QString &n) cons
 // tb_brain 표지판 필터 (brain_node.cpp의 FILTER_LABELS와 같은 순서)
 std::vector<std::string> QNode::brainParamNames()
 {
-  std::vector<std::string> names = {"mission.turn_ms", "mission.rearm_ms", "mission.parking_pause",
+  std::vector<std::string> names = {"mission.turn_ms", "mission.turn_end_deg", "mission.turn_end_mm", "mission.rearm_ms", "mission.parking_pause",
                                     "mission.barrier_release_ms", "mission.con_end_mode", "mission.con_hold_ms",
                                     "mission.con_once", "mission.start_follow", "mission.stop_line",
                                     "mission.parking.time_enter", "mission.parking.time_break_ms", "mission.parking.time_exit", "mission.parking.turn_deg", "mission.parking.psd_L",
