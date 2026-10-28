@@ -8,6 +8,7 @@
 #include "tb_path/obstacles.hpp"
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <cmath>
 #include <cstdio>
 #include <string>
 
@@ -120,6 +121,9 @@ int main()
         check(q.size() == 2, "r-r-r → 두 군데 이음");
         q = obstacles::bridge_same_side({{0.0, 0.10, -0.10, true}, {0.45, 0.53, -0.10, true}}, 0.0);
         check(q.empty(), "con_bridge_mm = 0 → 끔");
+        q = obstacles::bridge_same_side({{0.0, 0.10, -0.10, true}, {0.45, 0.53, -0.10, true}}, 0.6, 0.05, 0.15, 0.03, 0.6, true);
+        check(q.size() == 1 && std::abs(q[0][0].x - 0.10) < 1e-9 && std::abs(q[0][0].y - (-0.07)) < 1e-9,
+              "from_back + margin 3cm → 뒷면(0.10)부터, 안쪽 끝 + 3cm");
     }
 
     // 경로 (스켈레톤 + 추적) — 흰선이 보이는 경우와 화면 밖인 경우

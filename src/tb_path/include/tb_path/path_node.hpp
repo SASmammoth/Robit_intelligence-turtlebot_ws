@@ -69,6 +69,9 @@ private:
     bool brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, BrickR &out) const;
     obstacles::Quad held_quads_one(int k) const; // 기억 중인 벽돌 k를 지금 위치로 옮긴 것 (잇기·표시용)
     int con_bridge_mm_ = 600;              // path.con_bridge_mm: 같은 쪽 벽돌 사이가 이보다 가까우면 이어 막음 (0 끔)
+    int con_bridge_margin_mm_ = 50;        // path.con_bridge_margin_mm: 이은 벽의 길 쪽 여유
+    int con_bridge_dy_mm_ = 150;           // path.con_bridge_dy_mm: 안쪽 끝 차이가 이보다 크면 안 이음
+    bool con_bridge_from_back_ = false;    // path.con_bridge_from_back: 앞 벽돌 뒷면부터 막음
     std::vector<obstacles::Quad> con_bridges_; // 이번 프레임에 이어 막은 곳 (표시용)
     double con_travel_ = 0.0;              // 공사 구간에서 지금까지 이동 거리
     lane_path::Pose2D con_last_pose_;

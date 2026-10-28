@@ -58,8 +58,9 @@ void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
 //   min_gap 이하로 겹치면 같은 벽돌(기억과 화면이 같은 것), max_gap 넘게 떨어지면 따로 피함
 //   max_dy: 두 벽돌 안쪽 끝 y 차이가 이보다 크면 다른 선에 붙은 것으로 보고 안 이음 (쪽 판단 오류 방지)
 //   margin: 안쪽 끝에서 길 쪽으로 더 막는 폭, far: 선 쪽으로 막는 폭 (화면 밖까지)
+//   from_back: true면 앞 벽돌 뒷면부터 막음 (false: 앞 벽돌 앞면부터 = 벽돌 옆까지 겹쳐 막음)
 struct SideBrick { double x0, x1, yin; bool right; };
 std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap, double min_gap = 0.05,
-                                   double max_dy = 0.15, double margin = 0.0, double far = 0.6);
+                                   double max_dy = 0.15, double margin = 0.0, double far = 0.6, bool from_back = false);
 
 } // namespace obstacles

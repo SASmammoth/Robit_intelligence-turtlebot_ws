@@ -134,6 +134,9 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_edge_mm", 60, 300);
     declare_int("path.con_dead_end_mm", 250, 1000);    // 끝이 벽에 막힌 가지가 이보다 짧으면 삭제 (0이면 끔)
     declare_int("path.con_bridge_mm", 600, 1500);     // 같은 쪽 벽돌(앞 벽돌 뒷면~다음 앞면)이 이 안이면 사이를 막음 (0 끔)
+    declare_int("path.con_bridge_margin_mm", 50, 300); // 이은 벽(보라)을 벽돌 안쪽 끝에서 길 쪽으로 더 막는 폭
+    declare_int("path.con_bridge_dy_mm", 150, 500);    // 두 벽돌 안쪽 끝 y 차이가 이보다 크면 다른 선에 붙은 것으로 보고 안 이음
+    declare_int("path.con_bridge_from_back", 0, 1);    // 1: 앞 벽돌 뒷면부터 막음 (0: 앞면부터 = 벽돌 옆도 겹쳐 막음)
     declare_int("path.con_keep", 0, 2);                // 지난 벽돌 피하기: 0 끔, 1 그쪽으로 꺾지만 못하게(약), 2 벽돌에서 떼어 놓기(강)
     declare_int("path.con_hold_mm", 40, 500);
     declare_int("path.con_keep_rear_mm", 100, 300);    // 지난 벽돌: 바퀴 축이 뒷면을 지나고 이만큼 더 가야 그쪽으로 꺾음 (로봇 뒤 끝 14cm)          // 기억한 벽돌 뒷면을 로봇 뒤 끝이 지나고 이만큼 더 가야 그쪽으로 붙음
@@ -239,6 +242,9 @@ void PathNode::reload_params()
     con_hold_mm_ = get_parameter("path.con_hold_mm").as_int();
     con_keep_ = get_parameter("path.con_keep").as_int();
     con_bridge_mm_ = int(get_parameter("path.con_bridge_mm").as_int());
+    con_bridge_margin_mm_ = int(get_parameter("path.con_bridge_margin_mm").as_int());
+    con_bridge_dy_mm_ = int(get_parameter("path.con_bridge_dy_mm").as_int());
+    con_bridge_from_back_ = get_parameter("path.con_bridge_from_back").as_int() != 0;
     con_keep_rear_mm_ = get_parameter("path.con_keep_rear_mm").as_int();
     con_dead_end_mm_ = get_parameter("path.con_dead_end_mm").as_int();
     con_clear_mm_ = get_parameter("path.con_clear_mm").as_int();
@@ -551,7 +557,8 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                 continue;
             sb.push_back({r.x0, r.x0 + 0.08, r.right ? r.yl : r.yr, r.right}); // 벽돌 두께 8cm
         }
-        con_bridges_ = obstacles::bridge_same_side(sb, con_bridge_mm_ / 1000.0, 0.05, 0.15, con_margin_mm_ / 1000.0);
+        con_bridges_ = obstacles::bridge_same_side(sb, con_bridge_mm_ / 1000.0, 0.05, con_bridge_dy_mm_ / 1000.0,
+                                                   con_bridge_margin_mm_ / 1000.0, 0.6, con_bridge_from_back_);
         if (!con_bridges_.empty())
         {
             bridge_m = cv::Mat::zeros(wall.size(), CV_8U);

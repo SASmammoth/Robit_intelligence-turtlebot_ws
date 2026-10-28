@@ -306,7 +306,7 @@ void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
 }
 
 std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap, double min_gap,
-                                   double max_dy, double margin, double far)
+                                   double max_dy, double margin, double far, bool from_back)
 {
     std::vector<Quad> out;
     if (max_gap <= 0.0)
@@ -327,8 +327,9 @@ std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap
                     // 길 쪽 끝: 두 벽돌 중 더 길 쪽으로 나온 것 + 여유. 선 쪽은 far만큼 (화면 밖까지)
                     const double yin = right ? std::max(prev->yin, b.yin) + margin : std::min(prev->yin, b.yin) - margin;
                     const double yout = right ? yin - far : yin + far;
-                    out.push_back({cv::Point2d(prev->x0, yin), cv::Point2d(b.x0 + 0.02, yin),
-                                   cv::Point2d(b.x0 + 0.02, yout), cv::Point2d(prev->x0, yout)});
+                    const double xs = from_back ? prev->x1 : prev->x0;
+                    out.push_back({cv::Point2d(xs, yin), cv::Point2d(b.x0 + 0.02, yin),
+                                   cv::Point2d(b.x0 + 0.02, yout), cv::Point2d(xs, yout)});
                 }
             }
             if (!prev || b.x1 > prev->x1)
