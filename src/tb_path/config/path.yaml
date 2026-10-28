@@ -60,4 +60,6 @@ path_node:
 
       # ── 정지선 (/mission/stop_line true 동안만: tb_brain이 빨간·노란불에서 켬)
       sl_margin_mm: 60      # 경로 끝 = 빨간선 - 이만큼 (바퀴 축 기준). 로봇 앞 끝 9cm, tb_drive stop_dist만큼 더 앞에서 멈춤
+      one_line_min_px: 300     # 한쪽 선만 보임(/lane/one_line): 적은 쪽 색 픽셀이 이보다 적고
+      one_line_main_px: 1000   #   많은 쪽이 이 이상일 때. tb_drive drive.one_line_v_mm_s로 감속
       sl_min_w_px: 60       # BEV 한 줄에 빨강이 이만큼 있어야 정지선으로 봄 (차로 폭 약 172px)

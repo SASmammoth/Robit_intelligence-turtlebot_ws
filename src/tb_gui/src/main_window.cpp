@@ -1224,6 +1224,12 @@ void MainWindow::setupParamTab()
                  {"path.sl_min_w_px", "한 줄 빨강 최소 폭 (BEV)", " px", 0, 320, 5},
              },
              2}),
+      group({"한쪽 선만 보임 (path_node → /lane/one_line, 감속은 주행 탭 '한쪽 선만 보일 때 속도')",
+             {
+                 {"path.one_line_min_px", "적은 쪽 색이 이보다 적고", " px", 0, 20000, 50},
+                 {"path.one_line_main_px", "많은 쪽 색이 이 이상", " px", 0, 50000, 100},
+             },
+             2}),
   }, "이름에 마우스를 올리면 ROS 파라미터 이름이 보입니다. 값은 바로 노드에 적용되고, 유지하려면 Save로 파일에 저장하세요."),
                "차선·경로");
 
@@ -1442,6 +1448,8 @@ void MainWindow::setupDriveTab()
            {"drive.hold_ms", "끊긴 뒤 마지막 경로 유지", " ms", 0, 3000, 50},
            {"drive.weak_src_pct", "약한 경로(memory 등) 속도", " %", 0, 100, 5},
            {"drive.weak_delay_ms", "약한 경로가 이만큼 이어지면 감속", " ms", 0, 2000, 50},
+           {"drive.one_line_v_mm_s", "한쪽 선만 보일 때 속도 (0=끔)", " mm/s", 0, 1000, 10},
+           {"drive.one_line_delay_ms", "한쪽 선만 이만큼 이어지면", " ms", 0, 5000, 100},
            {"drive.stop_dist_mm", "경로 끝 정지", " mm", 0, 300, 5},
            {"drive.cmd_timeout_ms", "brain 명령 유효", " ms", 50, 3000, 50},
            {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},

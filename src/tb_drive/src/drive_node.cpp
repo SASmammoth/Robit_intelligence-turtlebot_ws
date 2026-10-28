@@ -48,7 +48,10 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.hold_ms", 600, 0, 3000);
     declare_int("drive.cmd_timeout_ms", 500, 50, 3000);
     declare_int("drive.weak_src_pct", 60, 0, 100);
-    declare_int("drive.weak_delay_ms", 0, 0, 2000);    // 약한 경로가 이만큼 이어져야 weak_src_pct로 감속 (0 = 바로, 예전과 같음)
+    declare_int("drive.weak_delay_ms", 0, 0, 2000);
+    // 한쪽 선만 보이는 상태(/lane/one_line)가 one_line_delay_ms 넘게 이어지면 속도 상한 (0 = 끔). 공사 구간은 제외
+    declare_int("drive.one_line_v_mm_s", 0, 0, 1000);
+    declare_int("drive.one_line_delay_ms", 800, 0, 5000);    // 약한 경로가 이만큼 이어져야 weak_src_pct로 감속 (0 = 바로, 예전과 같음)
     // 일반 주행 회전 세기 % (pure pursuit 곡률 배율. 120 = 같은 lookahead에서 반경 0.83배)
     declare_int("drive.turn_gain_pct", 100, 50, 300);
     // 교차로 명령(/mission/turn ≠ 0) 중: 최고 속도·회전 세기·최소 lookahead (공사 구간이면 공사 값이 우선)
@@ -113,6 +116,12 @@ DriveNode::DriveNode() : Node("drive_node")
                 weak_since_ = now(); // 약한 경로가 시작된 시각 (drive.weak_delay_ms)
             weak_src_ = weak;
             path_src_ = m->data; });
+    one_line_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "/lane/one_line", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
+        {
+            if (m->data && !one_line_)
+                one_line_since_ = now();
+            one_line_ = m->data; });
     con_sub_ = create_subscription<std_msgs::msg::Bool>(
         "/lane/construction", 10, [this](const std_msgs::msg::Bool::ConstSharedPtr m)
         {
@@ -279,6 +288,8 @@ void DriveNode::reload_params()
     cmd_timeout_ = mm("drive.cmd_timeout_ms");
     weak_scale_ = get_parameter("drive.weak_src_pct").as_int() / 100.0;
     weak_delay_ = mm("drive.weak_delay_ms"); // ms → s
+    one_line_v_ = mm("drive.one_line_v_mm_s");
+    one_line_delay_ = mm("drive.one_line_delay_ms");
     con_v_ = mm("drive.con_v_mm_s");
 
     auto &pv = pv_normal_;
@@ -373,6 +384,9 @@ void DriveNode::on_timer()
             // 번갈아 나오면 감속·가속이 반복돼 출렁임. 기억 경로는 odom 배율을 맞춘 뒤로 짧게는 정확함)
             if (weak_src_ && (weak_delay_ <= 0.0 || (now_t - weak_since_).seconds() >= weak_delay_))
                 limit *= weak_scale_;
+            // 한쪽 선만 오래 보임: 다음 꺾임을 BEV에서 늦게 보므로 감속 (녹화 1029 07:08 S자: 3초 동안 노란선만)
+            if (one_line_v_ > 0.0 && one_line_ && !construction_ && (now_t - one_line_since_).seconds() >= one_line_delay_)
+                limit = std::min(limit, one_line_v_);
             if (construction_ && con_v_ > 0.0)
                 limit = std::min(limit, con_v_);
             else if (turning_ && cross_v_ > 0.0) // 교차로 명령 중 (공사 구간이면 공사 속도)

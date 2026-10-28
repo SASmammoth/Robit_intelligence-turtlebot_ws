@@ -422,7 +422,7 @@ std::vector<std::string> QNode::pathParamNames()
           "path.branch_look_mm", "path.blind_max_mm", "path.fill_blind", "path.fill_join_mm", "path.turn_radius_mm", "path.turn_min_deg",
           "path.con_brick_depth_mm", "path.con_brick_margin_mm", "path.con_brick_w_mm", "path.con_smooth_mm", "path.con_attach_mm", "path.con_extend_mm", "path.con_edge_mm", "path.con_dead_end_mm", "path.con_line_hug", "path.con_line_keep_mm", "path.con_line_zone_mm", "path.con_line_max_shift_mm", "path.con_bridge_mm", "path.con_bridge_margin_mm", "path.con_bridge_dy_mm", "path.con_bridge_from_back", "path.con_bridge_far_mm", "path.con_bridge_far_dy_mm", "path.con_keep", "path.con_keep_rear_mm", "path.con_hold_mm", "path.con_clear_mm",
           "path.con_exit_mm", "path.con_no_brick_mm", "path.con_override_frames", "path.con_cross_override_frames", "path.con_straight_by_lane", "path.con_offscreen_side",
-          "path.sl_margin_mm", "path.sl_min_w_px"};
+          "path.sl_margin_mm", "path.sl_min_w_px", "path.one_line_min_px", "path.one_line_main_px"};
 }
 
 std::vector<std::string> QNode::driveParamNames(bool with_enable)
@@ -435,7 +435,7 @@ std::vector<std::string> QNode::driveParamNames(bool with_enable)
       "drive.accel_mm_s2", "drive.decel_mm_s2", "drive.w_accel_deg_s2",
       "drive.ld_min_mm", "drive.ld_max_mm", "drive.ld_time_ms", "drive.ld_sharp_mm", "drive.sharp_turn_deg", "drive.sharp_hold_ms", "drive.sharp_hold_mm", "drive.curv_slow_mm", "drive.stop_dist_mm",
       "drive.sharp_curve_start_deg", "drive.sharp_curve_full_deg", "drive.curve_x_offset_mm",
-      "drive.path_timeout_ms", "drive.hold_ms", "drive.cmd_timeout_ms", "drive.weak_src_pct", "drive.weak_delay_ms", "drive.turn_gain_pct", "drive.cross_v_mm_s", "drive.cross_turn_gain_pct", "drive.cross_ld_min_mm", "drive.cross_ld_max_mm", "drive.cross_v_min_mm_s", "drive.cross_v_curve_mm_s", "drive.con_v_mm_s",
+      "drive.path_timeout_ms", "drive.hold_ms", "drive.cmd_timeout_ms", "drive.weak_src_pct", "drive.weak_delay_ms", "drive.one_line_v_mm_s", "drive.one_line_delay_ms", "drive.turn_gain_pct", "drive.cross_v_mm_s", "drive.cross_turn_gain_pct", "drive.cross_ld_min_mm", "drive.cross_ld_max_mm", "drive.cross_v_min_mm_s", "drive.cross_v_curve_mm_s", "drive.con_v_mm_s",
       "drive.con_ld_min_mm", "drive.con_ld_max_mm", "drive.con_v_min_mm_s", "drive.con_v_curve_mm_s", "drive.con_ld_sharp_mm", "drive.con_turn_gain_pct", "drive.con_pivot_enter_deg", "drive.con_pivot_keep_deg",
       "drive.pivot_enter_deg", "drive.pivot_keep_deg", "drive.pivot_confirm", "drive.pivot_exit_deg", "drive.pivot_w_deg_s", "drive.pivot_fallback_deg", "drive.corner_min_x_mm",
       "drive.psd.stop_mm"};

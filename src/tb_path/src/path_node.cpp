@@ -98,6 +98,7 @@ PathNode::PathNode() : Node("path_node")
     src_pub_ = create_publisher<std_msgs::msg::String>("/lane/path_source", 10);
     debug_pub_ = create_publisher<sensor_msgs::msg::CompressedImage>("/lane/debug/skel/compressed", rclcpp::SensorDataQoS().keep_last(1));
     con_pub_ = create_publisher<std_msgs::msg::Bool>("/lane/construction", 10);
+    one_line_pub_ = create_publisher<std_msgs::msg::Bool>("/lane/one_line", 10);
     world_pub_ = create_publisher<tb_interfaces::msg::PathWorld>("/lane/world", rclcpp::SensorDataQoS().keep_last(1));
     con_info_pub_ = create_publisher<std_msgs::msg::String>("/lane/construction_info", 10);
 
@@ -157,7 +158,10 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_straight_by_lane", 1, 1);   // 공사 구간: 직진 갈림길에서 차선 방향 기준으로 가장 곧은 가지 (화면 밖 선에 붙은 벽돌 앞으로 새지 않게)
     // 정지선 (/mission/stop_line true 동안만)
     declare_int("path.sl_margin_mm", 60, 500);  // 경로 끝 = 정지선 - 이만큼 (바퀴 축 기준. 로봇 앞 9cm + tb_drive stop_dist도 생각)
-    declare_int("path.sl_min_w_px", 60, 320);   // BEV 한 줄에 빨강이 이만큼 있어야 정지선 (잡티·옆 빨간 것 거르기)
+    declare_int("path.sl_min_w_px", 60, 320);
+    // 한쪽 선만 보임 (/lane/one_line → tb_drive가 drive.one_line_v_mm_s로 감속): 적은 쪽 색이 min_px 미만, 많은 쪽이 main_px 이상
+    declare_int("path.one_line_min_px", 300, 20000);
+    declare_int("path.one_line_main_px", 1000, 50000);   // BEV 한 줄에 빨강이 이만큼 있어야 정지선 (잡티·옆 빨간 것 거르기)
 
     reload_params();
     skel_p_.max_lane_thick = get_parameter("skel.max_lane_thick").as_int();
@@ -272,6 +276,8 @@ void PathNode::reload_params()
     con_offscreen_side_ = get_parameter("path.con_offscreen_side").as_int() != 0;
     sl_margin_mm_ = int(get_parameter("path.sl_margin_mm").as_int());
     sl_min_w_px_ = int(get_parameter("path.sl_min_w_px").as_int());
+    one_line_min_px_ = int(get_parameter("path.one_line_min_px").as_int());
+    one_line_main_px_ = int(get_parameter("path.one_line_main_px").as_int());
 }
 
 // BEV에서 로봇에 가장 가까운 빨간 가로선 → 로봇 기준 거리 [m]. 없으면 false
@@ -836,6 +842,13 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     std_msgs::msg::Bool con_state;
     con_state.data = con_on();
     con_pub_->publish(con_state);
+    // 한쪽 선만 보이는지 (보이는 곳의 흰선·노란선 픽셀 수). 다음 꺾임을 미리 못 보므로 drive가 감속에 씀
+    {
+        const int nw = cv::countNonZero(white & valid), ny = cv::countNonZero(yellow & valid);
+        std_msgs::msg::Bool ol;
+        ol.data = std::min(nw, ny) < one_line_min_px_ && std::max(nw, ny) >= one_line_main_px_;
+        one_line_pub_->publish(ol);
+    }
     std_msgs::msg::String con_info;
     con_info.data = construction_info();
     con_info_pub_->publish(con_info);

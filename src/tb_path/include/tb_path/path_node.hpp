@@ -148,6 +148,8 @@ private:
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_exit_sub_;  // /mission/construction_exit
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr con_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr one_line_pub_; // /lane/one_line: 한쪽 선만 보임
+    int one_line_min_px_ = 300, one_line_main_px_ = 1000;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr con_info_pub_;  // /lane/construction_info (GUI 표시용)
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;

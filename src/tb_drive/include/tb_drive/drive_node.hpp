@@ -41,6 +41,10 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr src_sub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr con_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr one_line_sub_; // /lane/one_line
+    bool one_line_ = false;
+    rclcpp::Time one_line_since_{0, 0, RCL_ROS_TIME};
+    double one_line_v_ = 0.0, one_line_delay_ = 0.8; // drive.one_line_v_mm_s [m/s], one_line_delay_ms [s]
 
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_; // /mission/pause
     rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr turn_sub_; // /mission/turn (0이 아니면 교차로)
