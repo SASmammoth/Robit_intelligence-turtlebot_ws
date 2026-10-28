@@ -32,6 +32,7 @@
 #include <QKeyEvent>
 #include "qnode.hpp"
 #include "path_view.hpp"
+#include "recorder.hpp"
 #include "ui_mainwindow.h"
 
 class MainWindow : public QMainWindow
@@ -66,6 +67,14 @@ private:
   QWidget *video_area_ = nullptr;
   QPushButton *btn_hide_video_ = nullptr;
   QMap<QString, QList<QLabel *>> streams_;               // "usb", "mask", "bev", "roi", "skel" → 라벨들
+
+  // 녹화 (영상 탭 오른쪽 위 버튼): USB·Skeleton·경로 보기 영상 + 노드 로그 + 현재 파라미터 → ~/tb_records/<날짜.시작시각>/
+  void setupRecorder();
+  void setRecording(bool on);
+  void updateRecordButton(); // 녹화 중이면 경과 시간 표시
+  Recorder *recorder_ = nullptr;
+  QPushButton *btn_record_ = nullptr;
+  PathView *rec_path_view_ = nullptr; // 녹화 전용 (화면에 안 띄움, 크기 고정 → 어느 탭을 보든 같은 영상)
   void queueParam(const QString &name, int v); // 50ms 묶음 전송
 
   // 주행 탭 아래: 노드 로그(/rosout) + 시간·수신 디버그, 영상 NO SIGNAL

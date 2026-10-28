@@ -43,6 +43,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
   connect(qnode, &QNode::bevImageReceived, this, [this](const QImage &img) { showStream("bev", img); });
   connect(qnode, &QNode::roiImageReceived, this, [this](const QImage &img) { showStream("roi", img); });
   connect(qnode, &QNode::skelImageReceived, this, [this](const QImage &img) { showStream("skel", img); });
+  setupRecorder();
 
   // ====== HSV 슬라이더 (흰/노랑 대상 전환)
   hsv_widgets_ = {
@@ -1517,6 +1518,81 @@ PathView *MainWindow::makePathView()
   return v;
 }
 
+// 녹화 버튼: 영상 탭(주행/튜닝) 이름 줄 오른쪽 끝
+//  녹화는 화면 표시와 따로 qnode 신호를 받음 → 영상을 숨기거나 다른 탭을 봐도 녹화됨
+void MainWindow::setupRecorder()
+{
+  recorder_ = new Recorder(this);
+  connect(qnode, &QNode::usbImageReceived, recorder_, [this](const QImage &img) { recorder_->setFrame("usb", img); });
+  connect(qnode, &QNode::skelImageReceived, recorder_, [this](const QImage &img) { recorder_->setFrame("skel", img); });
+  connect(qnode, &QNode::nodeLogReceived, recorder_, &Recorder::logNode); // 로그 필터와 상관없이 전부
+  connect(qnode, &QNode::paramFileStatus, recorder_, [this](const QString &text)
+          { recorder_->logEvent("파라미터 파일: " + QString(text).replace('\n', ' ')); }); // params.yaml 저장 결과 등
+
+  rec_path_view_ = makePathView();
+  rec_path_view_->setParent(this);
+  rec_path_view_->hide();
+  rec_path_view_->resize(640, 480);
+  recorder_->setPathView(rec_path_view_);
+
+  btn_record_ = new QPushButton(display_tabs_);
+  btn_record_->setCheckable(true);
+  btn_record_->setFocusPolicy(Qt::NoFocus); // WASD·방향 키 입력을 뺏지 않게
+  btn_record_->setToolTip(QString("USB · Skeleton · 경로 보기를 영상(mp4, %1 fps)으로, 노드 로그를 events.log로,\n"
+                                  "시작할 때 노드의 현재 파라미터 값을 params.yaml로 저장\n"
+                                  "저장 위치: ~/tb_records/<날짜.시작시각>/")
+                              .arg(Recorder::kFps));
+  display_tabs_->setCornerWidget(btn_record_, Qt::TopRightCorner);
+  connect(btn_record_, &QPushButton::toggled, this, &MainWindow::setRecording);
+  connect(&debug_timer_, &QTimer::timeout, this, &MainWindow::updateRecordButton);
+  updateRecordButton();
+}
+
+void MainWindow::setRecording(bool on)
+{
+  if (on && !recorder_->isRecording())
+  {
+    if (!recorder_->start(QDir::home().filePath("tb_records")))
+    {
+      statusBar()->showMessage("녹화 실패: 폴더/파일을 만들 수 없음", 5000);
+      QSignalBlocker block(btn_record_);
+      btn_record_->setChecked(false);
+    }
+    else
+    {
+      // 녹화 당시 노드의 현재 파라미터 값 (Save 버튼과 같은 형식, 결과는 파라미터 파일 표시 줄에 나옴)
+      const QString params = QDir(recorder_->dir()).filePath("params.yaml");
+      qnode->saveParams(params);
+      recorder_->logEvent("파라미터 저장 요청: " + params);
+      statusBar()->showMessage("녹화 시작: " + recorder_->dir(), 5000);
+    }
+  }
+  else if (!on && recorder_->isRecording())
+  {
+    const QString dir = recorder_->dir();
+    recorder_->stop();
+    statusBar()->showMessage("녹화 저장됨: " + dir, 10000);
+  }
+  updateRecordButton();
+}
+
+void MainWindow::updateRecordButton()
+{
+  if (!btn_record_)
+    return;
+  if (recorder_->isRecording())
+  {
+    const qint64 s = recorder_->elapsedMs() / 1000;
+    btn_record_->setText(QString("■ 녹화 중지 (%1:%2)").arg(s / 60, 2, 10, QChar('0')).arg(s % 60, 2, 10, QChar('0')));
+    btn_record_->setStyleSheet("QPushButton { color: white; background: #c0392b; font-weight: bold; padding: 2px 8px; }");
+  }
+  else
+  {
+    btn_record_->setText("● 녹화");
+    btn_record_->setStyleSheet("QPushButton { color: #c0392b; font-weight: bold; padding: 2px 8px; }");
+  }
+}
+
 // 같은 영상을 보여주는 라벨 중 지금 화면에 보이는 것만 그림 (숨은 탭은 크기 조정 안 함)
 void MainWindow::showStream(const QString &stream, const QImage &img)
 {
@@ -1614,6 +1690,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
 {
   stopDrive(); // 주행 중에 창을 닫으면 정지 명령 전송
   barrier_timer_.stop();
+  if (recorder_)
+    recorder_->stop(); // 녹화 중에 닫으면 파일을 정상적으로 닫음
   if (ui->checkAutoEnable->isChecked())
     qnode->setBoolParam("drive.enable", false); // 테스트 중 GUI를 닫으면 자동 주행도 끔
   QMainWindow::closeEvent(event);
