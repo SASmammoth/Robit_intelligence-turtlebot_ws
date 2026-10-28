@@ -62,7 +62,7 @@
 //   5. dist_mm 후진 → 0 0 → parking_pause초 대기 → dist_mm 직진 → 0 0
 //   6. 같은 방향 제자리 회전, turn_deg만큼 도는 시간 뒤 → 0 0
 //   7. pause 0, /mission/turn = 1을 time_exit초 동안
-//   흰 점선 잇기 (/mission/white_dash): 주차 시작(1) ~ 벽돌 옆에서 멈출 때(ApproachExtra → Stop) 켬
+//   흰 점선 잇기 (/mission/white_dash): 주차 시작(1) ~ 벽돌 옆에서 멈출 때(Break → Settle) 켬
 //     켜진 동안 10Hz로 true를 계속 보내고, 끌 때 false를 한 번 보냄 (꺼져 있을 때는 안 보냄: GUI 수동 켜기와 안 싸움)
 //   PSD는 TB_Uart_TX "psd <0> <1> <2>" (tb_uart: F L R 순서). 주차 중에는 다른 표지판 무시
 //   거리는 TB_Uart_TX "velocity L R" 피드백(33ms)을 적분: 원시값 → m/s는 tb_drive publish_uart의 역
@@ -704,7 +704,7 @@ private:
     void park_next(Park p, const rclcpp::Time &t)
     {
         RCLCPP_INFO(get_logger(), "parking: %s → %s", park_name(park_), park_name(p));
-        if (p == Park::Stop || p == Park::Idle)
+        if (p == Park::Settle || p == Park::Idle)
             set_white_dash(false); // 벽돌 옆에서 멈춤 (또는 주차 끝): 흰 점선 잇기 끔
         park_ = p;
         park_t_ = t;
