@@ -183,6 +183,7 @@ private:
   QWidget *makeParamPage(const std::vector<QWidget *> &boxes, const QString &hint);
   QGroupBox *makeSignFilterTable(QWidget *parent); // 표지판 × (높이·너비·면적·연속 프레임)
   QGroupBox *makeYoloBox(QWidget *parent);         // signs_node: max_hz, conf, nms, publish_debug
+  QGroupBox *makeOdomBox(QWidget *parent);         // tb_uart_node: odom 보정값 + 지금 위치 + 실제 거리로 배율 맞추기
   QMap<QString, QDoubleSpinBox *> double_widgets_;
   QCheckBox *check_yolo_debug_ = nullptr;
   void setupParamTab();

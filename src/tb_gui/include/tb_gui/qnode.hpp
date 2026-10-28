@@ -19,6 +19,7 @@
 #include "tb_interfaces/msg/drive_cmd.hpp"
 #include "tb_interfaces/msg/path_world.hpp"
 #include <nav_msgs/msg/path.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <rcl_interfaces/msg/log.hpp>
 #endif
@@ -62,6 +63,7 @@ public:
   void publishDriveStop();           // /drive/cmd STOP 한 번 (차단바 흉내: 10Hz 이상으로 계속 불러야 유지됨)
   void publishBrainRun(bool start);  // /brain/run "start" / "stop" (tb_brain 켜기/끄기)
   void publishReset();               // /mission/reset (path·drive·brain 상태 초기화)
+  void publishOdomReset();           // /odom/reset (odom 위치 0, 멈춘 상태에서 보정할 때만)
   void publishPause(bool on);        // /mission/pause (tb_brain이 거는 일시정지. brain 끌 때 풀어 줌)
   void publishBrainInject(const QString &label); // /brain/inject: 가짜 표지판 (brain이 바로 그 표지판 동작)
 
@@ -92,6 +94,8 @@ private:
   static bool isBrainParam(const QString &name); // sign.*, mission.* → /brain_node (표지판 필터, 미션 동작)
   static bool isSignsParam(const QString &name); // conf, nms, max_hz, publish_debug → /signs_node (YOLO)
   static std::vector<std::string> signsParamNames();
+  static bool isUartParam(const QString &name);  // odom.* → /tb_uart_node (odom 보정)
+  static std::vector<std::string> uartParamNames();
   static std::vector<std::string> brainParamNames();
   static std::vector<std::string> lineParamNames();
   static std::vector<std::string> pathParamNames();
@@ -126,6 +130,9 @@ private:
   rclcpp::Publisher<tb_interfaces::msg::DriveCmd>::SharedPtr drive_cmd_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr brain_run_pub_; // /brain/run
   rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr reset_pub_;      // /mission/reset
+  rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr odom_reset_pub_; // /odom/reset
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_; // odom 보정 표시용 (10Hz로 줄여 보냄)
+  std::chrono::steady_clock::time_point odom_emit_t_{};
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pause_pub_;       // /mission/pause
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr inject_pub_;    // /brain/inject
 
@@ -143,7 +150,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr uart_cmd_sub_; // TB_Uart_RX (모터로 실제 보낸 명령)
 
   // 파라미터
-  rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_, drive_client_, brain_client_, signs_client_;
+  rclcpp::AsyncParametersClient::SharedPtr line_client_, path_client_, drive_client_, brain_client_, signs_client_, uart_client_;
   rclcpp::AsyncParametersClient::SharedPtr clientFor(const QString &name) const; // 이름 → 보낼 노드
   // setBoolParam으로 보낸 시각. 그 직후 주기 읽기(refreshParams)가 보내기 전 값을 돌려주면
   // 화면이 되돌아감(자동→정지 표시인데 로봇은 주행) → 잠깐 동안은 읽은 bool 값을 무시
@@ -211,6 +218,7 @@ Q_SIGNALS:
   void driveStateReceived(const QString &text);
   void pathReceived(const QPolygonF &pts);   // /lane/path (base_link, m)
   void worldReceived(const WorldData &w);    // /lane/world (선·벽돌·기억, base_link m)
+  void odomReceived(double x, double y, double th); // /odom 위치 [m, m, rad] (10Hz)
   void targetReceived(const QPointF &p);     // /drive/target (base_link, m)
   void uartCommandSeen(const QString &text); // TB_Uart_RX (drive, WASD 등 누가 보냈든)
 

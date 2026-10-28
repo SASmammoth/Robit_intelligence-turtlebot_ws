@@ -23,6 +23,8 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <algorithm>
+#include <cmath>
+#include <memory>
 #include <cstdlib>
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindowDesign)
@@ -1086,6 +1088,80 @@ QGroupBox *MainWindow::makeYoloBox(QWidget *parent)
   return box;
 }
 
+// odom 보정 (tb_uart_node): 바퀴 값·배율을 실행 중에 바꾸고, 멈춘 상태에서 0 → 밀거나 몰고 → 실제 거리로 배율 계산
+QGroupBox *MainWindow::makeOdomBox(QWidget *parent)
+{
+  auto *box = new QGroupBox("odom 보정 (tb_uart_node)", parent);
+  auto *g = new QGridLayout(box);
+  const ParamDoubleDef defs[] = {
+      {"odom.rpm_per_unit", "배율 (rpm/원시값)", "", 0.001, 5.0, 0.005, 4},
+      {"odom.wheel_radius_m", "바퀴 반지름", " m", 0.01, 0.20, 0.0005, 4},
+      {"odom.wheel_sep_m", "바퀴 간격 (직진·곡선)", " m", 0.05, 0.50, 0.001, 4},
+      {"odom.pivot_sep_m", "바퀴 간격 (제자리 회전)", " m", 0.05, 0.50, 0.001, 4},
+  };
+  int i = 0;
+  for (const auto &d : defs)
+    addParamDouble(g, box, i++, 1, d);
+  addParamSpin(g, box, i++, 1, {"odom.max_gap_ms", "피드백 끊김 허용", " ms", 1, 1000, 10});
+
+  // 지금 odom 위치 + 0으로
+  auto *pos = new QLabel("odom: -", box);
+  pos->setStyleSheet("font-family: monospace;");
+  g->addWidget(pos, i, 0, 1, 2);
+  ++i;
+  auto *row = new QHBoxLayout;
+  auto *btn_zero = new QPushButton("odom 0으로", box);
+  btn_zero->setToolTip("/odom/reset. 멈춘 상태에서만 (주행 중에 누르면 path_node 기억 경로가 튐)");
+  btn_zero->setFocusPolicy(Qt::NoFocus);
+  auto *real = new QDoubleSpinBox(box);
+  real->setRange(0.05, 10.0);
+  real->setDecimals(3);
+  real->setSingleStep(0.05);
+  real->setValue(1.0);
+  real->setSuffix(" m");
+  real->setToolTip("0으로 한 뒤 자로 잰 실제 직진 거리");
+  auto *btn_fit = new QPushButton("실제 거리로 배율 맞추기", box);
+  btn_fit->setToolTip("새 배율 = 지금 배율 × 실제 거리 ÷ odom 거리 (0으로 한 뒤 직진만 했을 때)");
+  btn_fit->setFocusPolicy(Qt::NoFocus);
+  row->addWidget(btn_zero);
+  row->addWidget(new QLabel("실제", box));
+  row->addWidget(real);
+  row->addWidget(btn_fit, 1);
+  g->addLayout(row, i, 0, 1, 2);
+  ++i;
+  auto *note = new QLabel("① 멈춘 상태에서 'odom 0으로' ② 자로 잰 거리만큼 직진 ③ 실제 거리 입력 → 배율 맞추기. "
+                          "회전이 틀리면 제자리 360° 후 '제자리 회전 간격'을 조정. 값은 Save로 params 파일에 저장됨",
+                          box);
+  note->setWordWrap(true);
+  note->setStyleSheet("color: gray;");
+  g->addWidget(note, i, 0, 1, 2);
+
+  auto odom_xy = std::make_shared<QPointF>(0.0, 0.0);
+  connect(qnode, &QNode::odomReceived, pos, [pos, odom_xy](double x, double y, double th)
+          {
+    *odom_xy = QPointF(x, y);
+    pos->setText(QString("odom: x %1  y %2 m  거리 %3 m  θ %4°")
+                     .arg(x, 7, 'f', 3).arg(y, 7, 'f', 3).arg(std::hypot(x, y), 6, 'f', 3).arg(th * 180.0 / M_PI, 6, 'f', 1)); });
+  connect(btn_zero, &QPushButton::clicked, this, [this]
+          {
+    qnode->publishOdomReset();
+    statusBar()->showMessage("odom 0으로 (/odom/reset)", 3000); });
+  connect(btn_fit, &QPushButton::clicked, this, [this, real, odom_xy]
+          {
+    const double d = std::hypot(odom_xy->x(), odom_xy->y());
+    QDoubleSpinBox *sp = double_widgets_.value("odom.rpm_per_unit", nullptr);
+    if (!sp || d < 0.05)
+    {
+      statusBar()->showMessage("odom 거리가 5cm보다 짧음 (0으로 한 뒤 직진했는지, tb_uart_node가 떠 있는지 확인)", 5000);
+      return;
+    }
+    const double now = sp->value(), next = now * real->value() / d;
+    sp->setValue(next); // valueChanged → 노드에 보냄
+    statusBar()->showMessage(QString("배율 %1 → %2 (odom %3 m, 실제 %4 m). 다시 0으로 하고 확인하세요")
+                                 .arg(now, 0, 'f', 4).arg(next, 0, 'f', 4).arg(d, 0, 'f', 3).arg(real->value(), 0, 'f', 3), 8000); });
+  return box;
+}
+
 // ───────── Params 탭: 노드·주제별 하위 탭 ─────────
 // Tab 1(차선 색·BEV)에 이미 있는 값(HSV, BEV 사다리꼴, morph, bev.lane_w_px, skel.seal/prune/dash)은 넣지 않음
 // (한 파라미터에 위젯이 둘이면 동기화가 꼬임)
@@ -1389,6 +1465,7 @@ void MainWindow::setupDriveTab()
   }
   for (int c = 0; c < GROUP_COLS; ++c)
     grid->setColumnStretch(c, 1);
+  grid->addWidget(makeOdomBox(wrap), i / GROUP_COLS, i % GROUP_COLS, Qt::AlignTop); // odom 보정 (tb_uart_node)
   ui->gridDriveParams->addWidget(wrap, 0, 0);
   ui->gridDriveParams->setRowStretch(1, 1);
 

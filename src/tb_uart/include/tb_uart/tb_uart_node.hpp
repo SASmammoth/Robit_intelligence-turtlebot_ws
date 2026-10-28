@@ -79,6 +79,14 @@ private:
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr odom_reset_sub_;
   std::atomic<bool> odom_reset_req_{false};
   rclcpp::TimerBase::SharedPtr odom_timer_;
+
+  // odom 보정값 (odom.rpm_per_unit, wheel_radius_m, wheel_sep_m, pivot_sep_m, max_gap_ms)은 실행 중에도 바꿀 수 있음
+  // (GUI 주행 탭 / ros2 param set). 파라미터 콜백에서 받아 두고 rx 스레드가 다음 피드백 때 odom_에 넣음
+  struct OdomCfg { double wheel_radius, wheel_sep, pivot_sep, rpm_per_unit, max_gap; };
+  std::mutex cfg_mtx_;
+  OdomCfg cfg_pending_{};
+  std::atomic<bool> cfg_dirty_{false};
+  OnSetParametersCallbackHandle::SharedPtr param_cb_;
 };
 
 }  // namespace tb

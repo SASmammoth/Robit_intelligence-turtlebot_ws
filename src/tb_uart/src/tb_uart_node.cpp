@@ -50,7 +50,7 @@ TbUartNode::TbUartNode() : Node("tb_uart_node")
   channel_ = declare_parameter<int>("channel", -1);   // -1: 자동 탐색
 
   // ====== odom: STM32 velocity 피드백(다이나믹셀 실제 속도)을 적분해서 /odom 발행
-  // 값은 시작할 때만 읽음. 바퀴 값은 tb_drive drive.uart.* 와 같게
+  // enable·period는 시작할 때만, 보정값(바퀴·배율·max_gap)은 실행 중에도 바꿀 수 있음. 바퀴 값은 tb_drive drive.uart.* 와 같게
   log_data_        = declare_parameter<bool>("log_data", false);
   odom_enable_     = declare_parameter<bool>("odom.enable", true);
   odom_period_ms_  = std::clamp<int>(declare_parameter<int>("odom.period_ms", 10), 1, 1000);
@@ -61,6 +61,56 @@ TbUartNode::TbUartNode() : Node("tb_uart_node")
   odom_.rpm_per_unit = declare_parameter<double>("odom.rpm_per_unit", 0.229);
   odom_.max_gap      = declare_parameter<int>("odom.max_gap_ms", 100) / 1000.0;
   rt_.set_quiet_data(!log_data_);
+
+  // 보정값 실행 중 변경: 1m 직진·360° 회전으로 맞출 때 (GUI 주행 탭 'odom 보정')
+  param_cb_ = add_on_set_parameters_callback([this](const std::vector<rclcpp::Parameter> &ps) {
+    rcl_interfaces::msg::SetParametersResult res;
+    res.successful = true;
+    OdomCfg c;
+    {
+      std::lock_guard<std::mutex> lk(cfg_mtx_);
+      c = cfg_dirty_ ? cfg_pending_
+                     : OdomCfg{odom_.wheel_radius, odom_.wheel_sep, odom_.pivot_sep, odom_.rpm_per_unit, odom_.max_gap};
+    }
+    bool touched = false;
+    for (const auto &p : ps) {
+      const std::string &n = p.get_name();
+      double *dst = n == "odom.wheel_radius_m" ? &c.wheel_radius
+                  : n == "odom.wheel_sep_m"    ? &c.wheel_sep
+                  : n == "odom.pivot_sep_m"    ? &c.pivot_sep
+                  : n == "odom.rpm_per_unit"   ? &c.rpm_per_unit
+                                               : nullptr;
+      if (dst) {
+        if (p.get_type() != rclcpp::ParameterType::PARAMETER_DOUBLE || p.as_double() <= 0.0) {
+          res.successful = false;
+          res.reason = n + ": 0보다 큰 실수여야 함";
+          return res;
+        }
+        *dst = p.as_double();
+        touched = true;
+      } else if (n == "odom.max_gap_ms") {
+        if (p.get_type() != rclcpp::ParameterType::PARAMETER_INTEGER || p.as_int() < 1) {
+          res.successful = false;
+          res.reason = "odom.max_gap_ms: 1 이상 정수";
+          return res;
+        }
+        c.max_gap = p.as_int() / 1000.0;
+        touched = true;
+      } else if (n == "odom.enable" || n == "odom.period_ms" || n == "channel") {
+        res.successful = false;
+        res.reason = n + ": 시작할 때만 읽음 (다시 실행해야 적용)";
+        return res;
+      }
+    }
+    if (touched) {
+      std::lock_guard<std::mutex> lk(cfg_mtx_);
+      cfg_pending_ = c;
+      cfg_dirty_ = true;
+      RCLCPP_INFO(get_logger(), "odom 보정: rpm_per_unit %.4f, wheel_radius %.4f m, wheel_sep %.4f m, pivot_sep %.4f m, max_gap %.0f ms",
+                  c.rpm_per_unit, c.wheel_radius, c.wheel_sep, c.pivot_sep, c.max_gap * 1000.0);
+    }
+    return res;
+  });
 
   if (odom_enable_) {
     odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
@@ -438,6 +488,15 @@ void TbUartNode::on_velocity(const int16_t v[2])
     if (odom_reset_req_.exchange(false)) {
       odom_.reset_pose();
       RCLCPP_INFO(get_logger(), "odom reset");
+    }
+    if (cfg_dirty_.load()) {   // 파라미터 콜백에서 바꾼 보정값 (다음 적분부터)
+      std::lock_guard<std::mutex> lk(cfg_mtx_);
+      odom_.wheel_radius = cfg_pending_.wheel_radius;
+      odom_.wheel_sep = cfg_pending_.wheel_sep;
+      odom_.pivot_sep = cfg_pending_.pivot_sep;
+      odom_.rpm_per_unit = cfg_pending_.rpm_per_unit;
+      odom_.max_gap = cfg_pending_.max_gap;
+      cfg_dirty_ = false;
     }
     // 피드백은 모터 방향 그대로 → 송신 때 곱한 direction(±1)을 다시 곱하면 "전진 = 양수"
     odom_.update(l * dl, r * dr, t.seconds());

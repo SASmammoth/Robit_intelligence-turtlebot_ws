@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <QDateTime>
@@ -86,6 +87,7 @@ static const char *LINE_NODE = "/lineDetect_node";
 static const char *PATH_NODE = "/path_node";
 static const char *DRIVE_NODE = "/drive_node";
 static const char *BRAIN_NODE = "/brain_node";
+static const char *UART_NODE = "/tb_uart_node"; // odom 보정값 (odom.*)
 static const char *SIGNS_NODE = "/signs_node"; // tb_signs sign_detect_node (robot.launch.py의 이름)
 
 // 파일 저장/불러오기에서 빼는 파라미터 (불러오자마자 로봇이 움직이면 안 됨)
@@ -180,6 +182,17 @@ QNode::QNode()
   drive_cmd_pub_ = node->create_publisher<tb_interfaces::msg::DriveCmd>("/drive/cmd", 10);
   brain_run_pub_ = node->create_publisher<std_msgs::msg::String>("/brain/run", 10);
   reset_pub_ = node->create_publisher<std_msgs::msg::Empty>("/mission/reset", 10);
+  odom_reset_pub_ = node->create_publisher<std_msgs::msg::Empty>("/odom/reset", 10);
+  odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
+      "/odom", rclcpp::SensorDataQoS().keep_last(1), [this](const nav_msgs::msg::Odometry::ConstSharedPtr m)
+      {
+        const auto t = std::chrono::steady_clock::now();
+        if (t - odom_emit_t_ < std::chrono::milliseconds(100))
+          return;
+        odom_emit_t_ = t;
+        const auto &q = m->pose.pose.orientation;
+        const double th = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+        Q_EMIT odomReceived(m->pose.pose.position.x, m->pose.pose.position.y, th); });
   pause_pub_ = node->create_publisher<std_msgs::msg::Bool>("/mission/pause", 10);
   inject_pub_ = node->create_publisher<std_msgs::msg::String>("/brain/inject", 10);
 
@@ -271,6 +284,7 @@ QNode::QNode()
   drive_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, DRIVE_NODE);
   brain_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, BRAIN_NODE);
   signs_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, SIGNS_NODE);
+  uart_client_ = std::make_shared<rclcpp::AsyncParametersClient>(node, UART_NODE);
 
   // 세 노드의 파라미터 변경을 실시간으로 받음
   param_event_handler_ = std::make_shared<rclcpp::ParameterEventHandler>(node);
@@ -278,7 +292,7 @@ QNode::QNode()
       [this](const rcl_interfaces::msg::ParameterEvent &event)
       {
         if (event.node != LINE_NODE && event.node != PATH_NODE && event.node != DRIVE_NODE && event.node != BRAIN_NODE &&
-            event.node != SIGNS_NODE)
+            event.node != SIGNS_NODE && event.node != UART_NODE)
           return;
         for (const auto *list : {&event.new_parameters, &event.changed_parameters})
           for (const auto &p : *list)
@@ -334,6 +348,17 @@ bool QNode::isSignsParam(const QString &n)
   return n == "conf" || n == "nms" || n == "max_hz" || n == "publish_debug";
 }
 
+// odom 보정 (tb_uart_node). 실수 4개 + 정수 1개
+bool QNode::isUartParam(const QString &n)
+{
+  return n.startsWith("odom.");
+}
+
+std::vector<std::string> QNode::uartParamNames()
+{
+  return {"odom.rpm_per_unit", "odom.wheel_radius_m", "odom.wheel_sep_m", "odom.pivot_sep_m", "odom.max_gap_ms"};
+}
+
 std::vector<std::string> QNode::signsParamNames()
 {
   return {"max_hz", "conf", "nms", "publish_debug"};
@@ -343,6 +368,8 @@ rclcpp::AsyncParametersClient::SharedPtr QNode::clientFor(const QString &n) cons
 {
   if (isSignsParam(n))
     return signs_client_;
+  if (isUartParam(n))
+    return uart_client_;
   if (isDriveParam(n))
     return drive_client_;
   if (isPathParam(n))
@@ -425,11 +452,12 @@ std::vector<std::string> QNode::driveDoubleNames()
 
 void QNode::setParams(const QMap<QString, int> &params)
 {
-  std::vector<rclcpp::Parameter> line, path, drive, brain;
+  std::vector<rclcpp::Parameter> line, path, drive, brain, uart;
   for (auto it = params.begin(); it != params.end(); ++it)
   {
     auto &dst = isDriveParam(it.key()) ? drive : isPathParam(it.key()) ? path
                                                : isBrainParam(it.key()) ? brain
+                                               : isUartParam(it.key())  ? uart
                                                                         : line;
     dst.emplace_back(it.key().toStdString(), it.value());
   }
@@ -438,6 +466,7 @@ void QNode::setParams(const QMap<QString, int> &params)
   sendParams(path_client_, PATH_NODE, path);
   sendParams(drive_client_, DRIVE_NODE, drive);
   sendParams(brain_client_, BRAIN_NODE, brain);
+  sendParams(uart_client_, UART_NODE, uart);
 }
 
 // 보내고 결과 확인: 노드가 거절하면(범위 밖, 없는 이름 등) 알리고 노드 값을 다시 읽어 화면을 되돌림
@@ -513,6 +542,7 @@ void QNode::refreshParams()
   each(drive_client_, driveDoubleNames());
   each(brain_client_, brainParamNames()); // brain은 늦게 뜨거나 안 띄울 수도 있어 여기서만 읽음
   each(signs_client_, signsParamNames()); // YOLO도 signs:=false로 안 띄울 수 있음
+  each(uart_client_, uartParamNames());   // odom 보정값
 }
 
 bool QNode::recentlySet(const std::string &name)
@@ -546,10 +576,10 @@ bool QNode::setDoubleParam(const QString &name, double v)
   auto client = clientFor(name);
   if (!client->service_is_ready())
   {
-    Q_EMIT paramMessage(QString("%1 연결 안 됨: %2 적용 안 됨").arg(isSignsParam(name) ? SIGNS_NODE : "노드", name));
+    Q_EMIT paramMessage(QString("%1 연결 안 됨: %2 적용 안 됨").arg(isSignsParam(name) ? SIGNS_NODE : isUartParam(name) ? UART_NODE : "노드", name));
     return false;
   }
-  sendParams(client, isSignsParam(name) ? SIGNS_NODE : "node", {rclcpp::Parameter(name.toStdString(), v)});
+  sendParams(client, isSignsParam(name) ? SIGNS_NODE : isUartParam(name) ? UART_NODE : "node", {rclcpp::Parameter(name.toStdString(), v)});
   return true;
 }
 
@@ -558,7 +588,7 @@ QStringList QNode::paramNodesReady()
   QStringList ready;
   for (const auto &[name, client] : {std::pair{LINE_NODE, line_client_}, std::pair{PATH_NODE, path_client_},
                                      std::pair{DRIVE_NODE, drive_client_}, std::pair{BRAIN_NODE, brain_client_},
-                                     std::pair{SIGNS_NODE, signs_client_}})
+                                     std::pair{SIGNS_NODE, signs_client_}, std::pair{UART_NODE, uart_client_}})
     if (client && client->service_is_ready())
       ready << QString(name).mid(1);
   return ready;
@@ -621,7 +651,8 @@ void QNode::saveParams(const QString &path)
                         Target{PATH_NODE, path_client_, pathParamNames()},
                         Target{DRIVE_NODE, drive_client_, driveParamNames(false)},
                         Target{BRAIN_NODE, brain_client_, brainParamNames()},
-                        Target{SIGNS_NODE, signs_client_, signsParamNames()}})
+                        Target{SIGNS_NODE, signs_client_, signsParamNames()},
+                        Target{UART_NODE, uart_client_, uartParamNames()}})
     if (t.client->service_is_ready())
       targets.push_back(t);
 
@@ -723,7 +754,7 @@ void QNode::loadParams(const QString &path)
   }
 
   // "/노드:" 줄로 대상 노드를 정하고, "이름: 값" 줄을 모음 (값은 정수 또는 true/false)
-  std::vector<rclcpp::Parameter> line, pth, drv, brn, sgn;
+  std::vector<rclcpp::Parameter> line, pth, drv, brn, sgn, urt;
   std::vector<rclcpp::Parameter> *cur = nullptr;
   std::string s;
   while (std::getline(f, s))
@@ -739,6 +770,7 @@ void QNode::loadParams(const QString &path)
             : (t.rfind(DRIVE_NODE, 0) == 0) ? &drv
             : (t.rfind(BRAIN_NODE, 0) == 0) ? &brn
             : (t.rfind(SIGNS_NODE, 0) == 0) ? &sgn
+            : (t.rfind(UART_NODE, 0) == 0)  ? &urt
                                             : nullptr;
       continue;
     }
@@ -783,6 +815,7 @@ void QNode::loadParams(const QString &path)
   send(drive_client_, drv);
   send(brain_client_, brn);
   send(signs_client_, sgn);
+  send(uart_client_, urt);
   Q_EMIT paramFileStatus(QString("불러옴: %1 (%2개 적용)").arg(path).arg(sent));
 }
 
@@ -807,6 +840,11 @@ void QNode::publishConstructionExit()
   std_msgs::msg::Bool m;
   m.data = true;
   construction_exit_pub_->publish(m);
+}
+
+void QNode::publishOdomReset()
+{
+  odom_reset_pub_->publish(std_msgs::msg::Empty());
 }
 
 void QNode::publishReset()
