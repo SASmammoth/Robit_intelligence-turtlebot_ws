@@ -44,6 +44,7 @@ def launch_setup(context):
     signs = LaunchConfiguration('signs')
     engine = LaunchConfiguration('engine')
     drive = LaunchConfiguration('drive')
+    brain_on = LaunchConfiguration('brain')
 
     camera = Node(package='tb_camera', executable='camera_node', name='camera_node', output='screen')
 
@@ -62,6 +63,9 @@ def launch_setup(context):
     driver = Node(package='tb_drive', executable='drive_node', name='drive_node', output='screen',
                   parameters=param_files(drive_yaml, params),
                   condition=IfCondition(drive))
+    brain = Node(package='tb_brain', executable='brain_node', name='brain_node', output='screen',
+                 parameters=param_files('', params),
+                 condition=IfCondition(brain_on))
     # odom.* 값을 바꾸려면 params 파일에 /tb_uart_node 섹션을 넣으면 됨
     uart = Node(
         package="tb_uart",
@@ -84,6 +88,7 @@ def launch_setup(context):
         yolo,
         driver,
         uart,
+        brain
     ]
 
 
@@ -99,6 +104,7 @@ def generate_launch_description():
             DeclareLaunchArgument("signs", default_value="true"),
             DeclareLaunchArgument("engine", default_value=default_engine),
             DeclareLaunchArgument("drive", default_value="true"),
+            DeclareLaunchArgument("brain", default_value="true"),
             DeclareLaunchArgument("params", default_value="",
                                   description="GUI에서 저장한 파라미터 yaml (비우면 패키지 기본값만)"),
             OpaqueFunction(function=launch_setup),
