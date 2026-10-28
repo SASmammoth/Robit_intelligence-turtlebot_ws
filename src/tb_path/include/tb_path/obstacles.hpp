@@ -64,9 +64,11 @@ void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
 //   막는 면은 두 벽돌 안쪽 끝을 잇는 비스듬한 사각형 (곡선에서 길 쪽으로 튀어나오지 않게)
 //   margin: 안쪽 끝에서 길 쪽으로 더 막는 폭, far: 선 쪽으로 막는 폭 (화면 밖까지)
 //   from_back: true면 앞 벽돌 뒷면부터 막음 (false: 앞 벽돌 앞면부터 = 벽돌 옆까지 겹쳐 막음)
-struct SideBrick { double x0, x1, yin; bool right; };
+//   far 벽돌(BEV 밖, 선이 안 보여 쪽을 로봇 기준 좌우로 정함)이 낀 쌍은 far_dy로 안쪽 끝 차이를 봄 (0이면 안 봄)
+struct SideBrick { double x0, x1, yin; bool right; bool far = false; };
 std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap, double min_gap = 0.05,
-                                   double max_dy = 0.15, double margin = 0.0, double far = 0.6, bool from_back = false);
+                                   double max_dy = 0.15, double margin = 0.0, double far = 0.6, bool from_back = false,
+                                   double far_dy = 0.0);
 
 // 공사 구간: 벽돌 옆을 지날 때 경로를 벽돌에서 떼어 반대쪽 차선 쪽으로 붙임 (path.con_line_hug)
 // 스켈레톤 경로는 벽돌과 선 사이 빈 곳의 한가운데라, 벽돌 박스가 실제보다 크거나 늦게 그려지면 벽돌에 가까워짐.

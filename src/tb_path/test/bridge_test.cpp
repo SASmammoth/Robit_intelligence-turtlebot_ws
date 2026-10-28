@@ -121,6 +121,14 @@ int main()
         check(q.size() == 2, "r-r-r → 두 군데 이음");
         q = obstacles::bridge_same_side({{0.0, 0.10, -0.10, true}, {0.45, 0.53, -0.10, true}}, 0.0);
         check(q.empty(), "con_bridge_mm = 0 → 끔");
+        {
+            std::vector<SideBrick> v = {{0.0, 0.10, -0.10, true}, {0.70, 0.78, -0.12, true, true}};
+            q = obstacles::bridge_same_side(v, 0.7, 0.05, 0.0, 0.0, 0.6, false, 0.20);
+            check(q.size() == 1, "BEV 밖 먼 벽돌(같은 쪽, 차이 2cm) → 이음");
+            v[1].yin = -0.40;
+            q = obstacles::bridge_same_side(v, 0.7, 0.05, 0.0, 0.0, 0.6, false, 0.20);
+            check(q.empty(), "먼 벽돌 안쪽 끝 차이 30cm > far_dy 20cm → 안 이음");
+        }
         q = obstacles::bridge_same_side({{0.0, 0.10, -0.10, true}, {0.45, 0.53, -0.10, true}}, 0.6, 0.05, 0.15, 0.03, 0.6, true);
         check(q.size() == 1 && std::abs(q[0][0].x - 0.10) < 1e-9 && std::abs(q[0][0].y - (-0.07)) < 1e-9,
               "from_back + margin 3cm → 뒷면(0.10)부터, 안쪽 끝 + 3cm");

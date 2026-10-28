@@ -1265,6 +1265,8 @@ void MainWindow::setupParamTab()
                  {"path.con_bridge_margin_mm", "잇기 벽 길 쪽 여유", " mm", 0, 300, 5},
                  {"path.con_bridge_dy_mm", "잇기: 안쪽 끝 차이 허용 (0=안 봄)", " mm", 0, 500, 10},
                  {"path.con_bridge_from_back", "잇기: 앞 벽돌 뒷면부터 (1=켬)", "", 0, 1, 1},
+                 {"path.con_bridge_far_mm", "잇기: BEV 밖 벽돌도 이 거리까지 (0=끔)", " mm", 0, 2000, 50},
+                 {"path.con_bridge_far_dy_mm", "잇기: 먼 벽돌 안쪽 끝 차이 허용", " mm", 0, 500, 10},
                  {"path.con_keep", "경로 밀기 (0끔 1약 2강)", "", 0, 2, 1},
                  {"path.con_keep_rear_mm", "축 뒤 길이", " mm", 0, 300, 10},
                  {"path.con_hold_mm", "더 피하기", " mm", 0, 500, 10},

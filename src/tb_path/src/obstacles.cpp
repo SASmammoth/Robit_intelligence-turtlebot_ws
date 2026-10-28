@@ -326,7 +326,7 @@ void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
 }
 
 std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap, double min_gap,
-                                   double max_dy, double margin, double far, bool from_back)
+                                   double max_dy, double margin, double far, bool from_back, double far_dy)
 {
     std::vector<Quad> out;
     if (max_gap <= 0.0)
@@ -342,7 +342,8 @@ std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap
             if (prev)
             {
                 const double gap = b.x0 - prev->x1;
-                if (gap > min_gap && gap <= max_gap && (max_dy <= 0.0 || std::abs(b.yin - prev->yin) <= max_dy))
+                const double lim = (b.far || prev->far) ? far_dy : max_dy;
+                if (gap > min_gap && gap <= max_gap && (lim <= 0.0 || std::abs(b.yin - prev->yin) <= lim))
                 {
                     // 길 쪽 끝: 두 벽돌 중 더 길 쪽으로 나온 것 + 여유. 선 쪽은 far만큼 (화면 밖까지)
                     // 두 벽돌 안쪽 끝을 잇는 선 (곡선에서는 비스듬함) + 여유, 선 쪽으로 far만큼

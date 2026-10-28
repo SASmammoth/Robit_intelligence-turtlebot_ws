@@ -141,7 +141,9 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_bridge_mm", 600, 1500);     // 같은 쪽 벽돌(앞 벽돌 뒷면~다음 앞면)이 이 안이면 사이를 막음 (0 끔)
     declare_int("path.con_bridge_margin_mm", 50, 300); // 이은 벽(보라)을 벽돌 안쪽 끝에서 길 쪽으로 더 막는 폭
     declare_int("path.con_bridge_dy_mm", 0, 500);      // 두 벽돌 안쪽 끝 y 차이가 이보다 크면 안 이음 (0 = 안 봄. 쪽은 붙은 선으로 정하므로 보통 0)
-    declare_int("path.con_bridge_from_back", 0, 1);    // 1: 앞 벽돌 뒷면부터 막음 (0: 앞면부터 = 벽돌 옆도 겹쳐 막음)
+    declare_int("path.con_bridge_from_back", 0, 1);
+    declare_int("path.con_bridge_far_mm", 1000, 2000); // 이 거리 안이면 BEV보다 먼(위로 벗어난) 벽돌도 잇기에 씀 (0 = BEV 안만)
+    declare_int("path.con_bridge_far_dy_mm", 200, 500); // 먼 벽돌은 선이 안 보여 쪽을 로봇 기준으로 정하므로, 안쪽 끝 차이가 이보다 크면 안 이음 (0 = 안 봄)    // 1: 앞 벽돌 뒷면부터 막음 (0: 앞면부터 = 벽돌 옆도 겹쳐 막음)
     declare_int("path.con_keep", 0, 2);                // 지난 벽돌 피하기: 0 끔, 1 그쪽으로 꺾지만 못하게(약), 2 벽돌에서 떼어 놓기(강)
     declare_int("path.con_hold_mm", 40, 500);
     declare_int("path.con_keep_rear_mm", 100, 300);    // 지난 벽돌: 바퀴 축이 뒷면을 지나고 이만큼 더 가야 그쪽으로 꺾음 (로봇 뒤 끝 14cm)          // 기억한 벽돌 뒷면을 로봇 뒤 끝이 지나고 이만큼 더 가야 그쪽으로 붙음
@@ -255,6 +257,8 @@ void PathNode::reload_params()
     con_bridge_margin_mm_ = int(get_parameter("path.con_bridge_margin_mm").as_int());
     con_bridge_dy_mm_ = int(get_parameter("path.con_bridge_dy_mm").as_int());
     con_bridge_from_back_ = get_parameter("path.con_bridge_from_back").as_int() != 0;
+    con_bridge_far_mm_ = int(get_parameter("path.con_bridge_far_mm").as_int());
+    con_bridge_far_dy_mm_ = int(get_parameter("path.con_bridge_far_dy_mm").as_int());
     con_keep_rear_mm_ = get_parameter("path.con_keep_rear_mm").as_int();
     con_dead_end_mm_ = get_parameter("path.con_dead_end_mm").as_int();
     con_clear_mm_ = get_parameter("path.con_clear_mm").as_int();
@@ -350,12 +354,24 @@ void PathNode::update_pose(const rclcpp::Time &t)
 
 // 벽돌 박스 → 로봇 좌표 앞면 x, 좌우 끝 y, 어느 쪽인지 (공사 구간 기억·잇기용)
 // 박스 아랫변이 화면 위로 벗어났거나 영상 아래에서 잘렸으면(바닥 위치가 틀림), 로봇 정면에 걸쳐 쪽을 모르면 false
-bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, int side_hint, BrickR &out) const
+bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, int side_hint, BrickR &out,
+                           double far_max) const
 {
     std::vector<cv::Point2f> src{{float(b.x), float(b.y + b.h)}, {float(b.x + b.w), float(b.y + b.h)}}, dst;
     cv::perspectiveTransform(src, dst, H);
-    if (dst[0].y < 0 || dst[1].y < 0 || dst[0].y >= rows - 2 || dst[1].y >= rows - 2)
-        return false;
+    if (dst[0].y >= rows - 2 || dst[1].y >= rows - 2)
+        return false; // 박스 아랫변이 영상 아래에서 잘림 (바닥 위치가 틀림)
+    // BEV보다 먼 벽돌 (아랫변이 BEV 위로 벗어남): far_max > 0일 때만, 그 거리 안이면 씀 (붙은 선이 안 보여 쪽은 로봇 기준 좌우)
+    const bool far = dst[0].y < 0 || dst[1].y < 0;
+    if (far)
+    {
+        if (far_max <= 0.0 || !std::isfinite(dst[0].x) || !std::isfinite(dst[0].y) || !std::isfinite(dst[1].x) || !std::isfinite(dst[1].y))
+            return false;
+        const double xa = lane_path::bev_to_robot({dst[0].x, dst[0].y}, geo_).x, xc = lane_path::bev_to_robot({dst[1].x, dst[1].y}, geo_).x;
+        if (std::min(xa, xc) < geo_.bottom_m || std::max(xa, xc) > far_max)
+            return false; // 지평선 근처·너머면 변환이 뒤집히거나 너무 멂
+        side_hint = 0;
+    }
     // 박스는 YOLO가 본 영상(det_pose_) 기준 → 이번 마스크 프레임(cur_pose_) 기준으로 옮김
     //   (YOLO 15Hz + det_max_age_ms 동안 같은 탐지를 계속 쓰므로, 안 옮기면 그동안 벽돌이 로봇을 따라옴)
     auto to_cur = [this](const cv::Point2d &p) { return world_to_robot(robot_to_world(p, det_pose_), cur_pose_); };
@@ -375,7 +391,7 @@ bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::
     const bool right = side_hint != 0 ? side_hint > 0 : yl < 0.0;
     // 박스는 옆면까지 잡혀 안쪽 끝이 실제보다 로봇 쪽으로 나옴 → 벽돌이 붙은 선이 보이면 "선 + 벽돌 가로"로 고침
     // (벽돌 앞면 줄부터 화면 아래까지, 붙은 쪽으로 con_attach_mm 안의 선)
-    if (con_brick_w_mm_ > 0)
+    if (con_brick_w_mm_ > 0 && !far)
     {
         const int cols = lines.cols;
         const int row0 = std::clamp(int(std::max(dst[0].y, dst[1].y)), 0, rows - 1);
@@ -408,7 +424,7 @@ bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::
                 yr = std::max(yr, line_y - bw);
         }
     }
-    out = {x0, yl, yr, right};
+    out = {x0, yl, yr, right, far};
     return true;
 }
 
@@ -622,12 +638,14 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
         for (size_t i = 0; i < bricks.size(); ++i)
         {
             BrickR r;
-            if (!brick_robot(bricks[i], H, lines, label.rows, i < brick_sides.size() ? brick_sides[i] : 0, r))
+            if (!brick_robot(bricks[i], H, lines, label.rows, i < brick_sides.size() ? brick_sides[i] : 0, r,
+                             con_bridge_far_mm_ / 1000.0)) // BEV 밖 먼 벽돌도 (path.con_bridge_far_mm)
                 continue;
-            sb.push_back({r.x0, r.x0 + 0.08, r.right ? r.yl : r.yr, r.right}); // 벽돌 두께 8cm
+            sb.push_back({r.x0, r.x0 + 0.08, r.right ? r.yl : r.yr, r.right, r.far}); // 벽돌 두께 8cm
         }
         con_bridges_ = obstacles::bridge_same_side(sb, con_bridge_mm_ / 1000.0, 0.05, con_bridge_dy_mm_ / 1000.0,
-                                                   con_bridge_margin_mm_ / 1000.0, 0.6, con_bridge_from_back_);
+                                                   con_bridge_margin_mm_ / 1000.0, 0.6, con_bridge_from_back_,
+                                                   con_bridge_far_dy_mm_ / 1000.0);
         if (!con_bridges_.empty())
         {
             bridge_m = cv::Mat::zeros(wall.size(), CV_8U);
