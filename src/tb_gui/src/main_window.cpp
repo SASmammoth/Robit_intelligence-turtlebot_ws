@@ -953,6 +953,7 @@ void MainWindow::setupParamTab()
        }},
       {"벽돌 (path_node)",
        {
+           {"path.brick_always", "공사 모드 밖에서도 벽돌 피함 (0=공사 모드만)", "", 0, 1, 1},
            {"path.brick_margin_mm", "좌우 여유", " mm", 0, 300, 5},
            {"path.brick_depth_mm", "앞뒤 길이", " mm", 0, 500, 5},
            {"path.brick_gap_mm", "선까지 틈 막기", " mm", 0, 300, 10},

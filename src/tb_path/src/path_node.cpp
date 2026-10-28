@@ -109,6 +109,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("skel.wdash_offset_mm", 40, 200); // 한 조각 중심이 다른 조각 축에서 옆으로 벗어나도 되는 거리
     declare_int("path.brick_depth_mm", 60, 500);
     declare_int("path.brick_margin_mm", 30, 300);
+    declare_int("path.brick_always", 0, 1);       // 1: 공사 모드가 아니어도 벽돌을 벽으로 (예전 동작), 0: 공사 모드에서만
     declare_int("path.brick_gap_mm", 120, 300);   // 벽돌 끝과 차선 사이 이보다 좁은 틈은 막음 (0이면 안 막음)
     declare_int("path.det_max_age_ms", 300, 2000);
     declare_int("path.mem_travel_mm", 600, 3000);
@@ -211,6 +212,7 @@ void PathNode::reload_params()
     brick_depth_mm_ = get_parameter("path.brick_depth_mm").as_int();
     brick_margin_mm_ = get_parameter("path.brick_margin_mm").as_int();
     brick_gap_mm_ = get_parameter("path.brick_gap_mm").as_int();
+    brick_always_ = get_parameter("path.brick_always").as_int() != 0;
     det_max_age_ms_ = get_parameter("path.det_max_age_ms").as_int();
     tracker_.p.mem_travel_m = get_parameter("path.mem_travel_mm").as_int() / 1000.0;
 
@@ -414,7 +416,9 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     const cv::Mat H(3, 3, CV_64F, h.data());
     const cv::Mat lines = wall.clone(); // 벽돌 그리기 전 차선만
     cv::Mat con_ext;                    // 공사 구간: 벽돌에 가려 끊긴 선을 이은 부분 (디버그 표시용)
-    if (!bricks.empty())
+    // 벽돌은 공사 모드에서만 경로에 반영 (다른 구간의 오검출·트랙 밖 벽돌로 경로가 꺾이지 않게).
+    // 공사 모드 진입·종료 판단(update_construction)에는 위에서 그대로 씀
+    if (!bricks.empty() && (con || brick_always_))
     {
         const double depth = (con ? con_depth_mm_ : brick_depth_mm_) / 1000.0;
         const double margin = (con ? con_margin_mm_ : brick_margin_mm_) / 1000.0;
