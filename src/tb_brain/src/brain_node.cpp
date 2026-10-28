@@ -52,11 +52,12 @@
 // mission.start_follow = 1: /brain/run start를 받자마자 FOLLOW (신호등 구간을 건너뛰고 중간에서 시작)
 //
 // 주차 (parking 표지판, mission.parking.*):
-//   1. /mission/turn = 1(left)을 time_enter초 동안 → pause 1
-//   2. 다음에 받은 brick 박스 중심이 x 320보다 왼쪽이면 brick_pos left(crit psd_L), 아니면 right(crit psd_R)
-//   3. TB_Uart_RX "psd period 100", "velocity move_vel move_vel"
-//      brick_pos 쪽 PSD(left: psd1, right: psd2)가 crit 초과 → 0.5초 더 간 뒤 velocity 0 0
-//   4. 0.5초 뒤 제자리 회전 (left: -turn_vel turn_vel, right: turn_vel -turn_vel), turn_deg만큼 도는 시간 뒤 → 0 0
+//   1. /mission/turn = 1(left)을 time_enter초 동안 (차선 따라 계속 주행)
+//   2. TB_Uart_RX "psd period 100", "velocity period 33"
+//      다음에 받은 brick 박스 중심이 x 320보다 왼쪽이면 brick_pos left(crit psd_L), 아니면 right(crit psd_R)
+//   3. brick_pos 쪽 PSD(left: psd1, right: psd2)가 crit 초과 → time_break_ms 뒤 pause 1
+//   4. tb_drive가 멈출 때까지(PARK_SETTLE_S) 기다린 뒤 제자리 회전
+//      (left: -turn_vel turn_vel, right: turn_vel -turn_vel), turn_deg만큼 도는 시간 뒤 → 0 0
 //      회전 시간 = turn_deg / (2v / PIVOT_SEP_M), v = turn_vel 원시값 → m/s (psd_F는 안 씀, GUI용으로 선언만 유지)
 //   5. dist_mm 후진 → 0 0 → parking_pause초 대기 → dist_mm 직진 → 0 0
 //   6. 같은 방향 제자리 회전, turn_deg만큼 도는 시간 뒤 → 0 0
@@ -130,8 +131,6 @@ static constexpr uint8_t TURN_RIGHT = 2;
 
 // ====== 주차
 static constexpr int IMG_CX = 320;                // 화면 가운데 x (640x480)
-static constexpr double PARK_APPROACH_EXTRA_S = 0.5; // 접근 PSD 기준을 넘은 뒤 이만큼 더 가고 정지
-static constexpr double PARK_STOP_S = 0.5;        // PSD로 멈춘 뒤 회전 전 정지 시간
 static constexpr double WHEEL_RADIUS_M = 0.0475;  // tb_drive drive.uart.wheel_radius_m
 static constexpr double RPM_PER_UNIT = 0.43;      // tb_drive drive.uart.rpm_per_unit (실측 보정값. 0.229면 거리를 약 1.9배 짧게 잼)
 static constexpr double PIVOT_SEP_M = 0.165;      // tb_drive drive.uart.pivot_sep_m (제자리 회전 실측 간격, 바퀴 사이 실제 193.4mm)
@@ -154,8 +153,9 @@ public:
         declare_int("mission.stop_line", 1, 0, 1);              // 1: 차단바가 끝나면 정지선 켬 (빨간 가로선 앞에서 멈춤)
 
         // 주차
-        declare_int("mission.parking.time_enter", 4, 0, 60);     // [s] 주차 표지판 → left 유지 후 pause
-        declare_int("mission.parking.time_exit", 6, 0, 60);      // [s] 주차 끝 → left 유지
+        declare_int("mission.parking.time_enter", 4, 0, 60);     // [s] 주차 표지판 → left 유지 후 PSD 켬
+        declare_int("mission.parking.time_break_ms", 500, 0, 10000); // PSD 기준 넘은 뒤 이만큼 더 가고 pause
+        declare_int("mission.parking.time_exit", 8, 0, 60);      // [s] 주차 끝 → left 유지
         declare_int("mission.parking.psd_L", 2000, 0, 65535);    // brick left: 접근 정지 기준 / right: 나올 때 회전 정지 기준
         declare_int("mission.parking.psd_R", 2500, 0, 65535);    // brick right: 접근 정지 기준 / left: 나올 때 회전 정지 기준
         declare_int("mission.parking.psd_F", 3000, 0, 65535);    // 들어갈 때 회전 정지 기준 (psd0)
@@ -396,6 +396,7 @@ private:
         stop_line_mode_ = ms("mission.stop_line") != 0;
         park_time_enter_ = ms("mission.parking.time_enter");
         park_time_exit_ = ms("mission.parking.time_exit");
+        park_time_break_ms_ = ms("mission.parking.time_break_ms");
         park_psd_l_ = ms("mission.parking.psd_L");
         park_psd_r_ = ms("mission.parking.psd_R");
         park_psd_f_ = ms("mission.parking.psd_F");
@@ -584,17 +585,11 @@ private:
                 best = &d;
         if (!best)
             return;
-        // pause 직후에는 tb_drive가 아직 감속 중이라 brain 명령을 덮어씀 → 멈춘 뒤에 시작
-        if ((now - park_t_).seconds() < PARK_SETTLE_S)
-            return;
         const double cx = best->x + best->w / 2.0;
         brick_left_ = cx < IMG_CX;
         park_crit_ = brick_left_ ? park_psd_l_ : park_psd_r_;
         RCLCPP_INFO(get_logger(), "parking: brick x %.0f → brick_pos %s (crit %d)", cx,
                     brick_left_ ? "left" : "right", park_crit_);
-        send_uart("psd period 100");
-        send_uart("velocity period 33"); // 직진·후진 거리용 피드백 (안 오면 시간으로 계산)
-        send_velocity(park_move_vel_, park_move_vel_);
         park_next(Park::Approach, now);
     }
 
@@ -624,8 +619,9 @@ private:
         case Park::Enter:
             if (el < park_time_enter_)
                 return;
-            RCLCPP_INFO(get_logger(), "parking: pause 1, brick 기다림");
-            publish_bool(pause_pub_, true);
+            RCLCPP_INFO(get_logger(), "parking: PSD 켬, brick 기다림");
+            send_uart("psd period 100");
+            send_uart("velocity period 33"); // 직진·후진 거리용 피드백 (안 오면 시간으로 계산)
             park_next(Park::WaitBrick, t);
             break;
         case Park::WaitBrick:
@@ -633,16 +629,18 @@ private:
         case Park::Approach:
             if (!psd_new || psd_[brick_left_ ? 1 : 2] <= park_crit_)
                 return;
-            park_next(Park::ApproachExtra, t); // 그대로 진행, 0.5초 뒤 정지
+            park_next(Park::Break, t); // 그대로 진행, time_break 뒤 pause
             break;
-        case Park::ApproachExtra:
-            if (el < PARK_APPROACH_EXTRA_S)
+        case Park::Break:
+            if (el * 1000.0 < park_time_break_ms_)
                 return;
-            send_velocity(0, 0);
-            park_next(Park::Stop, t);
+            RCLCPP_INFO(get_logger(), "parking: pause 1");
+            publish_bool(pause_pub_, true);
+            park_next(Park::Settle, t);
             break;
-        case Park::Stop:
-            if (el < PARK_STOP_S)
+        case Park::Settle:
+            // pause 직후에는 tb_drive가 아직 감속 중이라 brain 명령을 덮어씀 → 멈춘 뒤에 시작
+            if (el < PARK_SETTLE_S)
                 return;
             send_velocity(tv, -tv);
             park_next(Park::TurnIn, t);
@@ -688,10 +686,10 @@ private:
         }
     }
 
-    enum class Park { Idle, Enter, WaitBrick, Approach, ApproachExtra, Stop, TurnIn, Back, Hold, Forward, TurnOut };
+    enum class Park { Idle, Enter, WaitBrick, Approach, Break, Settle, TurnIn, Back, Hold, Forward, TurnOut };
     static const char *park_name(Park p)
     {
-        static const char *const n[] = {"idle", "enter", "wait_brick", "approach", "approach_extra", "stop",
+        static const char *const n[] = {"idle", "enter", "wait_brick", "approach", "break", "settle",
                                         "turn_in", "back", "hold", "forward", "turn_out"};
         return n[int(p)];
     }
@@ -812,7 +810,8 @@ private:
     rclcpp::Time barrier_last_{0, 0, RCL_ROS_TIME};
 
     // 주차
-    int park_time_enter_ = 4, park_time_exit_ = 6, park_pause_s_ = 1; // [s]
+    int park_time_enter_ = 4, park_time_exit_ = 8, park_pause_s_ = 1; // [s]
+    int park_time_break_ms_ = 500;
     int park_psd_l_ = 2000, park_psd_r_ = 2500, park_psd_f_ = 3000;
     int park_turn_vel_ = 70, park_move_vel_ = 70, park_dist_mm_ = 180;
     int park_turn_deg_ = 90;
