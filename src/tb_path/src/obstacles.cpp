@@ -20,7 +20,8 @@ namespace {
 //  - off_side: 박스 아랫변이 화면 밖으로 나감 (-1 왼쪽, +1 오른쪽, 0 아님) = 그쪽 화면 밖 선에 붙은 벽돌.
 //    반대쪽 선에 닿아 보여도(곡선에서 먼 줄만 닿음) 그쪽에 붙은 걸로 보지 않음 → 반대쪽 틈은 지나갈 길
 //    (녹화 run_1027 6.8s: 왼쪽 벽돌의 먼 줄이 휘어 들어온 흰 선에 닿아 오른쪽 틈까지 막고, 경로가 벽돌 앞으로 감)
-void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int edge, int width, int attach, int off_side)
+// 반환: 벽돌이 붙은 쪽 (+1 오른쪽 선, -1 왼쪽 선, 0 모름: 양쪽 다 닿음 / 선도 화면 끝도 아님)
+int draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int edge, int width, int attach, int off_side)
 {
     struct Row { int y, xl, xr, cl, cr; }; // cl/cr: 왼쪽/오른쪽에 닿은 선 x (-1이면 없음)
     std::vector<Row> rows;
@@ -54,7 +55,7 @@ void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int ed
         rows.push_back(r);
     }
     if (rows.empty())
-        return;
+        return 0;
 
     if (off_side != 0)
         for (auto &r : rows)
@@ -120,7 +121,20 @@ void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int ed
         }
 
     if (edge <= 0 || nl > 0 || nr > 0)
-        return;
+    {
+        if (att_r || att_l)
+            return att_r ? 1 : -1;
+        // 양쪽 다 닿음: 곡선에서 붙은 선이 벽돌 먼 줄 아래로 휘어 반대쪽에서도 닿음.
+        // 로봇에 가장 가까운 줄(앞면)에서 한쪽만 닿은 쪽이 붙은 선
+        for (auto it = rows.rbegin(); it != rows.rend(); ++it)
+        {
+            if (it->cr >= 0 && it->cl < 0)
+                return 1;
+            if (it->cl >= 0 && it->cr < 0)
+                return -1;
+        }
+        return 0;
+    }
     int xmin = wall.cols, xmax = -1;
     for (const auto &r : rows)
         xmin = std::min(xmin, r.xl), xmax = std::max(xmax, r.xr);
@@ -140,19 +154,23 @@ void draw_brick(cv::Mat &wall, cv::Mat &q, const cv::Mat &lines, int gap, int ed
         cv::rectangle(wall, cv::Rect(0, y0, strip, wall.rows - y0), cv::Scalar(255), cv::FILLED);
     if (right)
         cv::rectangle(wall, cv::Rect(wall.cols - strip, y0, strip, wall.rows - y0), cv::Scalar(255), cv::FILLED);
+    return right ? 1 : left ? -1 : 0;
 }
 
 } // namespace
 
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
                double depth_px, double margin_px, const cv::Mat *lines, double gap_px, double edge_px,
-               double width_px, double attach_px, bool keep_far, bool off_screen)
+               double width_px, double attach_px, bool keep_far, bool off_screen, std::vector<int> *sides)
 {
     const bool close = lines && !lines->empty() && (gap_px >= 1.0 || edge_px >= 1.0);
     cv::Mat q;
     int n = 0;
     const cv::Rect canvas(0, 0, wall.cols, wall.rows);
-    for (const auto &b : boxes) {
+    if (sides)
+        sides->assign(boxes.size(), 0);
+    for (size_t bi = 0; bi < boxes.size(); ++bi) {
+        const Box &b = boxes[bi];
         // 아랫변 양 끝 (원본 영상)
         std::vector<cv::Point2f> src = {{float(b.x), float(b.y + b.h)},
                                         {float(b.x + b.w), float(b.y + b.h)}};
@@ -204,8 +222,10 @@ int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
             q.setTo(0);
             cv::fillConvexPoly(q, quad, cv::Scalar(255));
             // 화면 위로 당겨 그린 먼 벽돌은 선이 안 보여 붙은 쪽을 모르므로 화면 끝 막기는 안 함
-            draw_brick(wall, q, *lines, int(std::lround(gap_px)), beyond_top ? 0 : int(std::lround(edge_px)),
-                       width_px >= 1.0 ? int(std::lround(width_px + margin_px)) : 0, int(std::lround(attach_px)), off_side);
+            const int side = draw_brick(wall, q, *lines, int(std::lround(gap_px)), beyond_top ? 0 : int(std::lround(edge_px)),
+                                        width_px >= 1.0 ? int(std::lround(width_px + margin_px)) : 0, int(std::lround(attach_px)), off_side);
+            if (sides && !beyond_top)
+                (*sides)[bi] = side;
         }
         else
             cv::fillConvexPoly(wall, quad, cv::Scalar(255));
@@ -322,14 +342,15 @@ std::vector<Quad> bridge_same_side(std::vector<SideBrick> bricks, double max_gap
             if (prev)
             {
                 const double gap = b.x0 - prev->x1;
-                if (gap > min_gap && gap <= max_gap && std::abs(b.yin - prev->yin) <= max_dy)
+                if (gap > min_gap && gap <= max_gap && (max_dy <= 0.0 || std::abs(b.yin - prev->yin) <= max_dy))
                 {
                     // 길 쪽 끝: 두 벽돌 중 더 길 쪽으로 나온 것 + 여유. 선 쪽은 far만큼 (화면 밖까지)
-                    const double yin = right ? std::max(prev->yin, b.yin) + margin : std::min(prev->yin, b.yin) - margin;
-                    const double yout = right ? yin - far : yin + far;
-                    const double xs = from_back ? prev->x1 : prev->x0;
-                    out.push_back({cv::Point2d(xs, yin), cv::Point2d(b.x0 + 0.02, yin),
-                                   cv::Point2d(b.x0 + 0.02, yout), cv::Point2d(xs, yout)});
+                    // 두 벽돌 안쪽 끝을 잇는 선 (곡선에서는 비스듬함) + 여유, 선 쪽으로 far만큼
+                    const double s = right ? 1.0 : -1.0; // 길 쪽 = +y(오른쪽 벽돌) / -y(왼쪽 벽돌)
+                    const double xs = from_back ? prev->x1 : prev->x0, xe = b.x0 + 0.02;
+                    const double ya = prev->yin + s * margin, yb = b.yin + s * margin;
+                    out.push_back({cv::Point2d(xs, ya), cv::Point2d(xe, yb),
+                                   cv::Point2d(xe, yb - s * far), cv::Point2d(xs, ya - s * far)});
                 }
             }
             if (!prev || b.x1 > prev->x1)

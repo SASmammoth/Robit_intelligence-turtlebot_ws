@@ -135,7 +135,7 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_dead_end_mm", 250, 1000);    // 끝이 벽에 막힌 가지가 이보다 짧으면 삭제 (0이면 끔)
     declare_int("path.con_bridge_mm", 600, 1500);     // 같은 쪽 벽돌(앞 벽돌 뒷면~다음 앞면)이 이 안이면 사이를 막음 (0 끔)
     declare_int("path.con_bridge_margin_mm", 50, 300); // 이은 벽(보라)을 벽돌 안쪽 끝에서 길 쪽으로 더 막는 폭
-    declare_int("path.con_bridge_dy_mm", 150, 500);    // 두 벽돌 안쪽 끝 y 차이가 이보다 크면 다른 선에 붙은 것으로 보고 안 이음
+    declare_int("path.con_bridge_dy_mm", 0, 500);      // 두 벽돌 안쪽 끝 y 차이가 이보다 크면 안 이음 (0 = 안 봄. 쪽은 붙은 선으로 정하므로 보통 0)
     declare_int("path.con_bridge_from_back", 0, 1);    // 1: 앞 벽돌 뒷면부터 막음 (0: 앞면부터 = 벽돌 옆도 겹쳐 막음)
     declare_int("path.con_keep", 0, 2);                // 지난 벽돌 피하기: 0 끔, 1 그쪽으로 꺾지만 못하게(약), 2 벽돌에서 떼어 놓기(강)
     declare_int("path.con_hold_mm", 40, 500);
@@ -339,7 +339,7 @@ void PathNode::update_pose(const rclcpp::Time &t)
 
 // 벽돌 박스 → 로봇 좌표 앞면 x, 좌우 끝 y, 어느 쪽인지 (공사 구간 기억·잇기용)
 // 박스 아랫변이 화면 위로 벗어났거나 영상 아래에서 잘렸으면(바닥 위치가 틀림), 로봇 정면에 걸쳐 쪽을 모르면 false
-bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, BrickR &out) const
+bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, int side_hint, BrickR &out) const
 {
     std::vector<cv::Point2f> src{{float(b.x), float(b.y + b.h)}, {float(b.x + b.w), float(b.y + b.h)}}, dst;
     cv::perspectiveTransform(src, dst, H);
@@ -349,9 +349,11 @@ bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::
     const cv::Point2d C = lane_path::bev_to_robot({dst[1].x, dst[1].y}, geo_);
     const double x0 = std::min(A.x, C.x);
     double yl = std::max(A.y, C.y), yr = std::min(A.y, C.y);
-    if (yl >= 0.0 && yr <= 0.0)
-        return false; // 로봇 정면에 걸침 → 어느 쪽인지 모름
-    const bool right = yl < 0.0;
+    // 쪽: 벽돌이 붙은 선(side_hint)을 먼저 씀. 곡선 진입에서는 오른쪽 선 벽돌이 로봇 왼쪽에 보이기도 해서
+    // 로봇 정면 기준 좌우로 정하면 틀림. 붙은 선을 모를 때만 로봇 기준 좌우 (정면에 걸치면 모름)
+    if (side_hint == 0 && yl >= 0.0 && yr <= 0.0)
+        return false;
+    const bool right = side_hint != 0 ? side_hint > 0 : yl < 0.0;
     // 박스는 옆면까지 잡혀 안쪽 끝이 실제보다 로봇 쪽으로 나옴 → 벽돌이 붙은 선이 보이면 "선 + 벽돌 가로"로 고침
     // (벽돌 앞면 줄부터 화면 아래까지, 붙은 쪽으로 con_attach_mm 안의 선)
     if (con_brick_w_mm_ > 0)
@@ -391,13 +393,22 @@ bool PathNode::brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::
     return true;
 }
 
-// 기억한 벽돌 k(0 오른쪽, 1 왼쪽)를 지금 위치로: 기억한 뒤 간 거리만큼 뒤로
+cv::Point2d PathNode::robot_to_world(const cv::Point2d &r, const lane_path::Pose2D &p)
+{
+    const double c = std::cos(p.th), s = std::sin(p.th);
+    return {p.x + c * r.x - s * r.y, p.y + s * r.x + c * r.y};
+}
+
+// 기억한 벽돌 k(0 오른쪽 선, 1 왼쪽 선)를 지금 로봇 좌표로 (월드 좌표로 기억함)
 obstacles::Quad PathNode::held_quads_one(int k) const
 {
-    obstacles::Quad r = con_hold_[k].q;
-    const double moved = con_travel_ - con_hold_[k].travel0;
-    for (auto &pt : r)
-        pt.x -= moved;
+    obstacles::Quad r;
+    const double c = std::cos(pose_.th), s = std::sin(pose_.th);
+    for (int j = 0; j < 4; ++j)
+    {
+        const double dx = con_hold_[k].q[j].x - pose_.x, dy = con_hold_[k].q[j].y - pose_.y;
+        r[j] = {c * dx + s * dy, -s * dx + c * dy};
+    }
     return r;
 }
 
@@ -502,6 +513,7 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     const cv::Mat H(3, 3, CV_64F, h.data());
     const cv::Mat lines = wall.clone(); // 벽돌 그리기 전 차선만
     cv::Mat con_ext;                    // 공사 구간: 벽돌에 가려 끊긴 선을 이은 부분 (디버그 표시용)
+    std::vector<int> brick_sides;       // 벽돌마다 붙은 선 (+1 오른쪽, -1 왼쪽, 0 모름). draw_boxes가 선을 보고 정함
     // 벽돌은 공사 모드에서만 경로에 반영 (다른 구간의 오검출·트랙 밖 벽돌로 경로가 꺾이지 않게).
     // 공사 모드 진입·종료 판단(update_construction)에는 위에서 그대로 씀
     if (!bricks.empty() && (con || brick_always_))
@@ -515,7 +527,8 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                               con ? con_brick_w_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
                               con ? con_attach_mm_ / 1000.0 / geo_.m_per_px_x : 0.0,
                               !con, // 공사 구간: BEV보다 먼 벽돌은 붙은 쪽을 몰라 잘못 피하므로 안 그림
-                              con && con_offscreen_side_); // 화면 옆 끝까지 간 벽돌은 그쪽(화면 밖) 선에 붙은 것
+                              con && con_offscreen_side_, // 화면 옆 끝까지 간 벽돌은 그쪽(화면 밖) 선에 붙은 것
+                              &brick_sides);
         if (con)
         {
             // 벽돌에 가려 끊긴 선을 벽돌 너머로 이음 (벽돌과 선 사이로 경로가 새지 않게)
@@ -550,10 +563,10 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             const bool right = k == 0;
             sb.push_back({x0, x1, right ? yl : yr, right});
         }
-        for (const auto &b : bricks)
+        for (size_t i = 0; i < bricks.size(); ++i)
         {
             BrickR r;
-            if (!brick_robot(b, H, lines, label.rows, r))
+            if (!brick_robot(bricks[i], H, lines, label.rows, i < brick_sides.size() ? brick_sides[i] : 0, r))
                 continue;
             sb.push_back({r.x0, r.x0 + 0.08, r.right ? r.yl : r.yr, r.right}); // 벽돌 두께 8cm
         }
@@ -640,10 +653,10 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
         con_near_.clear();
     else
     {
-        for (const auto &b : bricks)
+        for (size_t i = 0; i < bricks.size(); ++i)
         {
             BrickR r;
-            if (!brick_robot(b, H, lines, label.rows, r))
+            if (!brick_robot(bricks[i], H, lines, label.rows, i < brick_sides.size() ? brick_sides[i] : 0, r))
                 continue;
             if (r.x0 > geo_.bottom_m + 0.08)
                 continue; // 아직 멀리 있음 (스켈레톤이 피함)
@@ -651,7 +664,10 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             const bool right = r.right;
             ConHold &hd = con_hold_[right ? 0 : 1]; // [0] 오른쪽, [1] 왼쪽
             hd.on = true;
-            hd.q = {cv::Point2d(x0, yl), cv::Point2d(x0, yr), cv::Point2d(x0 + 0.10, yr), cv::Point2d(x0 + 0.10, yl)}; // 두께 8cm + 여유
+            // 월드(odom) 좌표로 기억 → 로봇이 돌아도 제자리 (예전: 회전 무시하고 이동 거리만큼 뒤로만 옮겨서 곡선에서 어긋남)
+            const obstacles::Quad qr = {cv::Point2d(x0, yl), cv::Point2d(x0, yr), cv::Point2d(x0 + 0.10, yr), cv::Point2d(x0 + 0.10, yl)}; // 두께 8cm + 여유
+            for (int j = 0; j < 4; ++j)
+                hd.q[j] = robot_to_world(qr[j], pose_);
             hd.travel0 = con_travel_;
         }
 

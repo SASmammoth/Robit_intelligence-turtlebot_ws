@@ -62,15 +62,17 @@ private:
     int con_smooth_mm_ = 80, con_attach_mm_ = 300, con_extend_mm_ = 400;
     static void smooth_path(std::vector<cv::Point2d> &path, double half); // 모서리 둥글게 (공사 구간)
     // 공사 구간: 화면 아랫줄을 막 벗어나는 벽돌을 쪽마다 하나 기억 (로봇 좌표, 이동 거리만큼 뒤로 옮김)
-    struct ConHold { bool on = false; obstacles::Quad q; double travel0 = 0.0; };
+    struct ConHold { bool on = false; obstacles::Quad q; double travel0 = 0.0; }; // q: 월드(odom) 좌표
     ConHold con_hold_[2];                  // [0] 오른쪽, [1] 왼쪽
     // 벽돌 하나의 로봇 좌표 (앞면 x, 왼쪽 끝 yl, 오른쪽 끝 yr, 로봇 오른쪽에 있는지)
     struct BrickR { double x0, yl, yr; bool right; };
-    bool brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, BrickR &out) const;
+    // side_hint: draw_boxes가 정한 붙은 선 (+1 오른쪽, -1 왼쪽, 0 모름 → 로봇 기준 좌우)
+    bool brick_robot(const obstacles::Box &b, const cv::Mat &H, const cv::Mat &lines, int rows, int side_hint, BrickR &out) const;
+    static cv::Point2d robot_to_world(const cv::Point2d &r, const lane_path::Pose2D &p);
     obstacles::Quad held_quads_one(int k) const; // 기억 중인 벽돌 k를 지금 위치로 옮긴 것 (잇기·표시용)
     int con_bridge_mm_ = 600;              // path.con_bridge_mm: 같은 쪽 벽돌 사이가 이보다 가까우면 이어 막음 (0 끔)
     int con_bridge_margin_mm_ = 50;        // path.con_bridge_margin_mm: 이은 벽의 길 쪽 여유
-    int con_bridge_dy_mm_ = 150;           // path.con_bridge_dy_mm: 안쪽 끝 차이가 이보다 크면 안 이음
+    int con_bridge_dy_mm_ = 0;           // path.con_bridge_dy_mm: 안쪽 끝 차이가 이보다 크면 안 이음
     bool con_bridge_from_back_ = false;    // path.con_bridge_from_back: 앞 벽돌 뒷면부터 막음
     std::vector<obstacles::Quad> con_bridges_; // 이번 프레임에 이어 막은 곳 (표시용)
     double con_travel_ = 0.0;              // 공사 구간에서 지금까지 이동 거리

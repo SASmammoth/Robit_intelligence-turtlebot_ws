@@ -1,5 +1,5 @@
 // 공사 구간 같은 쪽 벽돌 잇기 (path.con_bridge_mm) 시험: r-r-l / r-l 배치
-//   빌드: cd tb_path && g++ -O2 -std=c++17 -Iinclude test/bridge_test.cpp src/laneSkeleton.cpp src/lanePath.cpp \
+//   빌드: cd tb_path && g++ -O2 -std=c++17 -Iinclude test/bridge_test.cpp src/laneSkeleton.cpp src/lanePath.cpp
 //         src/obstacles.cpp $(pkg-config --cflags --libs opencv4) -o bridge_test && ./bridge_test
 //   1번(오른쪽)은 이미 화면 아래로 빠져 기억만 있고, 2번이 앞에 보이는 상황.
 //   잇기 없이: 1·2번 사이 흰선 옆 빈 곳으로 경로가 들어갈 수 있음 / 잇기: 막힘
@@ -124,6 +124,34 @@ int main()
         q = obstacles::bridge_same_side({{0.0, 0.10, -0.10, true}, {0.45, 0.53, -0.10, true}}, 0.6, 0.05, 0.15, 0.03, 0.6, true);
         check(q.size() == 1 && std::abs(q[0][0].x - 0.10) < 1e-9 && std::abs(q[0][0].y - (-0.07)) < 1e-9,
               "from_back + margin 3cm → 뒷면(0.10)부터, 안쪽 끝 + 3cm");
+    }
+
+    // 붙은 쪽 판정 (draw_boxes sides): 곡선 진입에서 오른쪽 선에 붙은 벽돌이 로봇 왼쪽(y>0)에 보일 때 (녹화 1029 03:15)
+    std::printf("[붙은 쪽]\n");
+    {
+        const lane_path::Geo g = geo();
+        const float w = 640, h = 480, cx = w / 2, ty = h * 0.45f, by = h - 1, tw = w * 0.16f, bw = w * 0.5f;
+        const std::vector<cv::Point2f> src = {{cx - tw, ty}, {cx + tw, ty}, {cx + bw, by}, {cx - bw, by}};
+        const float S = 320, m = S * 0.25f;
+        const std::vector<cv::Point2f> dst = {{m, 0}, {S - m, 0}, {S - m, S}, {m, S}};
+        const cv::Mat M = cv::getPerspectiveTransform(src, dst);
+        cv::Mat white = cv::Mat::zeros(320, 320, CV_8U);
+        // 왼쪽으로 휘어 들어오는 오른쪽 흰선: (0.19, -0.05) → (0.57, +0.20)
+        cv::line(white, cv::Point(lane_path::robot_to_bev({0.19, -0.05}, g)), cv::Point(lane_path::robot_to_bev({0.57, 0.20}, g)),
+                 255, int(0.02 / g.mx()));
+        const double xf = 0.35, yline = -0.05 + 0.25 * (xf - 0.19) / 0.38; // 앞면 줄에서 선 위치
+        // 벽돌: 선 왼쪽에 붙음, 가로 20cm → y = yline+0.01 ~ yline+0.21 (전부 로봇 왼쪽)
+        std::vector<cv::Point2f> bev = {cv::Point2f(lane_path::robot_to_bev({xf, yline + 0.21}, g)),
+                                        cv::Point2f(lane_path::robot_to_bev({xf, yline + 0.01}, g))}, img;
+        cv::perspectiveTransform(bev, img, M.inv());
+        const int x0 = int(std::min(img[0].x, img[1].x)), x1 = int(std::max(img[0].x, img[1].x)), yb = int(img[0].y);
+        const std::vector<obstacles::Box> boxes = {{x0, yb - 60, x1 - x0, 60}};
+        cv::Mat wall = cv::Mat::zeros(320, 320, CV_8U);
+        std::vector<int> sides;
+        obstacles::draw_boxes(wall, M, boxes, 0.15 / g.my(), 0.05 / g.mx(), &white, 0.14 / g.mx(), 0.15 / g.mx(),
+                              0.20 / g.mx(), 0.30 / g.mx(), false, false, &sides);
+        std::printf("  벽돌 y %+.2f~%+.2f (로봇 왼쪽), 선 y %+.2f → side %d\n", yline + 0.01, yline + 0.21, yline, sides[0]);
+        check(sides.size() == 1 && sides[0] == 1, "로봇 왼쪽에 보여도 오른쪽 선에 붙은 벽돌 → 오른쪽(+1)");
     }
 
     // 경로 (스켈레톤 + 추적) — 흰선이 보이는 경우와 화면 밖인 경우

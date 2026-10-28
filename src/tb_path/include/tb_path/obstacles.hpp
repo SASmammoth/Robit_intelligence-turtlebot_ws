@@ -26,11 +26,14 @@ struct Box { int x, y, w, h; };
 //   (곡선에서 수평 박스 아래쪽 줄과 선 사이가 gap보다 벌어져 생기는 주머니 막기)
 // off_screen: 박스 아랫변이 화면 한쪽 옆으로 나가면 그쪽 (화면 밖) 선에 붙은 벽돌로 봄.
 //   반대쪽 선에 닿아 보여도(곡선에서 먼 줄만 닿음) 그쪽 틈은 막지 않음 (공사 구간)
+// sides: 주면 박스마다 붙은 쪽 (+1 오른쪽 선, -1 왼쪽 선, 0 모름·안 그림). 로봇이 틀어져 있어도
+//   "어느 선에 붙었나"로 정하므로, 로봇 정면 기준 좌우보다 정확함 (곡선 진입에서 오른쪽 선 벽돌이 화면 왼쪽에 보임)
 // 반환: 실제로 그린 개수 (BEV 밖이면 안 그림)
 int draw_boxes(cv::Mat &wall, const cv::Mat &H, const std::vector<Box> &boxes,
                double depth_px, double margin_px,
                const cv::Mat *lines = nullptr, double gap_px = 0.0, double edge_px = 0.0,
-               double width_px = 0.0, double attach_px = 0.0, bool keep_far = true, bool off_screen = false);
+               double width_px = 0.0, double attach_px = 0.0, bool keep_far = true, bool off_screen = false,
+               std::vector<int> *sides = nullptr);
 
 // 벽돌에 가려 끊긴 선을 끝 방향 그대로 이어 그림 (공사 구간)
 // lines: 차선 마스크, bricks: 벽돌 벽만 그린 마스크, out: 이은 부분을 그릴 곳
@@ -56,7 +59,8 @@ void keep_clear(std::vector<cv::Point2d> &path, const std::vector<Quad> &bricks,
 // 붙은 선 쪽으로 막는 사각형(로봇 좌표)을 돌려줌.
 //   x0, x1: 벽돌 앞면·뒷면 x [m], yin: 지나갈 길 쪽 끝 y [m] (오른쪽 벽돌은 왼쪽 끝, 왼쪽 벽돌은 오른쪽 끝)
 //   min_gap 이하로 겹치면 같은 벽돌(기억과 화면이 같은 것), max_gap 넘게 떨어지면 따로 피함
-//   max_dy: 두 벽돌 안쪽 끝 y 차이가 이보다 크면 다른 선에 붙은 것으로 보고 안 이음 (쪽 판단 오류 방지)
+//   max_dy: 두 벽돌 안쪽 끝 y 차이가 이보다 크면 안 이음 (0이면 안 봄). 곡선에서는 같은 선이어도 차이가 커짐
+//   막는 면은 두 벽돌 안쪽 끝을 잇는 비스듬한 사각형 (곡선에서 길 쪽으로 튀어나오지 않게)
 //   margin: 안쪽 끝에서 길 쪽으로 더 막는 폭, far: 선 쪽으로 막는 폭 (화면 밖까지)
 //   from_back: true면 앞 벽돌 뒷면부터 막음 (false: 앞 벽돌 앞면부터 = 벽돌 옆까지 겹쳐 막음)
 struct SideBrick { double x0, x1, yin; bool right; };

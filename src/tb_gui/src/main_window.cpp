@@ -1183,7 +1183,7 @@ void MainWindow::setupParamTab()
              {
                  {"path.con_bridge_mm", "같은 쪽 벽돌 잇기 거리 (0=끔)", " mm", 0, 1500, 50},
                  {"path.con_bridge_margin_mm", "잇기 벽 길 쪽 여유", " mm", 0, 300, 5},
-                 {"path.con_bridge_dy_mm", "잇기: 안쪽 끝 차이 허용", " mm", 0, 500, 10},
+                 {"path.con_bridge_dy_mm", "잇기: 안쪽 끝 차이 허용 (0=안 봄)", " mm", 0, 500, 10},
                  {"path.con_bridge_from_back", "잇기: 앞 벽돌 뒷면부터 (1=켬)", "", 0, 1, 1},
                  {"path.con_keep", "경로 밀기 (0끔 1약 2강)", "", 0, 2, 1},
                  {"path.con_keep_rear_mm", "축 뒤 길이", " mm", 0, 300, 10},
@@ -1779,6 +1779,8 @@ void MainWindow::setupRecorder()
           { recorder_->logEvent("파라미터 파일: " + QString(text).replace('\n', ' ')); }); // params.yaml 저장 결과 등
 
   rec_path_view_ = makePathView();
+  rec_path_view_->setWorldMode(true); // 녹화에는 선·벽돌·기억까지 (주행+ 탭과 같은 그림)
+  connect(qnode, &QNode::worldReceived, rec_path_view_, &PathView::setWorld);
   rec_path_view_->setParent(this);
   rec_path_view_->hide();
   rec_path_view_->resize(640, 480);
