@@ -52,11 +52,17 @@ drive_node:
       cross_v_mm_s: 0          # 최고 속도 (0 = v_max 그대로)
       cross_turn_gain_pct: 100 # 회전 세기
       cross_ld_min_mm: 0       # 최소 lookahead (0 = ld_min_mm 그대로). 줄이면 더 늦고 급하게 꺾음
+      cross_ld_max_mm: 0       # 최대 lookahead (0 = ld_max_mm 그대로)
+      cross_v_min_mm_s: 0      # 최저 속도 (0 = v_min_mm_s 그대로)
+      cross_v_curve_mm_s: 0    # 코너 속도 상한 (0 = v_curve_mm_s 그대로)
       # ── 공사 구간 (/lane/construction이 켜지면 아래 값으로 바뀜. 경로는 일반 주행과 같음)
       con_v_mm_s: 100          # 최고 속도
       con_ld_min_mm: 250       # 최소 lookahead. 길게 = 멀리 보고 ㄱ자 경로를 미리 완만하게 꺾음 (120은 늦게 꺾어 벽돌에 박음)
       con_turn_gain_pct: 130   # 회전 세기 %. lookahead는 그대로 두고 도는 반경만 줄임 (130 → 0.77배). 벽돌 안쪽을 깎으면 낮춤
       con_ld_sharp_mm: 0       # 급한 곳 lookahead. 0 = 공사 구간에서는 안 줄임
+      con_ld_max_mm: 0         # 최대 lookahead (0 = ld_max_mm 그대로)
+      con_v_min_mm_s: 0        # 최저 속도 (0 = v_min_mm_s 그대로)
+      con_v_curve_mm_s: 0      # 코너 속도 상한 (0 = v_curve_mm_s 그대로)
       con_pivot_enter_deg: 180 # 피봇 시작 각도. 180 = 코너 피봇 안 함 (60은 곡선에서도 걸리고, 벽돌 옆 피봇은 뒤가 쓸림)
       con_pivot_keep_deg: 15   # 이만큼은 전진하며 돌고 초과분만 피봇
 

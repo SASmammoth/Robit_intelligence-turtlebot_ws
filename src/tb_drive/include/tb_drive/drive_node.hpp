@@ -93,6 +93,10 @@ private:
     double turn_gain_cross_ = 1.0;          // 교차로 명령 중 회전 세기 배율 (drive.cross_turn_gain_pct)
     double ld_min_cross_ = 0.0;             // 교차로 명령 중 최소 lookahead [m] (0이면 일반 값)
     double cross_v_ = 0.0;                  // 교차로 명령 중 최고 속도 [m/s] (0이면 끔)
+    // 프로필별 lookahead 최대·최저 속도·코너 속도 [m, m/s]. 교차로·공사 값이 0이면 일반 값
+    double ld_max_normal_ = 0.35, ld_max_cross_ = 0.0, ld_max_con_ = 0.0;
+    double v_min_normal_ = 0.04, v_min_cross_ = 0.0, v_min_con_ = 0.0;
+    double v_curve_normal_ = 0.0, v_curve_cross_ = 0.0, v_curve_con_ = 0.0;
     tb_drive::PivotParams pv_normal_, pv_con_;
     void apply_profile();                   // construction_·turning_에 맞는 값을 follower_·pivot_에 넣음
     double psd_stop_ = 0.15;

@@ -54,8 +54,14 @@ DriveNode::DriveNode() : Node("drive_node")
     declare_int("drive.cross_v_mm_s", 0, 0, 1000);         // 0이면 끔 (v_max 그대로)
     declare_int("drive.cross_turn_gain_pct", 100, 50, 300);
     declare_int("drive.cross_ld_min_mm", 0, 0, 1000);      // 0이면 ld_min_mm 그대로
+    declare_int("drive.cross_ld_max_mm", 0, 0, 1500);      // 0이면 ld_max_mm 그대로
+    declare_int("drive.cross_v_min_mm_s", 0, 0, 500);      // 0이면 v_min_mm_s 그대로
+    declare_int("drive.cross_v_curve_mm_s", 0, 0, 1000);   // 코너 속도 상한. 0이면 v_curve_mm_s 그대로
     declare_int("drive.con_v_mm_s", 100, 0, 1000);        // 공사 구간 최고 속도
     declare_int("drive.con_ld_min_mm", 250, 0, 1000);     // 공사 구간 최소 lookahead (길게: 멀리 보고 미리 완만하게 꺾음)
+    declare_int("drive.con_ld_max_mm", 0, 0, 1500);       // 공사 구간 최대 lookahead (0이면 ld_max_mm 그대로)
+    declare_int("drive.con_v_min_mm_s", 0, 0, 500);       // 공사 구간 최저 속도 (0이면 v_min_mm_s 그대로)
+    declare_int("drive.con_v_curve_mm_s", 0, 0, 1000);    // 공사 구간 코너 속도 상한 (0이면 v_curve_mm_s 그대로)
     declare_int("drive.con_ld_sharp_mm", 0, 0, 1000);
     declare_int("drive.con_turn_gain_pct", 130, 50, 300); // 공사 구간 회전 세기 % (130 = 같은 lookahead에서 반경 0.77배)     // 공사 구간 급한 곳 lookahead (0이면 안 줄임. 줄이면 ㄱ자에서 늦게 꺾음)
     declare_int("drive.con_pivot_enter_deg", 180, 0, 180); // 공사 구간 피봇 시작 각도 (180 = 코너 피봇 안 함. 벽돌 옆 피봇은 뒤가 쓸림)
@@ -188,10 +194,16 @@ void DriveNode::apply_profile()
 {
     // 우선순위: 공사 구간 > 교차로 명령 > 일반
     const bool cross = turning_ && !construction_;
+    // 공사·교차로 값이 0이면 일반 값 (ld_min·ld_sharp·turn_gain은 예전 규칙 그대로)
+    auto pick = [&](double normal, double cr, double co)
+    { return construction_ ? (co > 0.0 ? co : normal) : (cross && cr > 0.0) ? cr : normal; };
     follower_.p.ld_min = construction_ ? ld_min_con_ : (cross && ld_min_cross_ > 0.0) ? ld_min_cross_ : ld_min_normal_;
     follower_.p.ld_sharp = construction_ ? ld_sharp_con_ : ld_sharp_normal_;
     follower_.p.turn_gain = construction_ ? turn_gain_con_ : cross ? turn_gain_cross_ : turn_gain_normal_;
-    follower_.p.ld_max = std::max(follower_.p.ld_max, follower_.p.ld_min);
+    // 매번 일반 값에서 다시 계산 (예전에는 ld_max가 한 번 커지면 일반 주행으로 돌아와도 안 줄었음)
+    follower_.p.ld_max = std::max(pick(ld_max_normal_, ld_max_cross_, ld_max_con_), follower_.p.ld_min);
+    follower_.p.v_min = pick(v_min_normal_, v_min_cross_, v_min_con_);
+    follower_.p.v_curve = pick(v_curve_normal_, v_curve_cross_, v_curve_con_);
     pivot_.p = construction_ ? pv_con_ : pv_normal_;
     // 교차로 명령 중에는 예전처럼 0°부터 비례, 아니면 일반 곡선에서는 lookahead를 줄이지 않음
     follower_.p.sharp_start = turning_ ? 0.0 : sharp_curve_start_;
@@ -220,8 +232,12 @@ void DriveNode::reload_params()
 
     auto &p = follower_.p;
     p.v_max = mm("drive.v_max_mm_s");
-    p.v_min = mm("drive.v_min_mm_s");
-    p.v_curve = mm("drive.v_curve_mm_s");
+    v_min_normal_ = mm("drive.v_min_mm_s");
+    v_curve_normal_ = mm("drive.v_curve_mm_s");
+    v_min_cross_ = mm("drive.cross_v_min_mm_s");
+    v_curve_cross_ = mm("drive.cross_v_curve_mm_s");
+    v_min_con_ = mm("drive.con_v_min_mm_s");
+    v_curve_con_ = mm("drive.con_v_curve_mm_s");
     p.curve_start = deg("drive.curve_start_deg");
     p.curve_full = std::max(deg("drive.curve_full_deg"), p.curve_start + 1e-3);
     p.w_max = deg("drive.w_max_deg_s");
@@ -230,7 +246,9 @@ void DriveNode::reload_params()
     p.w_accel = deg("drive.w_accel_deg_s2");
     ld_min_normal_ = mm("drive.ld_min_mm");
     ld_min_con_ = mm("drive.con_ld_min_mm");
-    p.ld_max = std::max(ld_min_normal_, mm("drive.ld_max_mm"));
+    ld_max_normal_ = std::max(ld_min_normal_, mm("drive.ld_max_mm"));
+    ld_max_cross_ = mm("drive.cross_ld_max_mm");
+    ld_max_con_ = mm("drive.con_ld_max_mm");
     p.ld_time = mm("drive.ld_time_ms"); // ms → s 도 /1000
     ld_sharp_normal_ = mm("drive.ld_sharp_mm");
     ld_sharp_con_ = mm("drive.con_ld_sharp_mm");
