@@ -370,6 +370,40 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
   // ====== View 탭 (카메라 크게 + 키보드 조작)
   setupViewTab();
+
+  // ====== 영상 칸 ↔ 아래 탭 경계를 끌어서 높이 조절
+  setupMainSplitter();
+}
+
+void MainWindow::setupMainSplitter()
+{
+  // .ui에서는 gridLayout_10 안에 영상 칸(gridLayout_7, 늘어남 10)과 아래 탭(tabWidget, 늘어남 0)이
+  // 고정 비율로 들어 있어서 탭이 최소 높이만 받음 → 둘을 세로 QSplitter로 옮김
+  QGridLayout *outer = ui->gridLayout_10;
+  outer->removeItem(ui->gridLayout_7);
+  outer->removeWidget(ui->tabWidget);
+
+  auto *top = new QWidget;
+  ui->gridLayout_7->setParent(nullptr); // 레이아웃은 부모가 없어야 다른 위젯에 붙일 수 있음
+  top->setLayout(ui->gridLayout_7);
+
+  main_split_ = new QSplitter(Qt::Vertical, ui->centralwidget);
+  main_split_->addWidget(top);
+  main_split_->addWidget(ui->tabWidget);
+  main_split_->setChildrenCollapsible(false); // 끝까지 끌어도 한쪽이 사라지지 않게
+  main_split_->setHandleWidth(8);
+  main_split_->setStretchFactor(0, 3);        // 창 크기를 바꿀 때 영상 칸이 더 많이 늘어남
+  main_split_->setStretchFactor(1, 2);
+  outer->addWidget(main_split_, 0, 0);
+  outer->setRowStretch(0, 1);
+  outer->setRowStretch(1, 0);
+
+  QSettings settings("tb_gui", "tb_gui");
+  const QByteArray state = settings.value("main_split").toByteArray();
+  if (!state.isEmpty())
+    main_split_->restoreState(state);
+  connect(main_split_, &QSplitter::splitterMoved, this, [this](int, int)
+          { QSettings("tb_gui", "tb_gui").setValue("main_split", main_split_->saveState()); });
 }
 
 void MainWindow::makeTabsScrollable()
