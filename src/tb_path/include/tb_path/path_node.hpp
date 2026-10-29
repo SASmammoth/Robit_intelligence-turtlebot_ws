@@ -86,6 +86,7 @@ private:
     int con_bridge_dy_mm_ = 0;           // path.con_bridge_dy_mm: 안쪽 끝 차이가 이보다 크면 안 이음
     bool con_bridge_from_back_ = false;
     int con_bridge_far_mm_ = 1000, con_bridge_far_dy_mm_ = 200; // path.con_bridge_far_mm, far_dy_mm    // path.con_bridge_from_back: 앞 벽돌 뒷면부터 막음
+    int con_hold_wall_mm_ = 170; // path.con_hold_wall_mm: 지난 벽돌 앞면부터 뒤로 이만큼 + 붙은 선 쪽을 벽으로 (0 끔)
     std::vector<obstacles::Quad> con_bridges_; // 이번 프레임에 이어 막은 곳 (표시용)
     double con_travel_ = 0.0;              // 공사 구간에서 지금까지 이동 거리
     lane_path::Pose2D con_last_pose_;

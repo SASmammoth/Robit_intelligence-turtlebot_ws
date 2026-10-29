@@ -146,7 +146,8 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_bridge_from_back", 0, 1);
     declare_int("path.con_bridge_far_mm", 1000, 2000); // 이 거리 안이면 BEV보다 먼(위로 벗어난) 벽돌도 잇기에 씀 (0 = BEV 안만)
     declare_int("path.con_bridge_far_dy_mm", 200, 500); // 먼 벽돌은 선이 안 보여 쪽을 로봇 기준으로 정하므로, 안쪽 끝 차이가 이보다 크면 안 이음 (0 = 안 봄)    // 1: 앞 벽돌 뒷면부터 막음 (0: 앞면부터 = 벽돌 옆도 겹쳐 막음)
-    declare_int("path.con_keep", 0, 2);                // 지난 벽돌 피하기: 0 끔, 1 그쪽으로 꺾지만 못하게(약), 2 벽돌에서 떼어 놓기(강)
+    declare_int("path.con_hold_wall_mm", 170, 500);    // 지난 벽돌(기억) 앞면부터 뒤로 이만큼 + 붙은 선 쪽을 벽으로 (벽돌 뒤로 경로가 새지 않게, 0 끔)
+    declare_int("path.con_keep", 0, 2);               // 지난 벽돌 피하기: 0 끔, 1 그쪽으로 꺾지만 못하게(약), 2 벽돌에서 떼어 놓기(강)
     declare_int("path.con_hold_mm", 40, 500);
     declare_int("path.con_keep_rear_mm", 100, 300);    // 지난 벽돌: 바퀴 축이 뒷면을 지나고 이만큼 더 가야 그쪽으로 꺾음 (로봇 뒤 끝 14cm)          // 기억한 벽돌 뒷면을 로봇 뒤 끝이 지나고 이만큼 더 가야 그쪽으로 붙음
     declare_int("path.con_clear_mm", 30, 200);         // 기억한 벽돌과 로봇 옆면 사이 여유          // 선에 안 닿은 벽돌 끝이 화면 끝에서 이 안이면 화면 끝까지 막음
@@ -270,6 +271,7 @@ void PathNode::reload_params()
     con_bridge_from_back_ = get_parameter("path.con_bridge_from_back").as_int() != 0;
     con_bridge_far_mm_ = int(get_parameter("path.con_bridge_far_mm").as_int());
     con_bridge_far_dy_mm_ = int(get_parameter("path.con_bridge_far_dy_mm").as_int());
+    con_hold_wall_mm_ = int(get_parameter("path.con_hold_wall_mm").as_int());
     con_keep_rear_mm_ = get_parameter("path.con_keep_rear_mm").as_int();
     con_dead_end_mm_ = get_parameter("path.con_dead_end_mm").as_int();
     con_clear_mm_ = get_parameter("path.con_clear_mm").as_int();
@@ -680,6 +682,39 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
         }
     }
 
+    // ====== 공사 구간: 기억한 지난 벽돌 자리 + 그 뒤 + 붙은 선 쪽을 벽으로
+    //   벽돌이 화면 아래로 빠지거나 탐지가 끊기면 그 자리가 빈 곳이 되어 벽돌 위·뒤로 경로가 생김 (녹화 1029 10-43-29, 15초)
+    //   앞면 x0 ~ x0 + con_hold_wall_mm, 안쪽 끝(길 쪽)에서 con_brick_margin_mm 더 막고 선 쪽은 0.6m(화면 밖)까지
+    cv::Mat hold_m; // 디버그 표시용
+    if (con && con_hold_wall_mm_ > 0)
+    {
+        const double depth = con_hold_wall_mm_ / 1000.0, margin = con_margin_mm_ / 1000.0, far = 0.6;
+        for (int k = 0; k < 2; ++k)
+        {
+            if (!con_hold_[k].on)
+                continue;
+            const auto q = held_quads_one(k);
+            double x0 = 1e9, yl = -1e9, yr = 1e9;
+            for (const auto &pt : q)
+                x0 = std::min(x0, pt.x), yl = std::max(yl, pt.y), yr = std::min(yr, pt.y);
+            const bool right = k == 0;
+            const double yin = right ? yl + margin : yr - margin, yout = right ? yl - far : yr + far;
+            const obstacles::Quad w = {cv::Point2d(x0, yin), cv::Point2d(x0 + depth, yin),
+                                       cv::Point2d(x0 + depth, yout), cv::Point2d(x0, yout)};
+            if (hold_m.empty())
+                hold_m = cv::Mat::zeros(wall.size(), CV_8U);
+            std::vector<cv::Point> px;
+            for (const auto &pt : w)
+            {
+                const cv::Point2d b = lane_path::robot_to_bev(pt, geo_);
+                px.emplace_back(cvRound(b.x), cvRound(b.y));
+            }
+            cv::fillConvexPoly(hold_m, px, cv::Scalar(255));
+        }
+        if (!hold_m.empty())
+            wall |= hold_m;
+    }
+
     // ====== 좌/우 명령이 새로 들어오면 직진 때 기억한 경로를 버림
     // (표지판이 교차로 바로 앞에서 보이면, 직진으로 기억한 다른 가지를 따라가거나
     //  turn으로 고른 새 가지를 "기억과 다르다"고 10프레임 동안 거부해서 T자에서 엉뚱하게 감)
@@ -930,6 +965,8 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             bm &= (con_ext == 0);
         if (!bridge_m.empty())
             bm &= (bridge_m == 0);
+        if (!hold_m.empty())
+            bm &= (hold_m == 0);
         std::vector<std::vector<cv::Point>> cs;
         cv::findContours(bm, cs, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         for (auto &c : cs)
@@ -979,6 +1016,8 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
             view.setTo(cv::Scalar(170, 170, 170), con_ext); // 이은 선: 회색
         if (!bridge_m.empty())
             view.setTo(cv::Scalar(180, 60, 200), bridge_m & (white == 0) & (yellow_wall == 0)); // 같은 쪽 벽돌 잇기: 보라
+        if (!hold_m.empty())
+            view.setTo(cv::Scalar(0, 90, 160), hold_m & (white == 0) & (yellow_wall == 0)); // 지난 벽돌 벽: 갈색
         view.setTo(cv::Scalar(235, 235, 235), white);
         view.setTo(cv::Scalar(0, 210, 255), yellow);
         if (skel.ok)
