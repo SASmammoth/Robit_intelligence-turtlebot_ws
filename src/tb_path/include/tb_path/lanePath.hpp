@@ -50,11 +50,19 @@ struct TrackerParams {
     // 그때는 override_frames 대신 이만큼 연속으로 보여야 믿음 (0이면 따로 안 봄).
     // 공사 구간은 override_frames=1이라 벽돌 지난 뒤 안쪽이 막히면 선 바깥 바닥 경로를 바로 따라감 (claude12)
     int    cross_override_frames = 0;
+    // 노란선 왼쪽 유지 (공사 구간 출구처럼 오른쪽 선이 안 보이는 곳):
+    // 직진 명령 갈림길에서 각 가지를 yellow_left_look_m만큼 따라가 보며 "왼쪽으로 차선 반폭 떨어진 곳에
+    // 노란선이 있는지"를 재고, 확실히 맞는 가지가 하나면 그 가지 (기억·straight_by_lane보다 먼저).
+    // 언제 켤지는 부르는 쪽(path_node: 벽돌을 한동안 못 봤을 때)이 정함
+    bool   yellow_left = false;
+    double yellow_left_look_m = 0.20;
+    double yellow_left_tol_m = 0.05;   // 노란선이 있어야 할 곳과 실제 노란선 평균 거리가 이 안이어야 맞는 가지
 };
 
 struct Output {
     Source src = Source::Lost;
     std::vector<cv::Point2d> path;  // 로봇 좌표 (m), 가까운 점부터
+    bool yellow_left_used = false;  // 이번 프레임에 노란선 왼쪽 유지로 가지를 골랐는지 (로그용)
 };
 
 class Tracker {

@@ -156,6 +156,10 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_override_frames", 1, 100);  // 공사 구간: 새 경로가 기억과 달라도 이만큼만 의심 (벽돌이 갑자기 보이면 경로가 크게 바뀌는 게 정상)
     declare_int("path.con_offscreen_side", 0, 1);     // 공사 구간: 화면 옆 끝까지 간 벽돌은 화면 밖 선에 붙은 것 (반대쪽 선 틈은 막지 않음)
     declare_int("path.con_cross_override_frames", 15, 100); // 공사 구간: 새 경로가 기억과 차선 너머에 있으면 이만큼 연속으로 보여야 믿음 (0 끔)
+    declare_int("path.con_yellow_left", 0, 1);           // 공사 구간: 오른쪽 선이 안 보이면 노란선을 왼쪽 반폭에 두는 가지로 (출구 좌회전 곡선에서 바깥으로 새지 않게)
+    declare_int("path.con_yellow_left_look_mm", 200, 600); //   각 가지를 이만큼 따라가 보며 잼
+    declare_int("path.con_yellow_left_brick_mm", 200, 3000); //   벽돌을 마지막으로 본 뒤 이만큼 가야 켬 (벽돌 사이에서는 안 씀)
+    declare_int("path.con_yellow_left_tol_mm", 50, 200);   //   노란선이 있어야 할 곳과 평균 이 거리 안이면 맞는 가지
     declare_int("path.con_straight_by_lane", 1, 1);   // 공사 구간: 직진 갈림길에서 차선 방향 기준으로 가장 곧은 가지 (화면 밖 선에 붙은 벽돌 앞으로 새지 않게)
     // 정지선 (/mission/stop_line true 동안만)
     declare_int("path.sl_margin_mm", 60, 500);  // 경로 끝 = 정지선 - 이만큼 (바퀴 축 기준. 로봇 앞 9cm + tb_drive stop_dist도 생각)
@@ -276,6 +280,10 @@ void PathNode::reload_params()
     con_override_frames_ = int(get_parameter("path.con_override_frames").as_int());
     con_cross_override_frames_ = int(get_parameter("path.con_cross_override_frames").as_int());
     con_straight_by_lane_ = get_parameter("path.con_straight_by_lane").as_int() != 0;
+    con_yellow_left_ = get_parameter("path.con_yellow_left").as_int() != 0;
+    tracker_.p.yellow_left_look_m = get_parameter("path.con_yellow_left_look_mm").as_int() / 1000.0;
+    con_yellow_left_brick_mm_ = int(get_parameter("path.con_yellow_left_brick_mm").as_int());
+    tracker_.p.yellow_left_tol_m = get_parameter("path.con_yellow_left_tol_mm").as_int() / 1000.0;
     con_offscreen_side_ = get_parameter("path.con_offscreen_side").as_int() != 0;
     sl_margin_mm_ = int(get_parameter("path.sl_margin_mm").as_int());
     sl_min_w_px_ = int(get_parameter("path.sl_min_w_px").as_int());
@@ -708,7 +716,14 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
                                                                           : override_frames_;
     tracker_.p.cross_override_frames = con ? con_cross_override_frames_ : 0;
     tracker_.p.straight_by_lane = con && con_straight_by_lane_;
+    // 벽돌이 보이는 동안·직후에는 안 씀 (벽돌이 노란선에 붙으면 노란선을 따라가는 가지가 벽돌 앞 막다른 곳)
+    //  → 진입 곡선(벽돌 보기 전)과 출구 곡선(마지막 벽돌 지난 뒤)에서만
+    const bool brick_far = !con_brick_seen_ ||
+        std::hypot(pose_.x - con_brick_pose_.x, pose_.y - con_brick_pose_.y) * 1000.0 >= con_yellow_left_brick_mm_;
+    tracker_.p.yellow_left = con && con_yellow_left_ && brick_far; // 이번 프레임 벽돌도 update_construction에서 con_brick_pose_로 이미 반영됨
     lane_path::Output out = tracker_.update(skel, skel_p_.scale, white, yellow, valid, geo_, turn, pose_);
+    if (out.yellow_left_used)
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "construction: 노란선 왼쪽 유지 켬 (그 가지로)");
 
     // 공사 구간: 스켈레톤 경로는 벽돌 앞에서 ㄱ자로 꺾이므로 모서리를 둥글게 (기억에는 원래 경로가 남음)
     if (con && con_smooth_mm_ > 0)

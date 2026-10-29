@@ -97,6 +97,8 @@ private:
     int con_cross_override_frames_ = 15; // 공사 구간: 차선 너머 새 경로는 이만큼 연속으로 보여야 믿음
     int override_frames_ = 10, con_override_frames_ = 1, turn_override_frames_ = 0; // 일반 / 공사 구간 path.override_frames
     bool con_straight_by_lane_ = true;
+    bool con_yellow_left_ = false;   // path.con_yellow_left
+    int con_yellow_left_brick_mm_ = 200;
     bool con_offscreen_side_ = false;     // path.con_offscreen_side
     lane_path::Pose2D con_start_pose_; // 공사 모드 시작 위치
     std::string con_reason_ = "-";     // 마지막 시작·끝 이유 (표시용)

@@ -31,3 +31,9 @@
 
     cd src/tb_path && g++ -O2 -std=c++17 -Iinclude test/hug_test.cpp src/laneSkeleton.cpp src/lanePath.cpp \
         src/obstacles.cpp $(pkg-config --cflags --libs opencv4) -o hug_test && ./hug_test
+
+`yellow_left_test`: 공사 구간 출구 (`path.con_yellow_left`). 노란선만 보이다 왼쪽으로 꺾이고 오른쪽 흰선은 화면 밖, 앞에 출구 바깥 흰 가로선이 보일 때
+바깥(직진)으로 새지 않고 왼쪽으로 도는지. 녹화 1029 09:57 22s 재현. 켬/끔 각 18가지 (모서리 반지름 0/12/24cm × 출발 위치 × 속도)
+
+    cd src/tb_path && g++ -O2 -std=c++17 -Iinclude src/laneSkeleton.cpp src/lanePath.cpp test/yellow_left_test.cpp \
+        $(pkg-config --cflags --libs opencv4) -o yellow_left_test && ./yellow_left_test

@@ -167,11 +167,13 @@ std::vector<cv::Point> preview(const cv::Mat &s, const cv::Mat &vis, cv::Point f
 
 // 분기에서 고를 가지 번호를 돌려주는 함수
 //  cur: 분기 위치, dir_in: 들어온 방향, ends: 각 가지를 미리 본 끝점 (스켈레톤 픽셀)
+//  far: far_look > 0일 때 각 가지를 길게 미리 본 점들 (없으면 빈 벡터)
 using Chooser = std::function<int(cv::Point cur, cv::Point2d dir_in,
-                                  const std::vector<cv::Point> &ends)>;
+                                  const std::vector<cv::Point> &ends,
+                                  const std::vector<std::vector<cv::Point>> &far)>;
 
 std::vector<cv::Point> trace(const cv::Mat &s, cv::Point start, int look, int max_len,
-                             const Chooser &choose , Turn turn)
+                             const Chooser &choose , Turn turn, int far_look = 0)
 {
     cv::Mat vis(s.size(), CV_8U, cv::Scalar(0));
     std::vector<cv::Point> path{start};
@@ -233,7 +235,10 @@ std::vector<cv::Point> trace(const cv::Mat &s, cv::Point start, int look, int ma
                 if (fwd.size() > 1) {
                     std::vector<cv::Point> ends;
                     for (int r : fwd) ends.push_back(pv[r].back());
-                    pick = fwd[choose(cur, din, ends)];
+                    std::vector<std::vector<cv::Point>> far;
+                    if (far_look > look)
+                        for (int r : fwd) far.push_back(preview(s, vis, cur, firsts[r], far_look));
+                    pick = fwd[choose(cur, din, ends, far)];
 
                     // 고른 가지를 미리 본 만큼 한 번에 전진.
                     // 분기점은 여러 픽셀 뭉치라서, 한 칸씩 가면 바로 옆 픽셀에서 다시 판단해 선택이 뒤집힘
@@ -338,17 +343,66 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
         }
     }
 
+    // 노란선 왼쪽 유지 (yellow_left): 노란선이 보일 때만
+    //  ydist: 노란선까지 거리 [BEV px]. 가지마다 "왼쪽 반폭 지점"에서 읽어 노란선과 얼마나 맞는지 잼
+    cv::Mat ydist;
+    if (p.yellow_left && turn == Turn::Straight && !yellow.empty() && !valid.empty()) {
+        cv::Mat yv;
+        cv::bitwise_and(yellow, valid, yv);
+        if (cv::countNonZero(yv) > 0)
+            cv::distanceTransform(yv == 0, ydist, cv::DIST_L2, 3);
+    }
+    // 가지 하나의 점수: 왼쪽 반폭 지점 ~ 노란선 평균 거리 [px] (재 볼 점이 모자라면 DBL_MAX)
+    auto yellow_left_cost = [&](const std::vector<cv::Point> &br) {
+        const double half = g.lane_w_px / 2.0;
+        double sum = 0;
+        int n = 0;
+        for (size_t i = 0; i < br.size(); i += 2) {
+            const cv::Point a = br[i >= 3 ? i - 3 : 0], b = br[std::min(br.size() - 1, i + 3)];
+            cv::Point2d h(b - a);
+            const double L = cv::norm(h);
+            if (L < 1e-6) continue;
+            h *= 1.0 / L;
+            const cv::Point2d left(h.y, -h.x);  // 영상 좌표에서 진행 방향의 왼쪽
+            const cv::Point2d q = cv::Point2d(br[i].x * K + K / 2.0, br[i].y * K + K / 2.0) + left * half;
+            const cv::Point qi(cvRound(q.x), cvRound(q.y));
+            if (qi.x < 0 || qi.y < 0 || qi.x >= ydist.cols || qi.y >= ydist.rows || !valid.at<uchar>(qi)) continue;
+            sum += std::min<double>(ydist.at<float>(qi), half); // 너무 멀면 반폭으로 자름 (한 점이 다 좌우하지 않게)
+            ++n;
+        }
+        return n >= 3 ? sum / n : DBL_MAX;
+    };
+    const int far_look = ydist.empty() ? 0 : std::max(4, int(p.yellow_left_look_m / (g.my() * K)));
+    const double yl_tol_px = p.yellow_left_tol_m / g.mx();
+
     // ── 1) 실시간 경로
     Pts live;
     if (sk.ok && !sk.skel.empty() && sk.seed.x >= 0) {
         bool turn_used = false;
         // 분기 선택: 기억한 경로가 이 분기 너머까지 있으면 그것과 가장 가까운 가지,
         // 없으면 이번 경로의 첫 분기는 turn 명령, 그다음 분기는 가장 곧은 가지
-                const Chooser choose = [&](cv::Point cur, cv::Point2d din, const std::vector<cv::Point> &ends)
+                const Chooser choose = [&](cv::Point cur, cv::Point2d din, const std::vector<cv::Point> &ends,
+                                   const std::vector<std::vector<cv::Point>> &far)
         {
             // turn 방향으로 가장 맞는 가지
             const Turn t = turn_used ? Turn::Straight : turn;
             turn_used = true;
+
+            // 노란선 왼쪽 유지: 확실히 맞는 가지가 하나면 그것 (기억·가장 곧은 가지보다 먼저)
+            if (t == Turn::Straight && !ydist.empty() && far.size() == ends.size() && far.size() >= 2)
+            {
+                std::vector<double> c;
+                for (const auto &br : far) c.push_back(yellow_left_cost(br));
+                std::vector<int> idx(c.size());
+                for (size_t i = 0; i < idx.size(); ++i) idx[i] = int(i);
+                std::sort(idx.begin(), idx.end(), [&](int a, int b) { return c[a] < c[b]; });
+                const double c0 = c[idx[0]], c1 = c[idx[1]];
+                if (c0 < yl_tol_px && (c1 == DBL_MAX || c1 - c0 > yl_tol_px * 0.5))
+                {
+                    out.yellow_left_used = true;
+                    return idx[0];
+                }
+            }
             int turn_pick = 0;
             double bv = -DBL_MAX;
             // 직진: 보이는 차선 방향이 있으면 그 기준으로 가장 곧은 가지 (straight_by_lane)
@@ -378,7 +432,7 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
 
         const cv::Point start(sk.seed.x / K, sk.seed.y / K);
         const int look = std::max(3, int(p.lookahead_m / (g.my() * K)));
-        auto px = trace(sk.skel, start, look, sk.skel.rows * sk.skel.cols, choose, turn);
+        auto px = trace(sk.skel, start, look, sk.skel.rows * sk.skel.cols, choose, turn, far_look);
 
         // 시작점이 중심선 중간이면(로봇 바로 앞에서 ㄱ자로 꺾여 가로 부분이 정면에 더 가까울 때)
         // 첫 방향이 로봇 쪽(되돌아가는 쪽)일 수 있음 → 그 방향을 막고 반대로도 따라가 봐서 로봇에서 먼 쪽을 씀
@@ -387,7 +441,7 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
         if (turn == Turn::Straight && px.size() >= 3 && px.back().y > start.y + 2) { // 끝이 시작점보다 아래(로봇 쪽) = 되돌아감
             cv::Mat s2 = sk.skel.clone();
             for (size_t i = 1; i < std::min<size_t>(px.size(), 4); ++i) s2.at<uchar>(px[i]) = 0;
-            auto alt = trace(s2, start, look, sk.skel.rows * sk.skel.cols, choose, turn);
+            auto alt = trace(s2, start, look, sk.skel.rows * sk.skel.cols, choose, turn, far_look);
             const cv::Point2d anchor(sk.skel.cols / 2.0, sk.skel.rows - 1.0);
             if (alt.size() >= 3 &&
                 cv::norm(cv::Point2d(alt.back()) - anchor) > cv::norm(cv::Point2d(px.back()) - anchor) + 3.0)

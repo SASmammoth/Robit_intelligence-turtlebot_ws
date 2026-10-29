@@ -1266,6 +1266,15 @@ void MainWindow::setupParamTab()
                  {"path.con_straight_by_lane", "직진 가지를 차선 방향으로 (1=켬)", "", 0, 1, 1},
                  {"path.con_offscreen_side", "화면 끝 벽돌은 화면 밖 선에 붙음 (1=켬)", "", 0, 1, 1},
              }}),
+      group({"공사: 노란선 왼쪽 유지 (출구 곡선에서 바깥으로 새지 않게)",
+             {
+                 {"path.con_yellow_left", "갈림길에서 노란선을 왼쪽에 두는 가지 (1=켬)", "", 0, 1, 1},
+                 {"path.con_yellow_left_look_mm", "가지를 따라가 보는 길이", " mm", 0, 600, 10},
+                 {"path.con_yellow_left_brick_mm", "마지막 벽돌 뒤 이만큼 가야 켬", " mm", 0, 3000, 10},
+                 {"path.con_yellow_left_tol_mm", "노란선 위치 허용 오차", " mm", 0, 200, 5},
+             },
+             2, "직진 명령 갈림길에서만, 벽돌이 안 보일 때(진입 전·출구)만. 왼쪽 반폭(13cm) 자리에 노란선이 확실히 맞는 가지가 하나면 기억보다 먼저 고름. "
+                "로그 'construction: 노란선 왼쪽 유지 켬'으로 확인"}),
       group({"공사: 지난 벽돌 (화면 아래로 빠진 벽돌 기억)",
              {
                  {"path.con_bridge_mm", "같은 쪽 벽돌 잇기 거리 (0=끔)", " mm", 0, 1500, 50},
