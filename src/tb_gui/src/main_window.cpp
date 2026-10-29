@@ -1887,6 +1887,20 @@ PathView *MainWindow::makePathView()
 
 // 녹화 버튼: 영상 탭(주행/튜닝) 이름 줄 오른쪽 끝
 //  녹화는 화면 표시와 따로 qnode 신호를 받음 → 영상을 숨기거나 다른 탭을 봐도 녹화됨
+// 녹화 저장 위치: <워크스페이스>/records
+//  실행 파일(<ws>/install/tb_gui/lib/tb_gui/tb_gui, symlink-install이면 <ws>/build/tb_gui/tb_gui)에서
+//  위로 올라가며 src와 install이 둘 다 있는 폴더를 워크스페이스로 봄. 못 찾으면 ~/tb_records
+static QString recordsDir()
+{
+  QDir d(QCoreApplication::applicationDirPath());
+  do
+  {
+    if (d.exists("src") && d.exists("install"))
+      return d.filePath("records");
+  } while (d.cdUp());
+  return QDir::home().filePath("tb_records");
+}
+
 void MainWindow::setupRecorder()
 {
   recorder_ = new Recorder(this);
@@ -1910,10 +1924,11 @@ void MainWindow::setupRecorder()
   btn_record_->setToolTip(QString("USB · 경로 보기 · Skeleton + 시간 + 로그를 한 영상(record.mp4, %1x%2, %3 fps)으로,\n"
                                   "노드 로그를 events.log로, 시작할 때 노드의 현재 파라미터 값을 params.yaml로 저장\n"
                                   "파라미터 노드가 하나도 연결되어 있지 않으면 녹화하지 않음\n"
-                                  "저장 위치: ~/tb_records/<날짜.시작시각>/")
+                                  "저장 위치: %4/<날짜.시작시각>/")
                               .arg(Recorder::kW)
                               .arg(Recorder::kH)
-                              .arg(Recorder::kFps));
+                              .arg(Recorder::kFps)
+                              .arg(recordsDir()));
   display_tabs_->setCornerWidget(btn_record_, Qt::TopRightCorner);
   connect(btn_record_, &QPushButton::toggled, this, &MainWindow::setRecording);
   connect(&debug_timer_, &QTimer::timeout, this, &MainWindow::updateRecordButton);
@@ -1929,7 +1944,7 @@ void MainWindow::setRecording(bool on)
     QString fail;
     if (nodes.isEmpty())
       fail = "녹화 안 함: 연결된 노드 없음 (lineDetect_node, path_node, drive_node, brain_node)";
-    else if (!recorder_->start(QDir::home().filePath("tb_records")))
+    else if (!recorder_->start(recordsDir()))
       fail = "녹화 실패: 폴더/파일을 만들 수 없음";
     if (!fail.isEmpty())
     {

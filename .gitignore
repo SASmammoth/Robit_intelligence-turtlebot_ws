@@ -54,6 +54,8 @@ venv/
 *.mcap
 rosbag*/
 rosbag2_*/
+# tb_gui 녹화 (영상·로그·파라미터)
+records/
 
 # ===== YOLO / 데이터셋 (Nextcloud로 관리) =====
 datasets/
