@@ -98,6 +98,9 @@ private:
     int con_cross_override_frames_ = 15; // 공사 구간: 차선 너머 새 경로는 이만큼 연속으로 보여야 믿음
     int override_frames_ = 10, con_override_frames_ = 1, turn_override_frames_ = 0; // 일반 / 공사 구간 path.override_frames
     bool con_straight_by_lane_ = true;
+    bool guard_mem_ = false;    // path.guard_mem: 일반 주행에서도 기억과 선 너머 새 경로를 오래 의심
+    int guard_mem_frames_ = 20;
+    bool guard_gap_ = false;    // path.guard_gap (주차 모드에서는 안 씀: 점선을 넘어 칸에 들어가야 함)
     bool con_yellow_left_ = false;   // path.con_yellow_left
     int con_yellow_left_brick_mm_ = 200;
     bool con_offscreen_side_ = false;     // path.con_offscreen_side

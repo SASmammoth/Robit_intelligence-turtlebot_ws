@@ -4,7 +4,7 @@
 // 녹화: USB / 경로 보기 / Skeleton 화면 + 시간 + 이벤트 로그를 한 영상(record.mp4)으로, 로그는 events.log로도 저장
 //  - start(): <base>/<yyyy-MM-dd.HH-mm-ss>/ 폴더를 만들고 그 안에 record.mp4, events.log
 //    (params.yaml은 MainWindow가 같은 폴더에 저장)
-//  - 영상 배치 (kW x kH):  [ USB | Path | Skeleton ] / 시간 줄 / 최근 로그
+//  - 영상 배치 (kW x kH):  [ USB | Path | Skeleton ] / 시간 줄 / 최근 로그 | 시간·수신 표
 //  - kFps 타이머로 한 장씩 그림. 타이머가 늦으면 같은 장을 더 써서 영상 길이 = 실제 녹화 시간
 //  - 1초 넘게 프레임이 안 온 화면은 NO SIGNAL
 //  - 그리기는 GUI 스레드, H.264 인코딩은 별도 스레드 (GUI가 안 버벅이게)
@@ -45,6 +45,7 @@ public:
 
   void setFrame(const QString &stream, const QImage &img); // "usb", "skel": 최신 프레임만 기억
   void setPathView(QWidget *w) { path_view_ = w; }          // 매 장마다 render()로 캡처
+  void setDebugText(const QString &t) { debug_text_ = t; }  // 시간·수신 표 (MainWindow가 5Hz로 줌)
   void logEvent(const QString &text);                       // GUI 쪽 이벤트 (녹화 시작/중지 등)
   void logNode(const QString &node, int level, qint64 stamp_ns, const QString &text); // /rosout
 
@@ -70,6 +71,7 @@ private:
   Stream usb_, skel_;
   QWidget *path_view_ = nullptr;
   std::deque<LogLine> lines_; // 영상에 보일 최근 로그
+  QString debug_text_;        // 시간·수신 표
   QFile log_;
   QTimer timer_;
   QElapsedTimer elapsed_;

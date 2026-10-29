@@ -1219,6 +1219,14 @@ void MainWindow::setupParamTab()
                  {"path.turn_min_deg", "둥글게 할 꺾임", " °", 0, 180, 5},
                  {"path.branch_look_mm", "분기 미리보기", " mm", 0, 300, 5},
              }}),
+      group({"차선 넘기 방지 (path_node) — 각각 0 = 예전 그대로, 1 = 켬",
+             {
+                 {"path.guard_start", "(a) 로봇~시작점 사이 선이면 다른 줄기 (1=켬)", "", 0, 1, 1},
+                 {"path.guard_mem", "(b) 기억과 선 너머 새 경로 오래 의심 (1=켬)", "", 0, 1, 1},
+                 {"path.guard_mem_frames", "(b) 선 너머 경로 믿기까지", " 프레임", 0, 100, 1},
+                 {"path.guard_gap", "(c) 선 틈으로 가는 가지 막기 (1=켬)", "", 0, 1, 1},
+                 {"path.guard_gap_mm", "(c) 이 이하 틈을 막음", " mm", 0, 250, 5},
+             }}),
       group({"정지선 (path_node) — /mission/stop_line 켜져 있을 때만 (brain: 차단바 끝나면 켬)",
              {
                  {"path.sl_margin_mm", "경로 끝 = 빨간선 - (바퀴 축 기준)", " mm", 0, 500, 5},
@@ -2287,9 +2295,20 @@ void MainWindow::updateDebug()
         drawNoSignal(l, it.key(), age);
   }
 
-  // ====== 시간·수신 표
-  if (!label_debug_ || !label_debug_->isVisible())
+  // ====== 시간·수신 표 (녹화 중이면 화면에 안 보여도 만들어서 녹화 영상에 넣음)
+  const bool show = label_debug_ && label_debug_->isVisible();
+  const bool rec = recorder_ && recorder_->isRecording();
+  if (!show && !rec)
     return;
+  const QString t = debugText(thr, now_ms);
+  if (show)
+    label_debug_->setText(t);
+  if (rec)
+    recorder_->setDebugText(t);
+}
+
+QString MainWindow::debugText(double thr, qint64 now_ms)
+{
   const qint64 unix_ms = QDateTime::currentMSecsSinceEpoch();
   QString t;
   t += QString("PC  unix %1.%2  %3\n")
@@ -2338,7 +2357,7 @@ void MainWindow::updateDebug()
              .arg(i.age_s > thr ? "  ← 끊김" : "");
   }
   t += "\nstamp lag = 받은 시각(PC) - 메시지 stamp(로봇). 로봇·PC 시계 차이 포함 (음수면 PC 시계가 느림)";
-  label_debug_->setText(t);
+  return t;
 }
 
 void MainWindow::drawNoSignal(QLabel *label, const QString &stream, double age_s)

@@ -84,6 +84,7 @@ private:
   QWidget *makeDebugPanel();
   void appendNodeLog(const QString &node, int level, qint64 stamp_ns, const QString &text);
   void updateDebug();                                         // 5Hz: 시간 표시 + NO SIGNAL
+  QString debugText(double thr, qint64 now_ms);               // 시간·수신 표 글자 (화면 + 녹화 영상)
   void drawNoSignal(QLabel *label, const QString &stream, double age_s);
   QPlainTextEdit *log_view_ = nullptr;
   QCheckBox *log_all_ = nullptr;      // path·drive 로그도 보기

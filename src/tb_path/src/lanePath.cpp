@@ -96,6 +96,56 @@ bool crosses_line(const Pts &live, const Pts &mem, const cv::Mat &lines, const G
     return false;
 }
 
+// 경로가 차선 틈을 빠져나가는 첫 점 (없으면 -1). guard_gap 설명은 TrackerParams
+// 경로 점마다 진행 방향 왼쪽·오른쪽에서 가장 가까운 차선 픽셀을 찾아, 둘 사이가 gap_m 이하이고
+// 경로가 그 사이를 지나면(점이 두 픽셀을 잇는 선분 가까이) 틈. 차선 안 정상 경로는 양쪽 선 사이가 차선 폭이라 안 걸림.
+// (경로에 수직인 광선으로 찾으면 비스듬히 지나는 가는 선을 빗나감)
+// 사각지대(BEV 밖) 점은 안 봄. 선 끝 하나만 돌아가는 것(교차로 회전)은 한쪽에만 선이 있어 안 걸림
+// 화면 테두리·사각지대 경계에 닿은 선 픽셀은 안 씀: 선이 화면 밖으로 이어지는데 거기서 끝난 것처럼 보임 (sim_fork 오검출)
+// 두 선 끝 사이 빈칸이 3cm 미만이면 틈이 아님 (경로가 이어진 한 선 앞에 오면 양쪽 픽셀이 붙어서 잡힘)
+// 두 픽셀이 둘레 안에서 이어진 한 선이면 틈이 아님 (섬·ㄱ자 모서리를 비스듬히 지날 때 두 팔이 잡힘, sim_fork)
+int gap_crossing(const Pts &path, const cv::Mat &lines, const cv::Mat &valid, const Geo &g, double gap_m)
+{
+    if (path.size() < 3 || lines.empty()) return -1;
+    const double gap_px = gap_m / g.mx(), min_gap_px = 0.03 / g.mx();
+    const int r = cvCeil(gap_px);
+    const cv::Rect R(0, 0, lines.cols, lines.rows);
+    cv::Mat edge = valid.empty() ? cv::Mat(lines.size(), CV_8U, cv::Scalar(0)) : cv::Mat(valid == 0);
+    cv::rectangle(edge, R, 255, 1);
+    cv::dilate(edge, edge, cv::getStructuringElement(cv::MORPH_RECT, {11, 11}));
+    const cv::Mat ends = lines & (edge == 0);
+    std::vector<cv::Point> pts;
+    cv::Mat lbl;
+    for (size_t i = 1; i + 1 < path.size(); ++i) {
+        const cv::Point2d o = robot_to_bev(path[i], g);
+        if (!R.contains(cv::Point(cvRound(o.x), cvRound(o.y)))) continue;
+        cv::Point2d h = robot_to_bev(path[i + 1], g) - robot_to_bev(path[i - 1], g);
+        const double L = cv::norm(h);
+        if (L < 1e-6) continue;
+        h *= 1.0 / L;
+        const cv::Rect win = cv::Rect(cvRound(o.x) - r, cvRound(o.y) - r, 2 * r + 1, 2 * r + 1) & R;
+        cv::findNonZero(ends(win), pts);
+        double bl = DBL_MAX, br = DBL_MAX;
+        cv::Point2d pl, pr;
+        for (const auto &q : pts) {
+            const cv::Point2d v = cv::Point2d(q + win.tl()) - o;
+            const double d = cv::norm(v);
+            const double side = h.x * v.y - h.y * v.x; // 진행 방향 기준 한쪽(+) / 반대쪽(-)
+            if (side > 0 && d < bl) { bl = d; pl = o + v; }
+            if (side < 0 && d < br) { br = d; pr = o + v; }
+        }
+        if (bl == DBL_MAX || br == DBL_MAX) continue;
+        const double w = cv::norm(pl - pr);
+        if (w < min_gap_px || w > gap_px || seg_dist(o, pl, pr) > std::max(4.0, 0.3 * gap_px)) continue;
+        cv::connectedComponents(ends(win), lbl, 8, CV_32S);
+        const cv::Point ql = cv::Point(cvRound(pl.x), cvRound(pl.y)) - win.tl();
+        const cv::Point qr = cv::Point(cvRound(pr.x), cvRound(pr.y)) - win.tl();
+        if (lbl.at<int>(ql) != lbl.at<int>(qr))
+            return int(i);
+    }
+    return -1;
+}
+
 // 일정 간격으로 다시 찍기
 Pts resample(const Pts &in, double step)
 {
@@ -432,34 +482,71 @@ Output Tracker::update(const lane_skel::Result &sk, int K,
 
         const cv::Point start(sk.seed.x / K, sk.seed.y / K);
         const int look = std::max(3, int(p.lookahead_m / (g.my() * K)));
-        auto px = trace(sk.skel, start, look, sk.skel.rows * sk.skel.cols, choose, turn, far_look);
+        // 스켈레톤 하나로 실시간 경로 만들기 (분기 선택 → 되돌아가는 방향 막기 → 사각지대 자르기)
+        auto make_live = [&](const cv::Mat &skel) -> Pts {
+            turn_used = false; // 다시 따라갈 때도 첫 분기는 turn 명령
+            auto px = trace(skel, start, look, sk.skel.rows * sk.skel.cols, choose, turn, far_look);
 
-        // 시작점이 중심선 중간이면(로봇 바로 앞에서 ㄱ자로 꺾여 가로 부분이 정면에 더 가까울 때)
-        // 첫 방향이 로봇 쪽(되돌아가는 쪽)일 수 있음 → 그 방향을 막고 반대로도 따라가 봐서 로봇에서 먼 쪽을 씀
-        // (녹화 con_run4 1.92s: 갈고리 경로를 따라 벽돌 쪽으로 꺾음)
-        // 직진 명령일 때만 (좌/우 명령 중에는 갈림길 선택을 건드리지 않음, sim_fork)
-        if (turn == Turn::Straight && px.size() >= 3 && px.back().y > start.y + 2) { // 끝이 시작점보다 아래(로봇 쪽) = 되돌아감
-            cv::Mat s2 = sk.skel.clone();
-            for (size_t i = 1; i < std::min<size_t>(px.size(), 4); ++i) s2.at<uchar>(px[i]) = 0;
-            auto alt = trace(s2, start, look, sk.skel.rows * sk.skel.cols, choose, turn, far_look);
-            const cv::Point2d anchor(sk.skel.cols / 2.0, sk.skel.rows - 1.0);
-            if (alt.size() >= 3 &&
-                cv::norm(cv::Point2d(alt.back()) - anchor) > cv::norm(cv::Point2d(px.back()) - anchor) + 3.0)
-                px.swap(alt);
-        }
+            // 시작점이 중심선 중간이면(로봇 바로 앞에서 ㄱ자로 꺾여 가로 부분이 정면에 더 가까울 때)
+            // 첫 방향이 로봇 쪽(되돌아가는 쪽)일 수 있음 → 그 방향을 막고 반대로도 따라가 봐서 로봇에서 먼 쪽을 씀
+            // (녹화 con_run4 1.92s: 갈고리 경로를 따라 벽돌 쪽으로 꺾음)
+            // 직진 명령일 때만 (좌/우 명령 중에는 갈림길 선택을 건드리지 않음, sim_fork)
+            if (turn == Turn::Straight && px.size() >= 3 && px.back().y > start.y + 2) { // 끝이 시작점보다 아래(로봇 쪽) = 되돌아감
+                cv::Mat s2 = skel.clone();
+                for (size_t i = 1; i < std::min<size_t>(px.size(), 4); ++i) s2.at<uchar>(px[i]) = 0;
+                auto alt = trace(s2, start, look, sk.skel.rows * sk.skel.cols, choose, turn, far_look);
+                const cv::Point2d anchor(sk.skel.cols / 2.0, sk.skel.rows - 1.0);
+                if (alt.size() >= 3 &&
+                    cv::norm(cv::Point2d(alt.back()) - anchor) > cv::norm(cv::Point2d(px.back()) - anchor) + 3.0)
+                    px.swap(alt);
+            }
 
-        // 사각지대 안을 오래 지나는 경로는 거기서 자름.
-        // 사각지대에서는 차선이 안 보여서 영역이 벽 너머로 샐 수 있음 (막다른 길 끝 등).
-        // 짧게 지나는 것(회전 중 화면 아래 모서리)은 허용
-        const int blind_max = std::max(3, int(p.blind_max_m / (g.my() * K)));
-        int run = 0;
-        for (size_t i = 0; i < px.size(); ++i) {
-            const cv::Point b(std::min(px[i].x * K, valid.cols - 1), std::min(px[i].y * K, valid.rows - 1));
-            run = valid.at<uchar>(b) ? 0 : run + 1;
-            if (run > blind_max) { px.resize(i + 1 - run); break; }
+            // 사각지대 안을 오래 지나는 경로는 거기서 자름.
+            // 사각지대에서는 차선이 안 보여서 영역이 벽 너머로 샐 수 있음 (막다른 길 끝 등).
+            // 짧게 지나는 것(회전 중 화면 아래 모서리)은 허용
+            const int blind_max = std::max(3, int(p.blind_max_m / (g.my() * K)));
+            int run = 0;
+            for (size_t i = 0; i < px.size(); ++i) {
+                const cv::Point b(std::min(px[i].x * K, valid.cols - 1), std::min(px[i].y * K, valid.rows - 1));
+                run = valid.at<uchar>(b) ? 0 : run + 1;
+                if (run > blind_max) { px.resize(i + 1 - run); break; }
+            }
+            Pts pts;
+            for (const auto &q : px) pts.push_back(px_small_to_robot(q));
+            return resample(smooth(pts, 2), p.step_m);
+        };
+        live = make_live(sk.skel);
+
+        // 차선 넘기 방지 (c): 선 틈을 빠져나가는 곳이 있으면 그 가지를 막고 다시 따라가 봄
+        // (직진 명령 T자: 틈 대신 좌/우 가지로). 다시 따라간 경로가 자른 경로보다 짧으면 자른 경로를 씀
+        if (p.guard_gap) {
+            const cv::Mat lines = white | yellow;
+            cv::Mat s2;
+            for (int tries = 0; tries < 3; ++tries) {
+                const int k = gap_crossing(live, lines, valid, g, p.guard_gap_m);
+                if (k < 0) break;
+                out.gap_cut = true;
+                Pts cut(live.begin(), live.begin() + k);
+                if (s2.empty()) s2 = sk.skel.clone();
+                // 틈으로 가는 가지를 틈에서 마지막 분기점 앞까지 지움
+                // (틈 근처만 지우면 막다른 토막이 남아 직진 명령에서 그 토막을 또 고름)
+                auto to_small = [&](const cv::Point2d &q) {
+                    const cv::Point2d b = robot_to_bev(q, g);
+                    return cv::Point(cvRound(b.x / K), cvRound(b.y / K));
+                };
+                for (int j = k; j >= 1; --j) {
+                    const cv::Point a = to_small(live[j]), c = to_small(live[j - 1]);
+                    bool at_junction = false;
+                    for (const auto &jn : sk.junctions)
+                        if (cv::norm(cv::Point2d(jn) / K - cv::Point2d(c)) < 4.0) at_junction = true;
+                    if (at_junction) break;
+                    cv::line(s2, a, c, 0, 5);
+                }
+                Pts alt = make_live(s2);
+                if (tries == 2 || poly_len(alt) <= poly_len(cut)) { live = cut; break; }
+                live = alt; // 다음 바퀴에 alt도 틈을 지나는지 다시 봄
+            }
         }
-        for (const auto &q : px) live.push_back(px_small_to_robot(q));
-        live = resample(smooth(live, 2), p.step_m);
     }
     bool live_ok = live.size() >= 2 && poly_len(live) >= p.min_len_m;
 

@@ -57,12 +57,18 @@ struct TrackerParams {
     bool   yellow_left = false;
     double yellow_left_look_m = 0.20;
     double yellow_left_tol_m = 0.05;   // 노란선이 있어야 할 곳과 실제 노란선 평균 거리가 이 안이어야 맞는 가지
+    // 차선 넘기 방지 (c): 실시간 경로가 차선 틈(끊긴·흐린 선, 점선 사이)을 빠져나가면 그 앞에서 자름.
+    // 경로 점마다 진행 방향 왼쪽·오른쪽에서 가장 가까운 차선 픽셀이 guard_gap_m 이내로 붙어 있고 경로가 그 사이를 지나면 틈.
+    // 차선 안 정상 경로는 양쪽 선 사이가 차선 폭(약 26cm)이라 안 걸림. false면 예전 그대로
+    bool   guard_gap = false;
+    double guard_gap_m = 0.15;
 };
 
 struct Output {
     Source src = Source::Lost;
     std::vector<cv::Point2d> path;  // 로봇 좌표 (m), 가까운 점부터
     bool yellow_left_used = false;  // 이번 프레임에 노란선 왼쪽 유지로 가지를 골랐는지 (로그용)
+    bool gap_cut = false;           // 이번 프레임에 guard_gap으로 실시간 경로를 잘랐는지 (로그용)
 };
 
 class Tracker {

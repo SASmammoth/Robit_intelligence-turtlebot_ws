@@ -438,6 +438,22 @@ Result build(const cv::Mat &lane, const cv::Mat &valid, const Params &p, const c
         hint = &hint_small;
     }
     if (!find_seed(cand, img, hint, seed)) return r;
+    // 차선 넘기 방지 (a): 시드가 로봇에서 선 너머면 영역 전체가 선 너머 도로가 됨
+    // → 선을 안 넘고 닿는 후보 중 하단 중앙에 가장 가까운 점으로 (없으면 실패)
+    const cv::Point robot_pad(img.x + img.width / 2, img.y + (p.robot_y >= 0 ? p.robot_y / K : img.height - 1));
+    if (p.guard_start && crosses_lane(ln, robot_pad, seed)) {
+        std::vector<cv::Point> pts;
+        cv::findNonZero(cand(img), pts);
+        const cv::Point base(img.width / 2, img.height - 1);
+        std::sort(pts.begin(), pts.end(), [&](const cv::Point &a, const cv::Point &b) {
+            return cv::norm(a - base) < cv::norm(b - base);
+        });
+        bool found = false;
+        for (const auto &q : pts)
+            if (!crosses_lane(ln, robot_pad, q + img.tl())) { seed = q + img.tl(); found = true; break; }
+        if (!found) return r;
+        r.start_guarded = true;
+    }
     cv::floodFill(cand, seed, cv::Scalar(128), nullptr, cv::Scalar(0), cv::Scalar(0), 4);
     cv::Mat region = (cand == 128);
     fill_fake_holes(region, wall);
@@ -476,6 +492,29 @@ Result build(const cv::Mat &lane, const cv::Mat &valid, const Params &p, const c
                 out = alt;
                 nearest = n2;
             }
+        }
+    }
+
+    // 차선 넘기 방지 (a): 로봇과 시작점 사이에 선이 있으면, 선을 안 넘고 닿는 점 중 하단 중앙에 가장 가까운 것의 줄기
+    // (기억이 없어도 동작. 로봇 위치는 화면 밖이라 선은 화면 안에 보이는 부분만 봄)
+    if (p.guard_start) {
+        const cv::Mat lane_img = ln(img);
+        const cv::Point robot(out.cols / 2, p.robot_y >= 0 ? p.robot_y / K : out.rows - 1);
+        if (crosses_lane(lane_img, robot, nearest)) {
+            std::vector<cv::Point> pts;
+            cv::findNonZero(skel_all, pts);
+            cv::Point best(-1, -1);
+            double bd = DBL_MAX;
+            for (const auto &q : pts) {
+                const double d = cv::norm(q - anchor);
+                if (d < bd && !crosses_lane(lane_img, robot, q)) { bd = d; best = q; }
+            }
+            if (best.x < 0) return r;
+            cv::Mat lbl;
+            cv::connectedComponents(skel_all, lbl, 8, CV_32S);
+            out = (lbl == lbl.at<int>(best));
+            nearest = best;
+            r.start_guarded = true;
         }
     }
 

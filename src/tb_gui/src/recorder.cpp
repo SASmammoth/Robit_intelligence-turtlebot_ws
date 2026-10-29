@@ -5,10 +5,11 @@
 #include <QFontDatabase>
 #include <QTextStream>
 
-// 영상 배치: 위 화면 3개 (각 640x480) / 시간 줄 / 로그
+// 영상 배치: 위 화면 3개 (각 640x480) / 시간 줄 / 로그 (왼쪽) | 시간·수신 표 (오른쪽)
 static const int kPanelW = Recorder::kW / 3, kPanelH = 480;
 static const int kBarY = kPanelH, kBarH = 44;
 static const int kLogY = kBarY + kBarH;
+static const int kDebugX = Recorder::kW * 3 / 5; // 로그 칸 끝 = 표 칸 시작
 static const size_t kMaxLines = 60;
 static const qint64 kNoSignalMs = 1000;
 
@@ -52,6 +53,7 @@ bool Recorder::start(const QString &base_dir)
   usb_ = {};
   skel_ = {};
   lines_.clear();
+  debug_text_.clear();
   frames_ = dropped_ = 0;
   queue_.clear();
   q_stop_ = false;
@@ -197,17 +199,38 @@ QImage Recorder::compose()
   p.setPen(QColor(0xe0, 0xe0, 0xe0));
   p.drawText(bar, Qt::AlignRight | Qt::AlignVCenter, QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz"));
 
-  // ====== 아래: 최근 로그 (아래가 최신)
+  // ====== 아래 왼쪽: 최근 로그 (아래가 최신, 칸보다 긴 줄은 … 으로. 전체는 events.log)
   mono.setPixelSize(16);
   mono.setBold(false);
   p.setFont(mono);
-  const int lh = p.fontMetrics().height() + 2;
+  const QFontMetrics fm = p.fontMetrics();
+  const int lh = fm.height() + 2;
+  const int log_w = kDebugX - 24;
   int y = kH - 8;
   for (auto it = lines_.rbegin(); it != lines_.rend() && y - lh >= kLogY + 4; ++it)
   {
     p.setPen(it->color);
-    p.drawText(QRect(12, y - lh, kW - 24, lh), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, it->text);
+    p.drawText(QRect(12, y - lh, log_w, lh), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+               fm.elidedText(it->text, Qt::ElideRight, log_w));
     y -= lh;
+  }
+
+  // ====== 아래 오른쪽: 시간·수신 표 (GUI 주행 탭 "시간·수신 (디버그)"와 같은 글자)
+  p.fillRect(QRect(kDebugX, kLogY, kW - kDebugX, kH - kLogY), QColor(0x23, 0x23, 0x28));
+  p.setPen(QColor(0x44, 0x44, 0x4a));
+  p.drawLine(kDebugX, kLogY, kDebugX, kH);
+  p.setPen(QColor(0x9a, 0xaa, 0xbb));
+  p.drawText(QRect(kDebugX + 12, kLogY + 6, kW - kDebugX - 24, lh), Qt::AlignLeft | Qt::AlignVCenter, "시간·수신 (디버그)");
+  const int dbg_w = kW - kDebugX - 24;
+  y = kLogY + 6 + lh + 4;
+  for (const QString &line : debug_text_.split('\n'))
+  {
+    if (y + lh > kH - 4)
+      break;
+    p.setPen(line.contains("끊김") ? QColor(0xff, 0x6b, 0x6b) : QColor(0xe0, 0xe0, 0xe0));
+    p.drawText(QRect(kDebugX + 12, y, dbg_w, lh), Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+               fm.elidedText(line, Qt::ElideRight, dbg_w));
+    y += lh;
   }
   return frame;
 }

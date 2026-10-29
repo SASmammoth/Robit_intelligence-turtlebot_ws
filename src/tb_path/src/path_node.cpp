@@ -162,6 +162,12 @@ PathNode::PathNode() : Node("path_node")
     declare_int("path.con_yellow_left_brick_mm", 200, 3000); //   벽돌을 마지막으로 본 뒤 이만큼 가야 켬 (벽돌 사이에서는 안 씀)
     declare_int("path.con_yellow_left_tol_mm", 50, 200);   //   노란선이 있어야 할 곳과 평균 이 거리 안이면 맞는 가지
     declare_int("path.con_straight_by_lane", 1, 1);   // 공사 구간: 직진 갈림길에서 차선 방향 기준으로 가장 곧은 가지 (화면 밖 선에 붙은 벽돌 앞으로 새지 않게)
+    // 차선 넘기 방지 (각각 0 = 예전 그대로, 1 = 켬)
+    declare_int("path.guard_start", 0, 1);       // (a) 로봇과 경로 시작점(시드) 사이에 선이 있으면 선을 안 넘는 줄기로 (기억 없어도)
+    declare_int("path.guard_mem", 0, 1);         // (b) 일반 주행에서도 기억과 선 너머에 있는 새 경로는 guard_mem_frames만큼 보여야 믿음
+    declare_int("path.guard_mem_frames", 20, 100);
+    declare_int("path.guard_gap", 0, 1);         // (c) 경로가 선 틈(끊긴·흐린 선)을 빠져나가면 그 가지를 막고 다시 따라감 (T자 가로선 틈 등)
+    declare_int("path.guard_gap_mm", 150, 250);  //     양쪽 선 끝 사이가 이 이하면 틈 (차선 폭 260보다 작게)
     // 정지선 (/mission/stop_line true 동안만)
     declare_int("path.sl_margin_mm", 60, 500);  // 경로 끝 = 정지선 - 이만큼 (바퀴 축 기준. 로봇 앞 9cm + tb_drive stop_dist도 생각)
     declare_int("path.sl_min_w_px", 60, 320);
@@ -282,6 +288,11 @@ void PathNode::reload_params()
     con_override_frames_ = int(get_parameter("path.con_override_frames").as_int());
     con_cross_override_frames_ = int(get_parameter("path.con_cross_override_frames").as_int());
     con_straight_by_lane_ = get_parameter("path.con_straight_by_lane").as_int() != 0;
+    skel_p_.guard_start = get_parameter("path.guard_start").as_int() != 0;
+    guard_mem_ = get_parameter("path.guard_mem").as_int() != 0;
+    guard_mem_frames_ = int(get_parameter("path.guard_mem_frames").as_int());
+    guard_gap_ = get_parameter("path.guard_gap").as_int() != 0;
+    tracker_.p.guard_gap_m = get_parameter("path.guard_gap_mm").as_int() / 1000.0;
     con_yellow_left_ = get_parameter("path.con_yellow_left").as_int() != 0;
     tracker_.p.yellow_left_look_m = get_parameter("path.con_yellow_left_look_mm").as_int() / 1000.0;
     con_yellow_left_brick_mm_ = int(get_parameter("path.con_yellow_left_brick_mm").as_int());
@@ -739,6 +750,7 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     lane_skel::Params sp = skel_p_;
     if (con && con_dead_end_mm_ > 0) // 공사 구간: 벽돌과 선 사이 구석으로 뻗은 막다른 가지 삭제
         sp.dead_end_len = int(std::lround(con_dead_end_mm_ / 1000.0 / geo_.m_per_px_y));
+    sp.robot_y = int(std::lround(lane_path::robot_to_bev({0.0, 0.0}, geo_).y)); // guard_start: 로봇 바퀴 축 (화면 아래 밖)
     const lane_skel::Result skel = lane_skel::build(wall, valid, sp, &seed_hint,
                                                     has_pred ? &predicted : nullptr);
     last_seed_ = skel.ok ? skel.seed : cv::Point(-1, -1);
@@ -749,7 +761,8 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     tracker_.p.override_frames = con ? con_override_frames_
                                : (turn_ != 0 && turn_override_frames_ > 0) ? turn_override_frames_
                                                                           : override_frames_;
-    tracker_.p.cross_override_frames = con ? con_cross_override_frames_ : 0;
+    tracker_.p.cross_override_frames = con ? con_cross_override_frames_ : guard_mem_ ? guard_mem_frames_ : 0;
+    tracker_.p.guard_gap = guard_gap_ && !parking_; // 주차: 노란 점선을 넘어 칸으로 들어가야 함
     tracker_.p.straight_by_lane = con && con_straight_by_lane_;
     // 벽돌이 보이는 동안·직후에는 안 씀 (벽돌이 노란선에 붙으면 노란선을 따라가는 가지가 벽돌 앞 막다른 곳)
     //  → 진입 곡선(벽돌 보기 전)과 출구 곡선(마지막 벽돌 지난 뒤)에서만
@@ -759,6 +772,10 @@ void PathNode::mask_callback(const tb_interfaces::msg::LaneMask::ConstSharedPtr 
     lane_path::Output out = tracker_.update(skel, skel_p_.scale, white, yellow, valid, geo_, turn, pose_);
     if (out.yellow_left_used)
         RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "construction: 노란선 왼쪽 유지 켬 (그 가지로)");
+    if (skel.start_guarded)
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "차선 넘기 방지(a): 로봇에서 선 너머 시작점 버림");
+    if (out.gap_cut)
+        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "차선 넘기 방지(c): 선 틈으로 가는 가지 막음");
 
     // 공사 구간: 스켈레톤 경로는 벽돌 앞에서 ㄱ자로 꺾이므로 모서리를 둥글게 (기억에는 원래 경로가 남음)
     if (con && con_smooth_mm_ > 0)

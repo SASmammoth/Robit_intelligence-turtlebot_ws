@@ -29,6 +29,13 @@ path_node:
       turn_radius_mm: 150   # 교차로 ㄱ자 같은 급한 모서리를 이 반지름 원호로 (0=끔). 실측한 교차로 회전 반지름. 쓰면 drive.pivot_enter_deg 180 권장
       turn_min_deg: 45      # 앞뒤 6cm 사이에서 이보다 크게 꺾이는 곳만 (완만한 곡선은 그대로)
 
+      # ── 차선 넘기 방지 (각각 0 = 예전 그대로, 1 = 켬. 따로 켜고 끌 수 있음)
+      guard_start: 0        # (a) 로봇과 경로 시작점 사이에 선이 있으면 선을 안 넘는 줄기로 (기억이 없어도)
+      guard_mem: 0          # (b) 일반 주행에서도 기억과 선 너머에 있는 새 경로는 guard_mem_frames만큼 보여야 믿음 (공사 구간은 con_cross_override_frames)
+      guard_mem_frames: 20
+      guard_gap: 0          # (c) 경로가 선 틈(끊긴·흐린 선)을 빠져나가면 그 가지를 막고 다시 따라감. T자 가로선 틈으로 직진하는 것 방지 (주차 모드에서는 꺼짐)
+      guard_gap_mm: 150     #     양쪽 선 끝 사이가 이 이하면 틈 (차선 폭 260보다 작게)
+
       # ── 공사 구간 (/mission/construction true로 진입: tb_brain이 표지판을 보고, 또는 GUI C키). 실측: 차폭 56cm, 벽돌 20x8cm 선에 붙어 좌우 번갈아, 빈 공간 40cm
       con_brick_depth_mm: 200  # 공사 구간 벽돌 벽 앞뒤 길이 (벽돌 8cm + 로봇 뒤가 벽돌 옆을 지날 여유)
       con_brick_margin_mm: 90  # 공사 구간 벽돌 벽 좌우 여유 (60은 벽돌 옆에 닿음)

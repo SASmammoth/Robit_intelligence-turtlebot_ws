@@ -13,6 +13,12 @@ struct Params {
     int max_lane_thick = 20;   // 이보다 두꺼운 덩어리의 끝은 연장하지 않음 (BEV px)
     int scale          = 2;    // 내부 처리 축소 배율 (2 → 320x320을 160x160에서 처리)
     int dead_end_len   = 0;    // 끝이 벽에 막힌(화면 끝·사각지대로 안 열린) 가지가 이보다 짧으면 삭제 (BEV px, 0이면 끔)
+    // 차선 넘기 방지 (a): 로봇(바퀴 축)과 경로 시작점 사이에 차선이 있으면 = 선 너머 중심선에서 시작한 것.
+    // 그때는 로봇에서 선을 안 넘고 닿는 줄기 중 가장 가까운 것을 고름 (없으면 실패 → 기억·색 규칙).
+    // T자에 수직으로 다가가 가로선이 BEV 아래쪽에 오면, 하단 중앙이 가로선 너머가 되어 그쪽 중심선이 가장 가까워짐.
+    // false면 예전 그대로 (anchor_hint가 있을 때만 확인)
+    bool guard_start   = false;
+    int  robot_y       = -1;   // 로봇 바퀴 축의 BEV y (px, 화면 아래 밖). <0이면 화면 맨 아랫줄
 };
 
 struct Result {
@@ -22,6 +28,7 @@ struct Result {
     std::vector<cv::Point> ends;       // 스켈레톤 끝점 (BEV 좌표)
     std::vector<cv::Point> junctions;  // 스켈레톤 분기점 (BEV 좌표)
     cv::Point seed{-1, -1};            // 로봇에 가장 가까운 중심선 점 (BEV 좌표), 다음 프레임 시드용
+    bool start_guarded = false;        // guard_start로 시작 줄기를 바꿨는지 (로그용)
 };
 
 // BEV에서 실제로 보이는 영역(255)과 사각지대(0)
