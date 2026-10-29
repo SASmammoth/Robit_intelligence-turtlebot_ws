@@ -74,6 +74,7 @@ private:
     std::string last_state_;
 
     bool paused_ = false; // /mission/pause 수신값 (true면 정지)
+    bool pause_hard_ = false; // drive.pause_hard_stop: pause면 감속 없이 바로 0 (급정거)
 
     // ====== 파라미터
     bool enable_ = false;

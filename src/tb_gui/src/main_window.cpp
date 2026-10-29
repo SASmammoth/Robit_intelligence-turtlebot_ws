@@ -1314,6 +1314,16 @@ void MainWindow::setupParamTab()
                  {"mission.barrier_release_ms", "차단바 안 보이면 정지 풀기 (0=끔)", " ms", 0, 30000, 250},
                  {"mission.stop_line", "차단바 끝나면 정지선 앞 정지 (1=켬)", "", 0, 1, 1},
              }}),
+      group({"차단바 거리 정지 — 정지 거리 0이면 끔 (보이면 바로 정지)",
+             {
+                 {"mission.barrier.stop_mm", "차단바 앞 이 거리에서 멈춤 (0=끔)", " mm", 0, 2000, 10},
+                 {"mission.barrier.ref_w_px", "기준: 이 거리에서 본 박스 너비", " px", 1, 640, 1},
+                 {"mission.barrier.ref_dist_mm", "기준: 그때 차단바까지 거리", " mm", 1, 5000, 10},
+                 {"mission.barrier.decel_mm_s2", "접근 감속", " mm/s²", 50, 3000, 50},
+             },
+             1, "자로 잰 거리에 로봇을 두고 '탐지' 목록에서 닫힌 차단바 박스 너비를 읽어 기준 두 칸에 넣으세요. "
+                "멀리서부터 재야 하므로 표지판·YOLO 탭의 barrier_closed 최소 너비를 낮추세요. "
+                "급정거는 주행 탭 '경로 끊김·안전'의 pause 급정거."}),
       group({"좌/우 표지판",
              {
                  {"mission.turn_ms", "turn 유지 시간 (최대)", " ms", 0, 30000, 500},
@@ -1322,7 +1332,10 @@ void MainWindow::setupParamTab()
              }}),
       group({"주차 — 진행 순서대로",
              {
-                 {"mission.parking.time_enter", "① 표지판 → 좌회전 유지", " s", 0, 60, 1},
+                 {"mission.parking.time_enter", "① 표지판 → 좌회전 유지 (벽돌 보이면 바로 ②)", " s", 0, 60, 1},
+                 {"mission.parking.brick_min_h_px", "① 이보다 작은 벽돌 박스는 무시", " px", 0, 480, 5},
+                 {"mission.parking.brick_after_ms", "① 표지판 뒤 이만큼은 벽돌 무시", " ms", 0, 30000, 100},
+                 {"mission.parking.psd_any", "② 박스 없어도 PSD로 정지 (1=켬)", "", 0, 1, 1},
                  {"mission.parking.psd_L", "② PSD 왼쪽 기준 (벽돌 왼쪽)", "", 0, 65535, 50},
                  {"mission.parking.psd_R", "② PSD 오른쪽 기준 (벽돌 오른쪽)", "", 0, 65535, 50},
                  {"mission.parking.time_break_ms", "③ 기준 넘은 뒤 더 가고 정지", " ms", 0, 10000, 50},
@@ -1454,6 +1467,7 @@ void MainWindow::setupDriveTab()
            {"drive.stop_dist_mm", "경로 끝 정지", " mm", 0, 300, 5},
            {"drive.cmd_timeout_ms", "brain 명령 유효", " ms", 50, 3000, 50},
            {"drive.psd.stop_mm", "PSD 정지 거리", " mm", 0, 1000, 10},
+           {"drive.pause_hard_stop", "pause 급정거 (0=감속, 1=즉시 0)", "", 0, 1, 1},
            {"drive.control_hz", "제어 주기", " Hz", 5, 100, 5},
        },
        1},

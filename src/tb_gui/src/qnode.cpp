@@ -385,7 +385,8 @@ std::vector<std::string> QNode::brainParamNames()
   std::vector<std::string> names = {"mission.turn_ms", "mission.turn_end_deg", "mission.turn_end_mm", "mission.rearm_ms", "mission.parking_pause",
                                     "mission.barrier_release_ms", "mission.con_end_mode", "mission.con_hold_ms",
                                     "mission.con_once", "mission.start_follow", "mission.stop_line",
-                                    "mission.parking.time_enter", "mission.parking.time_break_ms", "mission.parking.time_exit", "mission.parking.turn_deg", "mission.parking.psd_L",
+                                    "mission.barrier.stop_mm", "mission.barrier.ref_w_px", "mission.barrier.ref_dist_mm", "mission.barrier.decel_mm_s2",
+                                    "mission.parking.time_enter", "mission.parking.brick_min_h_px", "mission.parking.brick_after_ms", "mission.parking.psd_any", "mission.parking.time_break_ms", "mission.parking.time_exit", "mission.parking.turn_deg", "mission.parking.psd_L",
                                     "mission.parking.psd_R", "mission.parking.psd_F", "mission.parking.turn_vel",
                                     "mission.parking.move_vel", "mission.parking.dist_mm",
                                     "sign.confirm_frames", "sign.min_score_pct"};
@@ -429,7 +430,7 @@ std::vector<std::string> QNode::driveParamNames(bool with_enable)
 {
   std::vector<std::string> names = {
       "drive.require_cmd", "drive.latency_comp", "drive.psd.enable", // bool
-      "drive.control_hz",
+      "drive.control_hz", "drive.pause_hard_stop",
       "drive.v_max_mm_s", "drive.v_curve_mm_s", "drive.curve_start_deg", "drive.curve_full_deg",
       "drive.v_min_mm_s", "drive.w_max_deg_s",
       "drive.accel_mm_s2", "drive.decel_mm_s2", "drive.w_accel_deg_s2",

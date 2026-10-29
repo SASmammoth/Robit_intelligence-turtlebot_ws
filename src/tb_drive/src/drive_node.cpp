@@ -81,6 +81,8 @@ DriveNode::DriveNode() : Node("drive_node")
 
     declare_bool("drive.psd.enable", false);
     declare_int("drive.psd.stop_mm", 150, 0, 1000);
+    // /mission/pause (차단바·주차) 정지 방식: 0 감속 제한으로 부드럽게 (예전), 1 급정거 (받는 즉시 모터 0)
+    declare_int("drive.pause_hard_stop", 0, 0, 1);
     declare_parameter("drive.psd.topics", std::vector<std::string>{"/psd/front"}); // 시작할 때만 읽음
 
     // ====== 모터 출력 (tb_uart_node: TB_Uart_RX "velocity L R", 다이나믹셀 원시값)
@@ -147,7 +149,15 @@ DriveNode::DriveNode() : Node("drive_node")
             if (m->data == paused_)
                 return;
             paused_ = m->data;
-            RCLCPP_INFO(get_logger(), "mission pause: %s", paused_ ? "ON" : "off"); });
+            RCLCPP_INFO(get_logger(), "mission pause: %s%s", paused_ ? "ON" : "off",
+                        paused_ && pause_hard_ ? " (급정거)" : "");
+            if (paused_ && pause_hard_ && enable_)
+            {
+                // 다음 제어 주기(최대 33ms)를 안 기다리고 바로 0
+                lim_.reset();
+                pivot_.reset();
+                publish_uart(0.0, 0.0, now().seconds(), true);
+            } });
 
     cmd_sub_ = create_subscription<DriveCmd>(
         "/drive/cmd", 10, [this](const DriveCmd::ConstSharedPtr m)
@@ -307,6 +317,7 @@ void DriveNode::reload_params()
 
     psd_enable_ = get_parameter("drive.psd.enable").as_bool();
     psd_stop_ = mm("drive.psd.stop_mm");
+    pause_hard_ = get_parameter("drive.pause_hard_stop").as_int() != 0;
 
     uart_enable_ = get_parameter("drive.uart.enable").as_bool();
     wheel_r_ = std::max(1e-3, get_parameter("drive.uart.wheel_radius_m").as_double());
@@ -430,6 +441,10 @@ void DriveNode::on_timer()
             }
             lim_.w = w;
         }
+
+        // 급정거: pause 동안은 감속 제한 없이 0
+        if (paused_ && pause_hard_)
+            lim_.reset();
 
         if (lim_.v > 0.0 && psd_blocked(now_t))
         {

@@ -15,6 +15,14 @@
 //   9 tl_red
 //   10 tl_yellow
 //
+// 차단바 거리 정지 (mission.barrier.stop_mm > 0):
+//   닫힌 차단바를 보면 바로 pause하지 않고, 박스 너비로 거리를 잼
+//     거리 = ref_dist_mm × ref_w_px / 박스 너비  (ref_*: 자로 잰 거리에서 GUI '탐지'로 본 박스 너비)
+//   그 거리 - stop_mm 지점에 맞춰 /drive/cmd speed_limit을 sqrt(2·decel·남은 거리)로 줄여 가다가
+//   남은 거리 0이면 pause 1. 박스가 화면 끝에 닿으면(가까워서 잘림) 거리는 안 믿고 odom으로만 감
+//   거리를 한 번도 못 쟀으면 예전처럼 바로 pause. 열림이 보이면 접근 취소
+//   급정거는 drive.pause_hard_stop (pause가 감속 없이 바로 0)
+//
 // 정지선 (/mission/stop_line): 차단바 다음 단계. 차단바가 끝나면(열림 검출 또는 닫힘이
 //   barrier_release_ms 동안 안 보임) 켜고, 켜져 있는 동안 path_node가 빨간 가로선 앞에서
 //   경로를 잘라 tb_drive가 선 앞에서 멈춤. 한 번 켜면 /brain/run stop 또는 /mission/reset까지 유지.
@@ -53,10 +61,14 @@
 //
 // 주차 (parking 표지판, mission.parking.*):
 //   1. /mission/turn = 1(left)을 time_enter초 동안 (차선 따라 계속 주행)
-//   2. TB_Uart_RX "psd period 100", "velocity period 33"
-//      다음에 받은 brick 박스 중심이 x 320보다 왼쪽이면 brick_pos left(crit psd_L), 아니면 right(crit psd_R)
+//      표지판을 본 순간 TB_Uart_RX "psd period 100", "velocity period 33" (좌회전 중에도 PSD를 봄)
+//   2. brick 박스(brick_min_h_px 이상)가 보이면 time_enter를 안 기다리고 바로 접근 단계
+//      박스 중심이 x 320보다 왼쪽이면 brick_pos left(crit psd_L), 아니면 right(crit psd_R)
+//      접근 중에도 벽돌이 보일 때마다 좌/우를 다시 정함 (멀리서 본 첫 박스로 굳히지 않게)
+//      time_enter가 지나도 벽돌을 못 봤으면 계속 기다림 (예전과 같음)
 //   3. brick_pos 쪽 PSD(left: psd1, right: psd2)가 crit 초과 → time_break_ms 뒤 pause 1
-//   4. tb_drive가 멈출 때까지(PARK_SETTLE_S) 기다린 뒤 제자리 회전
+//   4. tb_drive가 멈출 때까지 기다린 뒤 제자리 회전
+//      (velocity 피드백이 2번 연속 거의 0이면 바로, 피드백이 없으면 최대 PARK_SETTLE_S)
 //      (left: -turn_vel turn_vel, right: turn_vel -turn_vel), turn_deg만큼 도는 시간 뒤 → 0 0
 //      회전 시간 = turn_deg / (2v / PIVOT_SEP_M), v = turn_vel 원시값 → m/s (psd_F는 안 씀, GUI용으로 선언만 유지)
 //   5. dist_mm 후진 → 0 0 → parking_pause초 대기 → dist_mm 직진 → 0 0
@@ -135,7 +147,12 @@ static constexpr int IMG_CX = 320;                // 화면 가운데 x (640x480
 static constexpr double WHEEL_RADIUS_M = 0.0475;  // tb_drive drive.uart.wheel_radius_m
 static constexpr double RPM_PER_UNIT = 0.43;      // tb_drive drive.uart.rpm_per_unit (실측 보정값. 0.229면 거리를 약 1.9배 짧게 잼)
 static constexpr double PIVOT_SEP_M = 0.165;      // tb_drive drive.uart.pivot_sep_m (제자리 회전 실측 간격, 바퀴 사이 실제 193.4mm)
-static constexpr double PARK_SETTLE_S = 1.0;      // pause 뒤 tb_drive가 감속을 끝내고 UART를 놓을 때까지 기다림
+static constexpr double PARK_SETTLE_S = 1.0;      // pause 뒤 tb_drive가 감속을 끝내고 UART를 놓을 때까지 기다림 (최대)
+static constexpr double PARK_SETTLE_MIN_S = 0.1;  // 최소 (drive가 마지막 0을 보낼 시간)
+static constexpr int PARK_STILL_RAW = 3;          // velocity 피드백이 이 원시값 이하면 멈춘 것
+static constexpr int IMG_W = 640;                 // 카메라 영상 너비 (박스가 화면 끝에 닿았는지)
+static constexpr double BAR_EST_MAX_AGE_S = 0.5;  // 차단바 거리 추정이 이보다 오래되면 접근 시작에 안 씀
+static constexpr double BAR_MIN_LIMIT = 0.02;     // [m/s] 접근 속도 상한의 바닥 (0은 "제한 없음"이라 못 씀)
 static constexpr double VEL_FB_TIMEOUT_S = 0.3;   // velocity 피드백이 이만큼 없으면 보낸 명령 × 시간으로 거리 계산
 
 class BrainNode : public rclcpp::Node
@@ -156,9 +173,17 @@ public:
         declare_int("mission.con_once", 1, 0, 1);               // 1: 진입 후 주차 표지판 전까지 공사 표지판 무시
         declare_int("mission.start_follow", 0, 0, 1);           // 1: start 받자마자 FOLLOW (초록불 안 기다림)
         declare_int("mission.stop_line", 1, 0, 1);              // 1: 차단바가 끝나면 정지선 켬 (빨간 가로선 앞에서 멈춤)
+        // 차단바 거리 정지 (0 = 끔: 보이면 바로 pause, 예전과 같음)
+        declare_int("mission.barrier.stop_mm", 0, 0, 2000);       // 차단바 앞 이 거리에서 멈춤 (ref_dist_mm와 같은 기준으로 잰 거리)
+        declare_int("mission.barrier.ref_w_px", 200, 1, 640);     // 기준 거리에서 본 닫힌 차단바 박스 너비
+        declare_int("mission.barrier.ref_dist_mm", 400, 1, 5000); // 그때 거리
+        declare_int("mission.barrier.decel_mm_s2", 400, 50, 3000); // 접근 감속 (drive.decel_mm_s2보다 작게)
 
         // 주차
-        declare_int("mission.parking.time_enter", 4, 0, 60);     // [s] 주차 표지판 → left 유지 후 PSD 켬
+        declare_int("mission.parking.time_enter", 4, 0, 60);     // [s] 주차 표지판 → left 유지 (벽돌이 먼저 보이면 그때 접근 시작)
+        declare_int("mission.parking.brick_min_h_px", 0, 0, 480); // 이보다 작은(먼) 벽돌 박스는 주차 판단에 안 씀
+        declare_int("mission.parking.brick_after_ms", 1000, 0, 30000); // 표지판 뒤 이만큼은 벽돌·PSD 무시 (공사 구간 벽돌 거르기)
+        declare_int("mission.parking.psd_any", 0, 0, 1);          // 1: 벽돌 박스를 못 봤어도 좌/우 PSD가 기준을 넘으면 그쪽에서 멈춤
         declare_int("mission.parking.time_break_ms", 500, 0, 10000); // PSD 기준 넘은 뒤 이만큼 더 가고 pause
         declare_int("mission.parking.time_exit", 8, 0, 60);      // [s] 주차 끝 → left 유지
         declare_int("mission.parking.psd_L", 2000, 0, 65535);    // brick left: 접근 정지 기준 / right: 나올 때 회전 정지 기준
@@ -283,6 +308,9 @@ private:
         con_on_ = false;
         con_latched_ = false;
         barrier_pause_ = false;
+        bar_approach_ = false;
+        bar_est_ok_ = false;
+        follow_limit_ = 0.0;
         stop_line_on_ = false;
         white_dash_on_ = false;
     }
@@ -418,6 +446,13 @@ private:
         con_once_ = ms("mission.con_once") != 0;
         start_follow_ = ms("mission.start_follow") != 0;
         stop_line_mode_ = ms("mission.stop_line") != 0;
+        bar_stop_mm_ = ms("mission.barrier.stop_mm");
+        bar_ref_w_ = ms("mission.barrier.ref_w_px");
+        bar_ref_dist_mm_ = ms("mission.barrier.ref_dist_mm");
+        bar_decel_ = ms("mission.barrier.decel_mm_s2") / 1000.0;
+        park_brick_min_h_ = ms("mission.parking.brick_min_h_px");
+        park_brick_after_ms_ = ms("mission.parking.brick_after_ms");
+        park_psd_any_ = ms("mission.parking.psd_any") != 0;
         park_time_enter_ = ms("mission.parking.time_enter");
         park_time_exit_ = ms("mission.parking.time_exit");
         park_time_break_ms_ = ms("mission.parking.time_break_ms");
@@ -457,8 +492,10 @@ private:
         if (run_state_ != 1)
             return;
         const rclcpp::Time now = this->now();
-        if (park_ == Park::WaitBrick)
+        // 주차: 좌회전(Enter) 중에도 벽돌을 봄. 접근(Approach) 중에는 좌/우만 다시 정함
+        if (park_ == Park::Enter || park_ == Park::WaitBrick || park_ == Park::Approach)
             parking_brick(msg, now);
+        barrier_measure(msg, now); // 차단바 거리 (필터와 상관없이 매 프레임)
 
         // 이번 프레임에 필터를 통과한 class_id → 연속 프레임 수 갱신 (안 보이면 0부터 다시)
         std::set<int> passed;
@@ -495,12 +532,27 @@ private:
         switch (id)
         {
         case ID_BARRIER_CLOSED:
-            RCLCPP_INFO(get_logger(), "barrier_closed → pause 1");
+            if (bar_approach_)
+                break; // 이미 거리 맞춰 접근 중 (끝은 barrier_approach_step)
+            // odom이 없으면 남은 거리를 못 줄여서 기어가기만 함 → 예전처럼 바로 정지
+            if (bar_stop_mm_ > 0 && odom_have_ && bar_est_ok_ && (now - bar_est_t_).seconds() < BAR_EST_MAX_AGE_S)
+            {
+                bar_approach_ = true;
+                RCLCPP_INFO(get_logger(), "barrier_closed → %.0fmm 앞까지 접근 (차단바 %.0fmm, 정지 %dmm)",
+                            (bar_target_acc_ - dist_acc_) * 1000.0, bar_est_mm_, bar_stop_mm_);
+                barrier_approach_step(now);
+                break;
+            }
+            RCLCPP_INFO(get_logger(), "barrier_closed → pause 1%s", bar_stop_mm_ > 0 ? " (거리 못 잼: 바로 정지)" : "");
             barrier_pause_ = true;
             publish_bool(pause_pub_, true);
             break;
         case ID_BARRIER_OPEN:
             RCLCPP_INFO(get_logger(), "barrier_open → pause 0");
+            if (bar_approach_)
+                RCLCPP_INFO(get_logger(), "barrier: 열림 → 접근 취소");
+            bar_approach_ = false;
+            follow_limit_ = 0.0;
             barrier_pause_ = false;
             publish_bool(pause_pub_, false);
             barrier_done("열림");
@@ -530,6 +582,9 @@ private:
             park_t_ = now;
             set_turn(TURN_LEFT, now, park_time_enter_ * 1000);
             set_white_dash(true); // 주차 칸으로 가는 동안 흰 점선을 실선으로
+            // 좌회전 중에도 벽돌 옆에 오면 멈출 수 있게 PSD·속도 피드백을 바로 켬
+            send_uart("psd period 100");
+            send_uart("velocity period 33");
             break;
         case ID_LEFT:
             start_turn(TURN_LEFT, now, "left");
@@ -588,6 +643,10 @@ private:
         }
         else if (head == "velocity" && (iss >> p[0] >> p[1]))
         {
+            // 멈췄는지 (Settle): 2번 연속 거의 0
+            const bool still = std::max(std::abs(p[0]), std::abs(p[1])) <= PARK_STILL_RAW;
+            still_count_ = still ? still_count_ + 1 : 0;
+            still_t_ = t;
             // 직진·후진 중 이동 거리 적분 (단계 시작 또는 지난 피드백부터)
             if (park_ == Park::Back || park_ == Park::Forward)
             {
@@ -604,22 +663,78 @@ private:
             parking_step(t);
     }
 
-    // 다음에 받은 brick 박스(여러 개면 가장 큰 것)의 중심으로 좌/우 결정
+    // brick 박스(여러 개면 가장 큰 것)의 중심으로 좌/우 결정
+    //   Enter·WaitBrick: 처음 보이면 바로 접근(Approach) 단계로 (좌회전 중이어도)
+    //   Approach: 좌/우만 다시 정함 (PSD 기준 넘으면 Break로 넘어가서 더는 안 바뀜)
     void parking_brick(const DetectionArray &msg, const rclcpp::Time &now)
     {
         const tb_interfaces::msg::Detection *best = nullptr;
         for (const auto &d : msg.detections)
-            if (d.class_id == ID_BRICK && d.score >= min_score_ &&
+            if (d.class_id == ID_BRICK && d.score >= min_score_ && d.h >= park_brick_min_h_ &&
                 (!best || int64_t(d.w) * d.h > int64_t(best->w) * best->h))
                 best = &d;
         if (!best)
             return;
+        // 표지판 직후에는 공사 구간 벽돌이 아직 보일 수 있어서 무시
+        if (park_ == Park::Enter && (now - park_t_).seconds() * 1000.0 < park_brick_after_ms_)
+            return;
         const double cx = best->x + best->w / 2.0;
-        brick_left_ = cx < IMG_CX;
+        const bool left = cx < IMG_CX;
+        const bool first = park_ != Park::Approach;
+        if (!first && left == brick_left_)
+            return;
+        brick_left_ = left;
         park_crit_ = brick_left_ ? park_psd_l_ : park_psd_r_;
-        RCLCPP_INFO(get_logger(), "parking: brick x %.0f → brick_pos %s (crit %d)", cx,
-                    brick_left_ ? "left" : "right", park_crit_);
-        park_next(Park::Approach, now);
+        RCLCPP_INFO(get_logger(), "parking: brick x %.0f → brick_pos %s (crit %d)%s", cx,
+                    brick_left_ ? "left" : "right", park_crit_,
+                    first ? (park_ == Park::Enter ? " — 좌회전 중 발견" : "") : " — 좌/우 바뀜");
+        if (first)
+            park_next(Park::Approach, now);
+    }
+
+    // ====== 차단바 거리
+    // 닫힌 차단바 박스(가장 넓은 것) 너비 → 거리. 화면 끝에 닿은 박스는 잘려서 안 씀
+    void barrier_measure(const DetectionArray &msg, const rclcpp::Time &now)
+    {
+        if (bar_stop_mm_ <= 0)
+            return;
+        const tb_interfaces::msg::Detection *best = nullptr;
+        for (const auto &d : msg.detections)
+            if (d.class_id == ID_BARRIER_CLOSED && d.score >= min_score_ && d.w > 0 &&
+                (!best || d.w > best->w))
+                best = &d;
+        if (!best || best->x <= 1 || best->x + best->w >= IMG_W - 1)
+            return;
+        const double est_mm = double(bar_ref_dist_mm_) * bar_ref_w_ / best->w;
+        const double target = dist_acc_ + (est_mm - bar_stop_mm_) / 1000.0; // 누적 이동 거리 기준 정지 지점
+        // 접근 중에는 새 값과 반씩 섞음 (박스 너비 흔들림), 처음이면 그대로
+        bar_target_acc_ = (bar_approach_ && bar_est_ok_) ? 0.5 * bar_target_acc_ + 0.5 * target : target;
+        bar_est_mm_ = est_mm;
+        bar_est_t_ = now;
+        bar_est_ok_ = true;
+        if (bar_approach_)
+            barrier_approach_step(now);
+    }
+
+    // 남은 거리로 속도 상한, 0이면 pause
+    void barrier_approach_step(const rclcpp::Time &)
+    {
+        if (!bar_approach_)
+            return;
+        const double rem = bar_target_acc_ - dist_acc_;
+        if (rem <= 0.0)
+        {
+            RCLCPP_INFO(get_logger(), "barrier: 정지 지점 도착 → pause 1 (마지막으로 잰 거리 %.0fmm, %.1fs 전)",
+                        bar_est_mm_, (now() - bar_est_t_).seconds());
+            bar_approach_ = false;
+            follow_limit_ = 0.0;
+            barrier_pause_ = true;
+            publish_bool(pause_pub_, true);
+            return;
+        }
+        follow_limit_ = std::max(BAR_MIN_LIMIT, std::sqrt(2.0 * bar_decel_ * rem));
+        if (follow_)
+            publish_follow(); // 프레임마다 바로 반영 (10Hz 타이머만 기다리지 않게)
     }
 
     void parking_step(const rclcpp::Time &t)
@@ -646,15 +761,24 @@ private:
         switch (park_)
         {
         case Park::Enter:
-            if (el < park_time_enter_)
+        case Park::WaitBrick:
+            // PSD·velocity 피드백은 표지판을 본 순간 켬. 벽돌이 먼저 보이면 parking_brick이 바로 Approach로
+            // psd_any: 박스를 못 봤어도 좌/우 PSD가 기준을 넘으면 그쪽 벽돌로 보고 바로 Break
+            if (park_psd_any_ && psd_new && (park_ == Park::WaitBrick || el * 1000.0 >= park_brick_after_ms_) &&
+                (psd_[1] > park_psd_l_ || psd_[2] > park_psd_r_))
+            {
+                brick_left_ = psd_[1] > park_psd_l_;
+                park_crit_ = brick_left_ ? park_psd_l_ : park_psd_r_;
+                RCLCPP_INFO(get_logger(), "parking: 박스 없이 PSD %s %d > %d → 그쪽에서 정지", brick_left_ ? "L" : "R",
+                            psd_[brick_left_ ? 1 : 2], park_crit_);
+                park_next(Park::Break, t);
+                break;
+            }
+            if (park_ == Park::WaitBrick || el < park_time_enter_)
                 return;
-            RCLCPP_INFO(get_logger(), "parking: PSD 켬, brick 기다림");
-            send_uart("psd period 100");
-            send_uart("velocity period 33"); // 직진·후진 거리용 피드백 (안 오면 시간으로 계산)
+            RCLCPP_INFO(get_logger(), "parking: 좌회전 시간 끝, brick 기다림");
             park_next(Park::WaitBrick, t);
             break;
-        case Park::WaitBrick:
-            break; // parking_brick
         case Park::Approach:
             if (!psd_new || psd_[brick_left_ ? 1 : 2] <= park_crit_)
                 return;
@@ -668,12 +792,17 @@ private:
             park_next(Park::Settle, t);
             break;
         case Park::Settle:
+        {
             // pause 직후에는 tb_drive가 아직 감속 중이라 brain 명령을 덮어씀 → 멈춘 뒤에 시작
-            if (el < PARK_SETTLE_S)
+            // 바퀴 피드백이 이 단계에 들어온 뒤 2번 연속 거의 0이면 바로 (drive.pause_hard_stop이면 거의 즉시)
+            const bool still = still_count_ >= 2 && still_t_ > park_t_;
+            if (el < PARK_SETTLE_MIN_S || (!still && el < PARK_SETTLE_S))
                 return;
+            RCLCPP_INFO(get_logger(), "parking: 정지 확인 %.2fs (%s)", el, still ? "피드백" : "시간");
             send_velocity(tv, -tv);
             park_next(Park::TurnIn, t);
             break;
+        }
         case Park::TurnIn:
             if (el < pivot_time_s())
                 return;
@@ -767,6 +896,8 @@ private:
             publish_bool(white_dash_pub_, true);
 
         const rclcpp::Time t = now();
+        // 차단바 접근: 프레임이 안 와도(박스가 잘려 안 쓰는 동안 등) odom으로 남은 거리 갱신
+        barrier_approach_step(t);
         // 공사 구간: 시간으로 끝내기 (con_end_mode 1)
         if (con_on_ && con_end_mode_ == 1 && t >= con_end_)
         {
@@ -827,7 +958,7 @@ private:
         DriveCmd m;
         m.header.stamp = now();
         m.mode = DriveCmd::FOLLOW;
-        m.speed_limit = 0.0f; // drive.v_max 사용
+        m.speed_limit = float(follow_limit_); // 0이면 drive.v_max 사용 (차단바 접근 중에만 줄임)
         drive_cmd_pub_->publish(m);
     }
 
@@ -857,6 +988,15 @@ private:
     rclcpp::Time con_end_{0, 0, RCL_ROS_TIME};
     bool barrier_pause_ = false; // 차단바 때문에 pause 중
     rclcpp::Time barrier_last_{0, 0, RCL_ROS_TIME};
+    // 차단바 거리 정지 (mission.barrier.*)
+    int bar_stop_mm_ = 0, bar_ref_w_ = 200, bar_ref_dist_mm_ = 400;
+    double bar_decel_ = 0.4;          // [m/s²]
+    bool bar_approach_ = false;       // 거리 맞춰 접근 중 (아직 pause 전)
+    bool bar_est_ok_ = false;         // 거리를 한 번이라도 잼
+    double bar_est_mm_ = 0.0;         // 마지막으로 잰 차단바 거리
+    double bar_target_acc_ = 0.0;     // [m] 멈출 지점 (dist_acc_ 기준)
+    rclcpp::Time bar_est_t_{0, 0, RCL_ROS_TIME};
+    double follow_limit_ = 0.0;       // [m/s] /drive/cmd speed_limit (0 = 제한 없음)
 
     // 주차
     int park_time_enter_ = 4, park_time_exit_ = 8, park_pause_s_ = 1; // [s]
@@ -864,6 +1004,10 @@ private:
     int park_psd_l_ = 2000, park_psd_r_ = 2500, park_psd_f_ = 3000;
     int park_turn_vel_ = 70, park_move_vel_ = 70, park_dist_mm_ = 180;
     int park_turn_deg_ = 90;
+    int park_brick_min_h_ = 0, park_brick_after_ms_ = 1000;
+    bool park_psd_any_ = false;
+    int still_count_ = 0;                     // velocity 피드백이 연속으로 거의 0인 횟수
+    rclcpp::Time still_t_{0, 0, RCL_ROS_TIME};
     Park park_ = Park::Idle;
     rclcpp::Time park_t_{0, 0, RCL_ROS_TIME}; // 지금 단계 시작 시각
     bool brick_left_ = true;                  // brick_pos (true: left)
